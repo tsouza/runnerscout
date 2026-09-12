@@ -33,10 +33,13 @@ func allocation() lifecycle.Allocation {
 	return lifecycle.Allocation{ID: "rs-test", Offering: placement.Offering{Region: "us-east-1", Zone: "us-east-1a", Machine: "c6i.large", Image: "ami-test", Spot: true}}
 }
 func TestAWSCreateUsesDurableTokenAndPrivateBootstrap(t *testing.T) {
-	f := &fakeExec{responses: [][]byte{[]byte(`{"Instances":[{"InstanceId":"i-test"}]}`)}}
+	f := &fakeExec{responses: [][]byte{[]byte(`{"Account":"000000000000"}`), []byte(`{"Instances":[{"InstanceId":"i-test"}]}`)}}
 	f.check = func(name string, args []string) {
 		if name != "aws" {
 			t.Fatal(name)
+		}
+		if args[0] == "sts" {
+			return
 		}
 		var input string
 		for _, s := range args {
@@ -61,7 +64,7 @@ func TestAWSCreateUsesDurableTokenAndPrivateBootstrap(t *testing.T) {
 			t.Fatal(body)
 		}
 	}
-	p := Command{Config: Config{Kind: "aws", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f, Bootstrap: func(context.Context, string) (string, error) { return "secret-jit", nil }}
+	p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f, Bootstrap: func(context.Context, string) (string, error) { return "secret-jit", nil }}
 	id, e := p.Create(context.Background(), allocation())
 	if e != nil || id != "i-test" {
 		t.Fatal(id, e)
@@ -78,8 +81,8 @@ func TestGCPOwnershipBlocksDeletion(t *testing.T) {
 	}
 }
 func TestUnknownProviderOutputIsNotAbsence(t *testing.T) {
-	f := &fakeExec{responses: [][]byte{[]byte(`not-json`)}}
-	p := Command{Config: Config{Kind: "aws", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}
+	f := &fakeExec{responses: [][]byte{[]byte(`{"Account":"000000000000"}`), []byte(`not-json`)}}
+	p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}
 	ob, e := p.Observe(context.Background(), allocation())
 	if e == nil || ob.Known {
 		t.Fatal(ob, e)
@@ -88,11 +91,20 @@ func TestUnknownProviderOutputIsNotAbsence(t *testing.T) {
 
 func TestMissingInventoryCannotConfirmCleanup(t *testing.T) {
 	for _, body := range []string{`{}`, `null`} {
-		f := &fakeExec{responses: [][]byte{[]byte(body)}}
-		p := Command{Config: Config{Kind: "aws", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}
+		f := &fakeExec{responses: [][]byte{[]byte(`{"Account":"000000000000"}`), []byte(body)}}
+		p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}
 		ob, e := p.Observe(context.Background(), allocation())
 		if e == nil || ob.Known {
 			t.Fatal(body, ob, e)
 		}
+	}
+}
+
+func TestAWSAccountDriftCannotConfirmAbsence(t *testing.T) {
+	f := &fakeExec{responses: [][]byte{[]byte(`{"Account":"999999999999"}`)}}
+	p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}
+	ob, e := p.Observe(context.Background(), allocation())
+	if e == nil || ob.Known || len(f.calls) != 1 {
+		t.Fatal(ob, e, f.calls)
 	}
 }

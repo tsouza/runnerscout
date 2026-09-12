@@ -170,6 +170,41 @@
           "exit_code": 1
         }
       ]
+    },
+    {
+      "run_id": "68353f49-4897-4f0f-a343-5f0576dd1b2d",
+      "verdict": "pass",
+      "candidate_sha256": "2301b0c19b9adedb837c341bb5a5f5a98754933e6aa5453bce2aa7776c312f4e",
+      "evaluator_sha256": "c156ce38eb01de2f3a23ccdf5bef9df00d109843a3f7f1f8589fabfe3f4efb07",
+      "tests": {
+        "pass_": true,
+        "started": 27,
+        "completed": 27,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "runnerscout-emulators-02c11e63ea76",
+      "verdict": "pass",
+      "scope": "emulated cloud APIs, not real cloud VM execution",
+      "checks": {
+        "aws_adapter": "pass",
+        "azure_vm_rest_smoke": "pass",
+        "azure_full_adapter": "unqualified: ARM deployment/disk composition not exercised",
+        "gcp_compute": "unavailable: Floci GCP does not implement standalone Compute Engine instances"
+      },
+      "images": {
+        "aws": "ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8",
+        "azure": "floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03",
+        "cli": "public.ecr.aws/aws-cli/aws-cli@sha256:bad3346a39098ab077be6ed58c7e1fe68321a4a844c7c740318100013e6c3581"
+      },
+      "required_paths": [
+        "aws_adapter",
+        "azure_vm_rest_smoke"
+      ],
+      "cleanup_errors": []
     }
   ]
 }

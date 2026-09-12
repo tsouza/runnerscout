@@ -103,3 +103,8 @@ or Docker socket mounts. AWS uses Ministack; Azure uses Floci control-plane smok
 checks. GCP Compute remains fixture-backed because the inspected Floci GCP release
 does not implement standalone instances. Live qualification is a later separate
 allocation, not a prerequisite for these local development checks.
+
+AWS provider configurations require the expected 12-digit accountID. Every EC2
+operation verifies STS account identity first, so rebinding a credential profile
+cannot turn resources in the original account into falsely confirmed absence.
+Azure uses an explicit subscription and GCP an explicit project on every command.

@@ -92,7 +92,7 @@ func TestMinistackAWSLostResponseAndCleanup(t *testing.T) {
 	if e := json.Unmarshal(sg["GroupId"], &group); e != nil || group == "" {
 		t.Fatal(sg, e)
 	}
-	p := Command{Config: Config{Kind: "aws", Owner: "test", Subnet: subnet.ID, SecurityGroup: group}, Exec: d, Bootstrap: func(context.Context, string) (string, error) { return "emulator-fixture-not-a-github-credential", nil }}
+	p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: subnet.ID, SecurityGroup: group}, Exec: d, Bootstrap: func(context.Context, string) (string, error) { return "emulator-fixture-not-a-github-credential", nil }}
 	a := lifecycle.Allocation{ID: "rs-" + uuid.NewString(), Offering: placement.Offering{Region: "us-east-1", Zone: "us-east-1a", Machine: "t3.micro", Image: "ami-0123456789abcdef0", Spot: true}}
 	d.loseResponse = true
 	if _, e := p.Create(ctx, a); e == nil {

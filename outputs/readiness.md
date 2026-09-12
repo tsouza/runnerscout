@@ -5,7 +5,7 @@ The experimental controller is implemented. This is not a qualified release.
 | Claim | Evidence and limits |
 |---|---|
 | Specification readiness | G01 scope and authority defined. G02–G08 remain partial: full provider pricing/retry composition and protected controller qualification are open. |
-| Local harness | Formatting, vet, build and all 26 current race tests passed, including Azure and started-job recovery. Eight completion-manifest integrity controls passed. CI verifies the exact PR revision; see PR #6. |
+| Local harness | Formatting, vet, build and all 27 current race tests passed, including Azure, started-job recovery and AWS account drift. Eight completion-manifest integrity controls passed. CI verifies the exact PR revision; see PR #6. |
 | Semantic controls | Three deliberate defects were detected, each after its unchanged positive control passed: unknown spot search treated as exhausted, wrong deadline boundary, delete acknowledgment treated as absence. |
 | Kubernetes integration | Passed against a real isolated Kubernetes v1.35.0 kind cluster: durable reload, stale resourceVersion rejection and observed namespace cleanup. The test cluster was removed. |
 | Candidate acceptance | Not accepted. Live GitHub-to-VM execution, AWS/Azure/GCP cleanup inventory and interruption retry composition are not demonstrated. |

@@ -26,6 +26,7 @@ REQUIRED = {
  "TestProviderBindingCannotChangeUnderExistingFleet", "TestMissingInventoryCannotConfirmCleanup",
  "TestAzureCreateUsesSecureBootstrapAndSpotDelete", "TestAzureActiveDeploymentCannotProveAbsence",
  "TestAzureForeignDiskCannotBeDeleted", "TestAzureResidualOwnedNICRetainsCleanup",
+ "TestAWSAccountDriftCannotConfirmAbsence",
 }
 
 def validate_records(path):

@@ -37,3 +37,8 @@ kindest/node:v1.35.0, set `RUNNERSCOUT_TEST_KUBECONFIG` to its explicit kubeconf
 then run `make integration`. The test creates a unique namespace, exercises real
 resourceVersion conflict rejection and waits for namespace deletion. It never uses
 the default kubeconfig or skips when the explicit test environment is missing.
+
+AWS configurations require `accountID` as well as their named credential profile
+or workload identity. STS caller identity must match before EC2 observations or
+effects. A profile rebound to another account produces an explicit error and
+retains cleanup obligations.

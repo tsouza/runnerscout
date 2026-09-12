@@ -15,6 +15,7 @@ import (
 )
 
 type Config struct {
+	AccountID     string `json:"accountID,omitempty"`
 	Subscription  string `json:"subscription,omitempty"`
 	ResourceGroup string `json:"resourceGroup,omitempty"`
 	SSHPublicKey  string `json:"sshPublicKey,omitempty"`
@@ -56,7 +57,7 @@ func (p *Command) Validate() error {
 	if p.Config.Owner == "" || p.Config.Subnet == "" {
 		return errors.New("owner and isolated subnet required")
 	}
-	if p.Config.Kind == "aws" && p.Config.SecurityGroup != "" {
+	if p.Config.Kind == "aws" && p.Config.SecurityGroup != "" && len(p.Config.AccountID) == 12 && strings.Trim(p.Config.AccountID, "0123456789") == "" {
 		return nil
 	}
 	if p.Config.Kind == "azure" && p.Config.Subscription != "" && p.Config.ResourceGroup != "" && p.Config.SecurityGroup != "" && strings.HasPrefix(p.Config.SSHPublicKey, "ssh-") {
@@ -65,9 +66,24 @@ func (p *Command) Validate() error {
 	if p.Config.Kind == "gcp" && p.Config.Project != "" {
 		return nil
 	}
-	return errors.New("aws requires securityGroup; gcp requires project; azure requires subscription, resourceGroup, securityGroup and SSH public key")
+	return errors.New("aws requires securityGroup and 12-digit accountID; gcp requires project; azure requires subscription, resourceGroup, securityGroup and SSH public key")
 }
 func (p *Command) aws(ctx context.Context, region string, args ...string) ([]byte, error) {
+	// A credential profile may be rotated or rebound without changing its name.
+	// Verify the immutable account before interpreting resource absence or effects.
+	identityArgs := []string{"sts", "get-caller-identity", "--region", region, "--output", "json", "--no-cli-pager"}
+	if p.Config.Profile != "" {
+		identityArgs = append(identityArgs, "--profile", p.Config.Profile)
+	}
+	identity, e := p.Exec.Run(ctx, "aws", identityArgs...)
+	if e != nil {
+		return nil, errors.New("AWS account identity unavailable")
+	}
+	var who struct{ Account string }
+	if json.Unmarshal(identity, &who) != nil || who.Account != p.Config.AccountID {
+		return nil, errors.New("AWS account identity mismatch")
+	}
+
 	all := []string{"ec2", "--region", region, "--output", "json", "--no-cli-pager"}
 	if p.Config.Profile != "" {
 		all = append(all, "--profile", p.Config.Profile)
