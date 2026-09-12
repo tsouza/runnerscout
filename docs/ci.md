@@ -31,3 +31,8 @@ structured-merge-diff major version required by apimachinery; updating it alone
 to a different schema type breaks builds. Helm uses the maintained 3.x line
 until the Helm 4 post-renderer interface is qualified. Dependency updates must
 pass the existing build, behavior and security checks.
+
+Required tests are identified by package and name. Integration checks retain Go
+JSON events and reject missing, skipped or unfinished required tests even when
+the Go process exits successfully. CI uploads integration evidence on failures
+as well as successes.

@@ -8,8 +8,8 @@ verify:
 
 .PHONY: integration
 integration:
-	go test -tags integration -run TestRealKubernetesPersistenceAndCAS -count=1 -v ./internal/state
-	go test -tags integration -run TestRealKubernetesCRDSchemasAndConfigurationSnapshot -count=1 -v ./internal/configapi
+	python3 tools/integration_tests.py --package github.com/tsouza/runnerscout/internal/state --test TestRealKubernetesPersistenceAndCAS
+	python3 tools/integration_tests.py --package github.com/tsouza/runnerscout/internal/configapi --test TestRealKubernetesCRDSchemasAndConfigurationSnapshot
 
 .PHONY: qualify
 qualify:
