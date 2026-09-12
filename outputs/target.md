@@ -108,3 +108,5 @@ AWS provider configurations require the expected 12-digit accountID. Every EC2
 operation verifies STS account identity first, so rebinding a credential profile
 cannot turn resources in the original account into falsely confirmed absence.
 Azure uses an explicit subscription and GCP an explicit project on every command.
+
+Helm upgrades may change maxRunners without changing class/provider identity. Decreasing the limit drains existing capacity naturally; it neither deletes running allocations nor resets consumed admissions or deadlines. Binding version 2 excludes only that limit and verifies legacy bindings across the previously valid range 1–10 before migration.

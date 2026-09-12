@@ -45,3 +45,4 @@ networkPolicy:
   egress: []
 tests:
   enabled: true
+  retainPod: false

@@ -520,6 +520,19 @@
       "sources": [],
       "location": "https://github.com/floci-io/floci-az/tree/0.12.0",
       "statement": "VM control plane is mocked. Its official az-vm CLI compatibility test is best-effort and may skip; RunnerScout must not interpret that as full adapter support."
+    },
+    {
+      "id": "DEC-LIMIT-UPGRADE-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "maintainer",
+      "sources": [
+        "AUTH-UBUNTU-001",
+        "DEV-0001"
+      ],
+      "basis": "recommended_default_adopted_under_standing_authority",
+      "statement": "maxRunners is a mutable admission ceiling during Helm upgrades. Lowering it admits nothing above the new ceiling and retains existing allocations, deadlines and consumed slots until normal cleanup/reset. Other class/provider identity fields remain immutable. Fleet binding v2 omits only maxRunners; old bindings migrate only when all other fields match a valid previous bounded limit."
     }
   ]
 }

@@ -9,7 +9,7 @@ The user requests a complete tested end-to-end 0.1.0, including a complete teste
 | Ordinary GitHub workflow end-to-end | Real scale-set job assignment, VM bootstrap, terminal results and cleanup, each provider | Not demonstrated |
 | Bounded interruption retries | Opt-in disabled by default, unique REST identity, rerun lineage, duplicate/ambiguous response recovery, dependent-job acknowledgment | Eligibility guard only; composition incomplete |
 | Installable runtime | Reproducible container with supported provider CLIs, non-root execution, architecture coverage and scan evidence | amd64 local image and restricted smoke tests implemented; architecture and vulnerability acceptance pending |
-| Full Helm chart | Schema/render/config tests; real install, helm test, upgrade, rollback, uninstall and retained-state checks; RBAC, Secret and workload-identity configurations | Nine render/package/config contract tests and probes implemented; real lifecycle qualification pending |
+| Full Helm chart | Schema/render/config tests; real install, helm test, upgrade, rollback, uninstall and retained-state checks; RBAC, Secret and workload-identity configurations | Ten render/package/config tests and real idle PAT-mode lifecycle passed; App/packaged/architecture coverage and release acceptance pending |
 | Controller assurance | Fault/timeout/restart tests, oracle controls, independently protected evaluator and CQ-01–CQ-12 | Local diagnostic controls only |
 | Qualified release | Exact-source passing required CI, complete above evidence, versioned chart/image/artifacts and release notes | Not accepted; no release tag |
 

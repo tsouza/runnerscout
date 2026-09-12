@@ -22,8 +22,10 @@ helm test runnerscout --namespace runnerscout --timeout 2m
 
 `helm test` checks configuration with the actual runtime parser. It does not
 contact GitHub, Kubernetes or a cloud provider. End-to-end job qualification is a
-separate required release gate. Chart install/upgrade/rollback/uninstall testing
-against real Kubernetes is still pending.
+separate required release gate. `make helm-integration` passed install/test/upgrade/rollback/uninstall against
+a real isolated Kubernetes 1.35 cluster and idle HTTPS GitHub fixture. This
+qualifies PAT-mode deployment behavior; live jobs, App-mode lifecycle and
+installation from the packaged chart archive remain separate outstanding checks.
 
 The chart uses one replica and Recreate replacement, namespace-scoped RBAC,
 non-root execution, a read-only root filesystem and bounded temporary storage.
@@ -50,3 +52,7 @@ same class/scale set concurrently from another release. Restoring a changed
 provider/class binding is necessary for cleanup; deleting state is not recovery.
 
 The deployment probes `/healthz` for liveness and `/readyz` for leader/session/reconciliation readiness. Cloud failures make the pod unready without causing liveness restart loops. See [runtime qualification](../../docs/runtime-image.md).
+
+`config.maxRunners` can be raised or lowered during upgrades and rollback. Lower limits stop additional admission while existing allocations drain normally. Provider identity, requirements and provisioning/lifetime settings remain bound to durable state; restore their original values if a change is rejected.
+
+Successful Helm test pods are deleted by default. For `helm test --logs`, first set `tests.retainPod: true`; the next test replaces the retained pod. Restore the default for automatic cleanup, or remove the retained test pod explicitly when finished debugging.

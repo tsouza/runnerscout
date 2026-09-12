@@ -224,10 +224,14 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "retainPod": {
+          "type": "boolean"
         }
       },
       "required": [
-        "enabled"
+        "enabled",
+        "retainPod"
       ]
     },
     "image": {

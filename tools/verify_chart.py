@@ -102,6 +102,14 @@ class ChartContracts(unittest.TestCase):
         self.assertEqual(controller["startupProbe"]["httpGet"]["port"], "health")
         self.assertEqual(controller["ports"], [{"name": "health", "containerPort": 8080}])
 
+    def test_test_log_retention_is_explicit(self):
+        default = resource(render(FIXTURE), "Pod")
+        self.assertEqual(default["metadata"]["annotations"]["helm.sh/hook-delete-policy"], "before-hook-creation,hook-succeeded")
+        values = copy.deepcopy(FIXTURE)
+        values["tests"] = {"retainPod": True}
+        retained = resource(render(values), "Pod")
+        self.assertEqual(retained["metadata"]["annotations"]["helm.sh/hook-delete-policy"], "before-hook-creation")
+
     def test_existing_service_account_and_rbac(self):
         values = copy.deepcopy(FIXTURE)
         values.update(serviceAccount={"create": False, "name": "external"}, rbac={"create": False})

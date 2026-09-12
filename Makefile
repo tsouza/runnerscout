@@ -30,3 +30,7 @@ image:
 .PHONY: image-test
 image-test:
 	python3 tools/runtime_image.py
+
+.PHONY: helm-integration
+helm-integration:
+	python3 tools/helm_integration.py
