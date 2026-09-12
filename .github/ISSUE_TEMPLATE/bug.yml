@@ -1,0 +1,16 @@
+name: Bug report
+description: Report an observable defect without secrets
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction and versions
+      description: Redact credentials, account details and JIT configuration.
+    validations:
+      required: true
