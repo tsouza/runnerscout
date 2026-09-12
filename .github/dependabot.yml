@@ -2,9 +2,26 @@ version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
+    groups:
+      kubernetes-modules:
+        patterns: ["k8s.io/api", "k8s.io/apimachinery", "k8s.io/client-go"]
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
     directory: /
+    groups:
+      ci-actions:
+        patterns: ["*"]
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /docker
+    groups:
+      azure-cli-runtime:
+        patterns: ["*"]
     schedule:
       interval: weekly

@@ -205,6 +205,496 @@
         "azure_vm_rest_smoke"
       ],
       "cleanup_errors": []
+    },
+    {
+      "run_id": "587b64be-bd50-4dab-bde5-e700a5e0670e",
+      "verdict": "pass",
+      "candidate_sha256": "9b2d7cedbd04ebe4424a8914148ba49da51cabd8805e5e2b28cd5d05426d3804",
+      "evaluator_sha256": "1220277dc4ee7ced39ec1482ee1e4355bf3717b1deb136c2a4b6ae7e10fcde2b",
+      "tests": {
+        "pass_": true,
+        "started": 31,
+        "completed": 31,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "runtime-23d4771c-c079-4b92-b23c-1b77ad0d29ff",
+      "verdict": "pass",
+      "scope": "local container runtime; no cloud or GitHub execution",
+      "checks": {
+        "identity": "pass",
+        "controller_config": "pass",
+        "aws_cli": "pass",
+        "azure_cli": "pass",
+        "gcp_cli": "pass"
+      },
+      "image_id": "sha256:bcd7273e84136bb91ea6259d23ca995cd8accbd622d37517c045985ece2aecb9",
+      "architecture": "amd64"
+    },
+    {
+      "run_id": "6d736916-dbd1-46ac-83b0-f40e8d4327cf",
+      "verdict": "pass",
+      "candidate_sha256": "d5318684f32c9f71012cc68fa087f49b0ce2c214012376280cf3f700b67ea89b",
+      "evaluator_sha256": "c1bf2c6b4c81a55b6f3ee0246ca28fe0fddb88ac2cc7330578fda7e6a1b5e16f",
+      "tests": {
+        "pass_": true,
+        "started": 28,
+        "completed": 28,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "b81f00a1-a19e-4e03-a321-29dadc42922a",
+      "verdict": "pass",
+      "candidate_sha256": "b57bf31efa82b806ee8dc2cfb14cdbe4246ac356f03d8ab1970b5043e9614f8d",
+      "evaluator_sha256": "c1bf2c6b4c81a55b6f3ee0246ca28fe0fddb88ac2cc7330578fda7e6a1b5e16f",
+      "tests": {
+        "pass_": true,
+        "started": 28,
+        "completed": 28,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "runtime-136d8405-2758-4954-b35b-5635387fe735",
+      "verdict": "pass",
+      "scope": "local container runtime; no cloud or GitHub execution",
+      "checks": {
+        "identity": "pass",
+        "controller_config": "pass",
+        "aws_cli": "pass",
+        "azure_cli": "pass",
+        "gcp_cli": "pass"
+      },
+      "cleanup_errors": [],
+      "image_id": "sha256:c4a6e3af6ca8df0cbcfd54f385fdcc81b9dc739296004862f3c775491d0a9546",
+      "architecture": "amd64"
+    },
+    {
+      "run_id": "5c8d9fa3-ff6c-4cca-a466-24ccee63b3f8",
+      "verdict": "pass",
+      "candidate_sha256": "389142b46d196c711bd9975682f43dabf273855207cf9ec91239ae6655b7abdf",
+      "evaluator_sha256": "c156ce38eb01de2f3a23ccdf5bef9df00d109843a3f7f1f8589fabfe3f4efb07",
+      "tests": {
+        "pass_": true,
+        "started": 27,
+        "completed": 27,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "9d80f384-1029-4930-8830-9797ed21756f",
+      "verdict": "pass",
+      "candidate_sha256": "49bbc75158fc1be87f17d5485c50d027348eed293a8fcd2aea8a969e15dfbb0c",
+      "evaluator_sha256": "1220277dc4ee7ced39ec1482ee1e4355bf3717b1deb136c2a4b6ae7e10fcde2b",
+      "tests": {
+        "pass_": true,
+        "started": 31,
+        "completed": 31,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "runtime-873a57fb-8c2b-4135-98a3-f8b5c4f8c7dd",
+      "verdict": "pass",
+      "scope": "local container runtime; no cloud or GitHub execution",
+      "checks": {
+        "identity": "pass",
+        "controller_config": "pass",
+        "aws_cli": "pass",
+        "azure_cli": "pass",
+        "gcp_cli": "pass"
+      },
+      "cleanup_errors": [],
+      "image_id": "sha256:2b0f530ad2da8cf20766dd585381cf448373ff4bcc186b962ed87035cbabb09a",
+      "architecture": "amd64"
+    },
+    {
+      "run_id": "4403bcc0-e992-43e0-8d1b-edd349c491a9",
+      "verdict": "fail",
+      "candidate_sha256": "49a9f75aa8caa4744dc43e43e451fc285bce3c49702c70e04d55fa2d60db6aaf",
+      "evaluator_sha256": "1220277dc4ee7ced39ec1482ee1e4355bf3717b1deb136c2a4b6ae7e10fcde2b",
+      "tests": {
+        "pass_": true,
+        "started": 31,
+        "completed": 31,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      },
+      "reason": "candidate changed during evaluation"
+    },
+    {
+      "run_id": "runnerscout-helm-9ddcf396",
+      "verdict": "pass",
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "checks": {
+        "internal_network": "pass",
+        "install_ready": "pass",
+        "helm_test": "pass",
+        "effective_rbac": "pass",
+        "retained_test_logs": "pass",
+        "upgrade_ready": "pass",
+        "rollback_ready": "pass",
+        "idle_scaleset_protocol": "pass",
+        "uninstall_retains_state": "pass",
+        "namespace_cleanup": "pass"
+      },
+      "cleanup_errors": [],
+      "image_id": "sha256:ddb9d204d73e3cd459609031be183d7ea5d9fd3f3ae0e89abcc0d35a080c50e2",
+      "kubernetes": "v1.35.0",
+      "fixture_requests": {
+        "POST /orgs/tsouza/actions/runners/registration-token": 3,
+        "POST /actions/runner-registration": 3,
+        "GET /tenant/123/_apis/runtime/runnerscalesets/1": 3,
+        "POST /tenant/123/_apis/runtime/runnerscalesets/1/sessions": 3,
+        "GET /fixture/messages": 40,
+        "GET /fixture/stats": 1
+      }
+    },
+    {
+      "run_id": "runnerscout-helm-f7149460",
+      "verdict": "fail",
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "checks": {
+        "internal_network": "pass"
+      },
+      "cleanup_errors": [],
+      "reason": "Extra data: line 26 column 1 (char 643)",
+      "image_id": "sha256:2b0f530ad2da8cf20766dd585381cf448373ff4bcc186b962ed87035cbabb09a"
+    },
+    {
+      "run_id": "runnerscout-helm-597e5348",
+      "verdict": "fail",
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "checks": {
+        "internal_network": "pass",
+        "install_ready": "pass"
+      },
+      "cleanup_errors": [],
+      "reason": "helm-test exited 1; see retained log",
+      "image_id": "sha256:ddb9d204d73e3cd459609031be183d7ea5d9fd3f3ae0e89abcc0d35a080c50e2",
+      "kubernetes": "v1.35.0"
+    },
+    {
+      "run_id": "runnerscout-helm-e52cb2e4",
+      "verdict": "fail",
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "checks": {
+        "internal_network": "pass"
+      },
+      "cleanup_errors": [],
+      "reason": "create-cluster exited 1; see retained log",
+      "image_id": "sha256:2b0f530ad2da8cf20766dd585381cf448373ff4bcc186b962ed87035cbabb09a"
+    },
+    {
+      "run_id": "2bb2e53a-3f1e-4618-97e5-e1f1b9b403a2",
+      "verdict": "pass",
+      "candidate_sha256": "abe60dda84974d1fe6b711c5d8278e99da10c141970f1217044ae16b61dd31b1",
+      "evaluator_sha256": "f2e9b04e6f830d05460efc1f3d1c951575e4afa367a4b5ec7de4036e4dcb9e1e",
+      "tests": {
+        "pass_": true,
+        "started": 33,
+        "completed": 33,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "runnerscout-helm-ffd2ca42",
+      "verdict": "fail",
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "checks": {
+        "internal_network": "pass"
+      },
+      "cleanup_errors": [],
+      "reason": "create-cluster exited 1; see retained log",
+      "image_id": "sha256:2b0f530ad2da8cf20766dd585381cf448373ff4bcc186b962ed87035cbabb09a"
+    },
+    {
+      "run_id": "runnerscout-helm-0ef0cc16",
+      "verdict": "fail",
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "checks": {
+        "internal_network": "pass"
+      },
+      "cleanup_errors": [],
+      "reason": "create-cluster exited 1; see retained log",
+      "image_id": "sha256:2b0f530ad2da8cf20766dd585381cf448373ff4bcc186b962ed87035cbabb09a"
+    },
+    {
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "started_at": "2026-09-12T22:22:56.395346+00:00",
+      "checks": {
+        "internal_network": "pass",
+        "install_ready": "pass",
+        "packaged_chart_install": "pass",
+        "helm_test": "pass",
+        "effective_rbac": "pass",
+        "retained_test_logs": "pass",
+        "upgrade_ready": "pass",
+        "rollback_ready": "pass",
+        "app_authentication": "pass",
+        "idle_scaleset_protocol": "pass",
+        "uninstall_retains_state": "pass",
+        "namespace_cleanup": "pass"
+      },
+      "cleanup_errors": [],
+      "verdict": "pass",
+      "image_id": "sha256:ddb9d204d73e3cd459609031be183d7ea5d9fd3f3ae0e89abcc0d35a080c50e2",
+      "kubernetes": "v1.35.0",
+      "chart_archive_sha256": "2ff239bd51462a632175b7ce1a50edcf3320f17c55b972b955aa26955e354d20",
+      "fixture_sha256": "e714d811f6ac0b645253ccceee5df4cd7a422c10138c31681581458e6d93091f",
+      "fixture_requests": {
+        "POST /orgs/tsouza/actions/runners/registration-token": 3,
+        "POST /actions/runner-registration": 3,
+        "GET /tenant/123/_apis/runtime/runnerscalesets/1": 3,
+        "POST /tenant/123/_apis/runtime/runnerscalesets/1/sessions": 3,
+        "GET /fixture/messages": 42,
+        "POST /app/installations/42/access_tokens": 1,
+        "GET /fixture/stats": 1
+      },
+      "run_id": "runnerscout-helm-d657e804"
+    },
+    {
+      "baseline": "DEV-0001",
+      "candidate_sha256": "1c358a634c893059aff79499f95b2efa5cf153e0ce1f760d469fec4aad368db7",
+      "evaluator_sha256": "f2e9b04e6f830d05460efc1f3d1c951575e4afa367a4b5ec7de4036e4dcb9e1e",
+      "protected": false,
+      "live_cloud_integration": false,
+      "commands": [
+        {
+          "argv": [
+            "gofmt",
+            "-l",
+            "cmd",
+            "internal"
+          ],
+          "exit_code": 0,
+          "log": "format.log"
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tools",
+            "-p",
+            "test_*.py"
+          ],
+          "exit_code": 0,
+          "log": "harness.log"
+        },
+        {
+          "argv": [
+            "go",
+            "vet",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "vet.log"
+        },
+        {
+          "argv": [
+            "go",
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "tests.jsonl"
+        },
+        {
+          "argv": [
+            "go",
+            "build",
+            "-trimpath",
+            "-o",
+            "bin/runnerscout",
+            "./cmd/runnerscout"
+          ],
+          "exit_code": 0,
+          "log": "build.log"
+        }
+      ],
+      "registry_records": 45,
+      "tests": {
+        "pass_": true,
+        "started": 33,
+        "completed": 33,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      },
+      "verdict": "pass",
+      "seconds": 229.37885946198367,
+      "run_id": "cfd75e80-4f05-449e-8ffd-6a610d3b54ee"
+    },
+    {
+      "scope": "local container runtime; no cloud or GitHub execution",
+      "time": "2026-09-12T22:36:39.492807+00:00",
+      "checks": {
+        "identity": "pass",
+        "controller_config": "pass",
+        "aws_cli": "pass",
+        "azure_cli": "pass",
+        "gcp_cli": "pass"
+      },
+      "cleanup_errors": [],
+      "verdict": "pass",
+      "image_id": "sha256:4280a47a8392685b922773b438f80041c17ca708c569fc7571ec14f7937d9b31",
+      "architecture": "amd64",
+      "size_bytes": 335930657,
+      "run_id": "runtime-3cbf9797-b2a8-464f-960b-88e26765f1a0"
+    },
+    {
+      "scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM",
+      "started_at": "2026-09-12T22:36:51.065833+00:00",
+      "checks": {
+        "internal_network": "pass",
+        "install_ready": "pass",
+        "packaged_chart_install": "pass",
+        "helm_test": "pass",
+        "effective_rbac": "pass",
+        "retained_test_logs": "pass",
+        "upgrade_ready": "pass",
+        "rollback_ready": "pass",
+        "app_authentication": "pass",
+        "idle_scaleset_protocol": "pass",
+        "uninstall_retains_state": "pass",
+        "namespace_cleanup": "pass"
+      },
+      "cleanup_errors": [],
+      "verdict": "pass",
+      "image_id": "sha256:4280a47a8392685b922773b438f80041c17ca708c569fc7571ec14f7937d9b31",
+      "kubernetes": "v1.37.0",
+      "chart_archive_sha256": "12d5736bdc79ee95e857ef502defaf7cbaa712f1a8744b4b8ba985d75d0bcb34",
+      "fixture_sha256": "e714d811f6ac0b645253ccceee5df4cd7a422c10138c31681581458e6d93091f",
+      "fixture_requests": {
+        "POST /orgs/tsouza/actions/runners/registration-token": 3,
+        "POST /actions/runner-registration": 3,
+        "GET /tenant/123/_apis/runtime/runnerscalesets/1": 3,
+        "POST /tenant/123/_apis/runtime/runnerscalesets/1/sessions": 3,
+        "GET /fixture/messages": 41,
+        "POST /app/installations/42/access_tokens": 1,
+        "GET /fixture/stats": 1
+      },
+      "run_id": "runnerscout-helm-9c751181"
+    },
+    {
+      "scope": "emulated cloud APIs, not real cloud VM execution",
+      "images": {
+        "aws": "ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8",
+        "azure": "floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03",
+        "cli": "public.ecr.aws/aws-cli/aws-cli@sha256:e8467f2c319f9bc9a1471808a69949a76915e9c95eaf4a09ece9f9e85fd32747"
+      },
+      "checks": {
+        "aws_adapter": "pass",
+        "azure_vm_rest_smoke": "pass",
+        "azure_full_adapter": "unqualified: ARM deployment/disk composition not exercised",
+        "gcp_compute": "unavailable: Floci GCP does not implement standalone Compute Engine instances"
+      },
+      "required_paths": [
+        "aws_adapter",
+        "azure_vm_rest_smoke"
+      ],
+      "verdict": "pass",
+      "cleanup_errors": [],
+      "run_id": "runnerscout-emulators-92344237338f"
+    },
+    {
+      "baseline": "DEV-0001",
+      "candidate_sha256": "30f7ee44fec512ed130ccf684d6f8c37d6564e0444aad18b14d1be34c1612752",
+      "evaluator_sha256": "f2e9b04e6f830d05460efc1f3d1c951575e4afa367a4b5ec7de4036e4dcb9e1e",
+      "protected": false,
+      "live_cloud_integration": false,
+      "commands": [
+        {
+          "argv": [
+            "gofmt",
+            "-l",
+            "cmd",
+            "internal"
+          ],
+          "exit_code": 0,
+          "log": "format.log"
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tools",
+            "-p",
+            "test_*.py"
+          ],
+          "exit_code": 0,
+          "log": "harness.log"
+        },
+        {
+          "argv": [
+            "go",
+            "vet",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "vet.log"
+        },
+        {
+          "argv": [
+            "go",
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "tests.jsonl"
+        },
+        {
+          "argv": [
+            "go",
+            "build",
+            "-trimpath",
+            "-o",
+            "bin/runnerscout",
+            "./cmd/runnerscout"
+          ],
+          "exit_code": 0,
+          "log": "build.log"
+        }
+      ],
+      "registry_records": 47,
+      "tests": {
+        "pass_": true,
+        "started": 33,
+        "completed": 33,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      },
+      "verdict": "pass",
+      "seconds": 5.086151523049921,
+      "run_id": "45a15cc8-fb10-4b74-9eec-c2ebacda5669"
     }
   ]
 }

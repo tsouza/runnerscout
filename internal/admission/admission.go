@@ -12,7 +12,7 @@ type State struct {
 // Reconcile returns new slots. Failed/expired admissions remain consumed until a
 // zero-demand reset and confirmed cleanup, preventing infinite deadline rearming.
 func (s *State) Reconcile(demand, active, limit int, cleanupConfirmed bool) (int, error) {
-	if demand < 0 || active < 0 || limit < 1 || limit > 100 || active > limit || s.Admitted < 0 || s.Admitted > limit {
+	if demand < 0 || active < 0 || limit < 1 || limit > 100 || active > 100 || s.Admitted < 0 || s.Admitted > 100 {
 		return 0, errors.New("invalid admission bounds")
 	}
 	if demand == 0 {
@@ -24,7 +24,7 @@ func (s *State) Reconcile(demand, active, limit int, cleanupConfirmed bool) (int
 		s.ResetObserved = false
 	}
 	desired := min(demand, limit)
-	n := min(max(0, desired-s.Admitted), limit-active)
+	n := min(max(0, desired-s.Admitted), max(0, max(0, limit-active)))
 	s.Admitted += n
 	return n, nil
 }

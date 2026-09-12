@@ -4,7 +4,7 @@ import json,os,subprocess,time,urllib.request,urllib.error,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 LOCAL_HTTP=urllib.request.build_opener(urllib.request.ProxyHandler({}))
-IMAGES={'aws':'ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8','azure':'floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03','cli':'public.ecr.aws/aws-cli/aws-cli@sha256:bad3346a39098ab077be6ed58c7e1fe68321a4a844c7c740318100013e6c3581'}
+IMAGES={'aws':'ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8','azure':'floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03','cli':'public.ecr.aws/aws-cli/aws-cli@sha256:e8467f2c319f9bc9a1471808a69949a76915e9c95eaf4a09ece9f9e85fd32747'}
 def command(args,**kw):return subprocess.run(args,check=True,text=True,capture_output=True,timeout=180,**kw).stdout.strip()
 def main():
  os.chdir(ROOT);token=uuid.uuid4().hex[:12];network='runnerscout-emulators-'+token;names=[]

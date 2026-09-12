@@ -54,3 +54,33 @@ func TestProviderBindingCannotChangeUnderExistingFleet(t *testing.T) {
 		t.Fatal("configuration drift silently adopted")
 	}
 }
+
+func TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity(t *testing.T) {
+	ctx := context.Background()
+	o := &Operator{Config: Config{Name: "test", Namespace: "test", MaxRunners: 1}, Client: fake.NewClientset()}
+	cm, f, e := o.loadFleet(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.Binding = o.bindingWithLimit(1)
+	f.BindingVersion = 0
+	if e = o.saveFleet(ctx, cm, f); e != nil {
+		t.Fatal(e)
+	}
+	o.Config.MaxRunners = 2
+	cm, f, e = o.loadFleet(ctx)
+	if e != nil || f.BindingVersion != 2 || f.Binding != o.binding() {
+		t.Fatal(f, e)
+	}
+	if e = o.saveFleet(ctx, cm, f); e != nil {
+		t.Fatal(e)
+	}
+	o.Config.MaxRunners = 1
+	if _, _, e = o.loadFleet(ctx); e != nil {
+		t.Fatal("limit rollback rejected", e)
+	}
+	o.Config.ScaleSetID = 99
+	if _, _, e = o.loadFleet(ctx); e == nil {
+		t.Fatal("identity drift accepted")
+	}
+}

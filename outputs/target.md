@@ -5,8 +5,8 @@ This is an implementation target; full G01–G08 readiness is not inferred.
 
 ## Fixed scope and interfaces
 
-Go 1.26.7; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
-1.35 API target; Ubuntu 24.04 Linux amd64/arm64 images maintained by the operator.
+Go 1.27.1; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
+1.37 API target; Ubuntu 24.04 Linux amd64/arm64 images maintained by the operator.
 AWS EC2, Azure Virtual Machines and GCP Compute are provider targets. GHES/Windows are
 outside the first implementation matrix, not demonstrated unsupported by nature.
 ARC is optional at runtime and must own different scale sets.
@@ -108,3 +108,5 @@ AWS provider configurations require the expected 12-digit accountID. Every EC2
 operation verifies STS account identity first, so rebinding a credential profile
 cannot turn resources in the original account into falsely confirmed absence.
 Azure uses an explicit subscription and GCP an explicit project on every command.
+
+Helm upgrades may change maxRunners without changing class/provider identity. Decreasing the limit drains existing capacity naturally; it neither deletes running allocations nor resets consumed admissions or deadlines. Binding version 2 excludes only that limit and verifies legacy bindings across the previously valid range 1–10 before migration.

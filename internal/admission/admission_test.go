@@ -33,3 +33,22 @@ func TestAdmissionLimits(t *testing.T) {
 		t.Fatal("accepted invalid demand")
 	}
 }
+
+func TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions(t *testing.T) {
+	s := State{}
+	if n, e := s.Reconcile(3, 0, 3, true); e != nil || n != 3 {
+		t.Fatal(n, e)
+	}
+	if n, e := s.Reconcile(3, 3, 1, false); e != nil || n != 0 || s.Admitted != 3 {
+		t.Fatal(n, e, s)
+	}
+	if n, e := s.Reconcile(3, 0, 1, true); e != nil || n != 0 || s.Admitted != 3 {
+		t.Fatal("expired slots rearmed on limit change", n, e, s)
+	}
+	if n, e := s.Reconcile(0, 0, 1, true); e != nil || n != 0 || s.Admitted != 0 {
+		t.Fatal(n, e, s)
+	}
+	if n, e := s.Reconcile(3, 0, 1, true); e != nil || n != 1 {
+		t.Fatal(n, e)
+	}
+}

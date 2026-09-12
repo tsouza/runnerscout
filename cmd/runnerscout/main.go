@@ -7,17 +7,22 @@ import (
 	"flag"
 	"fmt"
 	"github.com/actions/scaleset"
+	"github.com/tsouza/runnerscout/internal/health"
 	"github.com/tsouza/runnerscout/internal/operator"
 	"io"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func run() error {
+	healthAddress := flag.String("health-address", ":8080", "HTTP liveness/readiness listen address")
 	configPath := flag.String("config", "", "JSON configuration file")
 	validate := flag.Bool("validate", false, "validate configuration without contacting cloud or GitHub")
 	tokenPath := flag.String("github-token-file", "", "mounted GitHub token file (never passed as a token argument)")
@@ -51,6 +56,22 @@ func run() error {
 		return nil
 	}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	var status health.Status
+	listener, e := net.Listen("tcp", *healthAddress)
+	if e != nil {
+		return fmt.Errorf("health listener: %w", e)
+	}
+	server := &http.Server{Handler: status.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	defer server.Close()
+	healthErrors := make(chan error, 1)
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			healthErrors <- err
+			cancel()
+		}
+	}()
 	var github *scaleset.Client
 	system := scaleset.SystemInfo{System: "runnerscout", Version: "development"}
 	if *appID != "" || *installationID != 0 || *appKey != "" {
@@ -85,9 +106,19 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	return operator.New(cfg, k, github).Run(ctx)
+	controller := operator.New(cfg, k, github)
+	controller.Readiness = status.SetReady
+	err := controller.Run(ctx)
+	status.SetReady(false)
+	select {
+	case healthErr := <-healthErrors:
+		return fmt.Errorf("health server: %w", healthErr)
+	default:
+	}
+	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 func main() {
 	if e := run(); e != nil {

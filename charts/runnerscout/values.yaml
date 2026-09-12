@@ -1,0 +1,48 @@
+# Explicit image coordinates are required until a verified release is published.
+image:
+  repository: ""
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+rbac:
+  create: true
+github:
+  existingSecret: ""
+  mode: app
+  tokenKey: token
+  privateKeyKey: privateKey
+  appClientID: ""
+  appInstallationID: 0
+# Native controller JSON, excluding namespace (derived from the Helm release).
+# Credentials belong in existing Secrets, never this ConfigMap.
+config: {}
+# Optional existing ConfigMap with catalog.json; controller reloads new admissions.
+catalog:
+  existingConfigMap: ""
+# Mount provider credential files from pre-existing Secrets. Workload identity can
+# instead use serviceAccount.annotations and env. No credentials are created.
+credentialSecrets: []
+env: []
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+networkPolicy:
+  enabled: false
+  egress: []
+tests:
+  enabled: true
+  retainPod: false

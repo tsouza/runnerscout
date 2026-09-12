@@ -1,0 +1,7 @@
+apiVersion: v2
+name: runnerscout
+description: Kubernetes controller for ephemeral multicloud GitHub Actions runners
+type: application
+version: 0.1.0-dev.1
+appVersion: development
+kubeVersion: ">=1.37.0-0 <1.38.0-0"

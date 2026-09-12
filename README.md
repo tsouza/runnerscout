@@ -13,7 +13,7 @@ lowest recorded compute-price placement, opt-in on-demand fallback, durable
 allocation identities, bounded provisioning and cleanup after uncertain effects.
 Spot job retries default to disabled; repeated workflow effects must be acknowledged.
 
-Build and verify with Go 1.26.7 and Python 3:
+Build and verify with Go 1.27.1 and Python 3:
 
 ```sh
 make verify
@@ -28,3 +28,5 @@ Run `make emulators` on a Linux Docker host for isolated Ministack AWS API tests
 and a Floci Azure VM-control-plane smoke test. This lane uses dummy credentials
 and an internal Docker network. It does not execute real cloud VMs. Floci GCP
 currently lacks standalone Compute Engine coverage; GCP uses explicit fixtures.
+
+The [0.1.0 completion plan](outputs/release-0.1.0-plan.md) tracks the full release scope. The [development Helm chart](charts/runnerscout/README.md) is verified with `make chart`; the packaged-chart lifecycle passed on isolated Kubernetes with an idle GitHub fixture. Live end-to-end release qualification remains pending.

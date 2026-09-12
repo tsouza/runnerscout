@@ -12,6 +12,10 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    "TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions",
+    "TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity",
+    "TestReadinessRequiresScaleSetSessionAndClearsOnExit",
+    "TestReadinessDoesNotTurnDependencyFailureIntoLivenessFailure",
  "TestFallbackRequiresDefinitiveExhaustion", "TestHardConstraintsAndFreshness",
  "TestIndependentSmallCatalogOracle", "TestLostCreateResponseRestartAndCleanup",
  "TestIntentConflictPreventsCloudCall", "TestUnknownAbsenceNeverBlindlyCreates",

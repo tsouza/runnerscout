@@ -1,0 +1,5 @@
+RunnerScout is experimental; this chart does not establish live cloud qualification.
+Run helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }} to validate mounted configuration.
+This test does not create a VM or execute a GitHub job.
+Before uninstalling, stop new demand and confirm all owned VMs/disks/NICs are absent.
+Uninstall does not remove durable state ConfigMaps or cloud resources.

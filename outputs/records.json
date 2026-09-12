@@ -376,7 +376,7 @@
     },
     {
       "id": "DEC-STACK-001",
-      "revision": 3,
+      "revision": 4,
       "type": "Decision",
       "status": "confirmed",
       "owner": "maintainer",
@@ -385,7 +385,7 @@
         "DEV-0001"
       ],
       "basis": "recommended_default_adopted_under_standing_authority",
-      "statement": "Go 1.26.7, upstream actions/scaleset v0.4.0, Kubernetes 1.35, Ubuntu 24.04 amd64/arm64 and AWS/Azure/GCP are the initial development matrix. Live paths are not yet qualified."
+      "statement": "Go 1.27.1, actions/scaleset v0.4.0, Kubernetes 1.37, Ubuntu 24.04 amd64/arm64 and AWS/Azure/GCP are the current development matrix. Helm uses maintained v3.22.0. Live paths and arm64 remain unqualified; dependency-status.md records compatibility exceptions."
     },
     {
       "id": "DEC-STATE-001",
@@ -520,6 +520,56 @@
       "sources": [],
       "location": "https://github.com/floci-io/floci-az/tree/0.12.0",
       "statement": "VM control plane is mocked. Its official az-vm CLI compatibility test is best-effort and may skip; RunnerScout must not interpret that as full adapter support."
+    },
+    {
+      "id": "DEC-LIMIT-UPGRADE-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "maintainer",
+      "sources": [
+        "AUTH-UBUNTU-001",
+        "DEV-0001"
+      ],
+      "basis": "recommended_default_adopted_under_standing_authority",
+      "statement": "maxRunners is a mutable admission ceiling during Helm upgrades. Lowering it admits nothing above the new ceiling and retains existing allocations, deadlines and consumed slots until normal cleanup/reset. Other class/provider identity fields remain immutable. Fleet binding v2 omits only maxRunners; old bindings migrate only when all other fields match a valid previous bounded limit."
+    },
+    {
+      "id": "AUTH-DEPS-CACHE-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "commissioning_user",
+      "sources": [
+        "AUTH-UBUNTU-001"
+      ],
+      "basis": "human_statement",
+      "statement": "Sweep remaining development PRs through required checks to merge; keep dependencies and third-party libraries current across the project and cache Go dependencies across CI runs. No bypass of repository or sandbox controls."
+    },
+    {
+      "id": "AUTH-CRD-EXAMPLES-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "commissioning_user",
+      "sources": [
+        "AUTH-UBUNTU-001"
+      ],
+      "basis": "human_statement",
+      "statement": "After the dependency/CI/PR sweep, implement the Kubernetes CRD configuration surface and comprehensive schema-validated worked examples for every CRD, including AWS/Azure/GCP providers, runner requirements, placement/fallback, retries, credentials and ordinary runs-on workflows. The current ConfigMap-only runtime does not satisfy this request; no example may imply unimplemented behavior."
+    },
+    {
+      "id": "AUTH-OPTIONAL-NETWORK-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "commissioning_user",
+      "sources": [
+        "AUTH-UBUNTU-001",
+        "AUTH-CRD-EXAMPLES-001"
+      ],
+      "basis": "human_statement",
+      "statement": "Expose an opt-in uniform logical private-network option spanning AWS VPC, Azure VNet and GCP VPC. Keep separate provider networks as default. Start qualification locally using isolated network domains and a real overlay, with positive/negative connectivity, DNS and ephemeral cleanup checks; real cloud routing remains separately unqualified until bounded authorized tests. No paid network provisioning is authorized by this option request."
     }
   ]
 }
