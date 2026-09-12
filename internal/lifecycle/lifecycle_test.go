@@ -158,3 +158,21 @@ func TestUnreadyVMExpiresButStartedJobDoesNot(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownCreateWithStartedJobSurvivesProvisioningDeadline(t *testing.T) {
+	c, s, cloud, now := setup()
+	cloud.loseResponse = true
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("expected unknown create")
+	}
+	// A GitHub job-start observation proves readiness even while the create
+	// response remains unreconciled. Provisioning expiry must not retire that job.
+	s.a.Ready = true
+	*now = s.a.Deadline
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Running || cloud.created != 1 || cloud.deleted != 0 {
+		t.Fatal(s.a)
+	}
+}

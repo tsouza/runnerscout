@@ -22,6 +22,7 @@ REQUIRED = {
  "TestPersistenceAcrossStoreInstances", "TestForeignStateRejected",
  "TestDurableAdmissionSurvivesOperatorRestart",
  "TestCooldownRetainsUnknownSearch", "TestUnreadyVMExpiresButStartedJobDoesNot",
+ "TestUnknownCreateWithStartedJobSurvivesProvisioningDeadline",
  "TestProviderBindingCannotChangeUnderExistingFleet", "TestMissingInventoryCannotConfirmCleanup",
  "TestAzureCreateUsesSecureBootstrapAndSpotDelete", "TestAzureActiveDeploymentCannotProveAbsence",
  "TestAzureForeignDiskCannotBeDeleted", "TestAzureResidualOwnedNICRetainsCleanup",

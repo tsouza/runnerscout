@@ -107,6 +107,69 @@
       },
       "cleanup_errors": [],
       "reason": "Command '['docker', 'port', 'runnerscout-emulators-60ac042d5779-azure', '4577/tcp']' returned non-zero exit status 1."
+    },
+    {
+      "run_id": "runnerscout-emulators-0548f082c300",
+      "verdict": "pass",
+      "scope": "emulated cloud APIs, not real cloud VM execution",
+      "checks": {
+        "aws_adapter": "pass",
+        "azure_vm_rest_smoke": "pass",
+        "azure_full_adapter": "unqualified: ARM deployment/disk composition not exercised",
+        "gcp_compute": "unavailable: Floci GCP does not implement standalone Compute Engine instances"
+      },
+      "images": {
+        "aws": "ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8",
+        "azure": "floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03",
+        "cli": "public.ecr.aws/aws-cli/aws-cli@sha256:bad3346a39098ab077be6ed58c7e1fe68321a4a844c7c740318100013e6c3581"
+      },
+      "required_paths": [
+        "aws_adapter",
+        "azure_vm_rest_smoke"
+      ],
+      "cleanup_errors": []
+    },
+    {
+      "run_id": "f88b3742-8829-4c15-999b-af88a6b56d0a",
+      "verdict": "pass",
+      "candidate_sha256": "edf9de3afb8171f0b9c158d88e971fbed57968a6055a9e12fd1bbefa1679a61a",
+      "evaluator_sha256": "64bc4b1b2653da6f551aab77144e44497cb16fcb2cb64190b9701ef459c7e30d",
+      "tests": {
+        "pass_": true,
+        "started": 26,
+        "completed": 26,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "qualification-f4aa7d1e-bcf8-405f-963b-16c3662d888b",
+      "verdict": "pass",
+      "scope": "targeted semantic controls; not full protected harness qualification",
+      "mutants": [
+        {
+          "name": "unknown-is-exhausted",
+          "witness": "TestFallbackRequiresDefinitiveExhaustion",
+          "original_sha256": "cca25cdd179bd98e1af77ce106cb9885f924f891e15b96b54ae1fbc20e2abd06",
+          "detected": true,
+          "exit_code": 1
+        },
+        {
+          "name": "exclusive-deadline",
+          "witness": "TestDeadlineInclusiveNoCloudEffect",
+          "original_sha256": "ea3e9ce1677b1cb62c8cd97794836d68891fd4426900856e837846f613f69a1e",
+          "detected": true,
+          "exit_code": 1
+        },
+        {
+          "name": "delete-ack-is-absence",
+          "witness": "TestLostCreateResponseRestartAndCleanup",
+          "original_sha256": "ea3e9ce1677b1cb62c8cd97794836d68891fd4426900856e837846f613f69a1e",
+          "detected": true,
+          "exit_code": 1
+        }
+      ]
     }
   ]
 }

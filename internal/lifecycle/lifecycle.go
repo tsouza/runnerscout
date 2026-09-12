@@ -155,7 +155,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		}
 		a.ResourceID = ob.ResourceID
 		a.Phase = Running
-		if a.Retire || expired {
+		if a.Retire || (expired && !a.Ready) {
 			a.Phase = Deleting
 			a.Condition = "LocalProvisioningTimeoutCleanupPending"
 		}
