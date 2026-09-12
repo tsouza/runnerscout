@@ -32,8 +32,8 @@ provider/class configuration if durable fleet binding rejects a change; do not d
 state to bypass it. Admission stops at 1,000 retained allocations until archival is
 implemented. This experimental runtime is not yet suitable for unattended production.
 
-For local Kubernetes qualification, create a dedicated kind v0.31.0 cluster using
-kindest/node:v1.35.0, set `RUNNERSCOUT_TEST_KUBECONFIG` to its explicit kubeconfig,
+For local Kubernetes qualification, create a dedicated kind v0.33.0 cluster using
+kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5, set `RUNNERSCOUT_TEST_KUBECONFIG` to its explicit kubeconfig,
 then run `make integration`. The test creates a unique namespace, exercises real
 resourceVersion conflict rejection and waits for namespace deletion. It never uses
 the default kubeconfig or skips when the explicit test environment is missing.

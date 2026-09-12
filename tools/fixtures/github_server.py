@@ -45,6 +45,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and path == "/fixture/stats":
             with LOCK:
                 self.reply(200, dict(COUNTS))
+        elif self.command == "POST" and path == "/app/installations/42/access_tokens":
+            self.reply(201, {"token": "fixture-installation-token", "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 3600))})
         elif self.command == "POST" and path.endswith("/runners/registration-token"):
             self.reply(201, {"token": "fixture-registration-token"})
         elif self.command == "POST" and path.endswith("/actions/runner-registration"):

@@ -5,8 +5,8 @@ This is an implementation target; full G01–G08 readiness is not inferred.
 
 ## Fixed scope and interfaces
 
-Go 1.26.7; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
-1.35 API target; Ubuntu 24.04 Linux amd64/arm64 images maintained by the operator.
+Go 1.27.1; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
+1.37 API target; Ubuntu 24.04 Linux amd64/arm64 images maintained by the operator.
 AWS EC2, Azure Virtual Machines and GCP Compute are provider targets. GHES/Windows are
 outside the first implementation matrix, not demonstrated unsupported by nature.
 ARC is optional at runtime and must own different scale sets.

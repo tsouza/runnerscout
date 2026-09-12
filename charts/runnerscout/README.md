@@ -1,7 +1,7 @@
 # RunnerScout Helm chart
 
 Development chart version `0.1.0-dev.1`; no released runtime image is implied.
-Requires Kubernetes 1.35 and Helm 3.16 or later. Supply an explicitly built image
+The current development target is Kubernetes 1.37 and maintained Helm 3.22. Supply an explicitly built image
 containing `/usr/local/bin/runnerscout` and the AWS, Azure and GCP CLIs.
 Build the local development image with `make image`; validate it with `make image-test`.
 Runtime vulnerability acceptance and arm64 execution remain pending.
@@ -23,9 +23,7 @@ helm test runnerscout --namespace runnerscout --timeout 2m
 `helm test` checks configuration with the actual runtime parser. It does not
 contact GitHub, Kubernetes or a cloud provider. End-to-end job qualification is a
 separate required release gate. `make helm-integration` passed install/test/upgrade/rollback/uninstall against
-a real isolated Kubernetes 1.35 cluster and idle HTTPS GitHub fixture. This
-qualifies PAT-mode deployment behavior; live jobs, App-mode lifecycle and
-installation from the packaged chart archive remain separate outstanding checks.
+a real isolated Kubernetes 1.37 cluster and idle HTTPS GitHub fixture. The packaged-chart run also passed PAT-to-App upgrade and rollback, including the installation-token exchange path. The fixture does not validate the App JWT cryptographically and does not establish live authentication. All 12 lifecycle checks and cleanup passed with Helm 3.22 and the refreshed runtime.
 
 The chart uses one replica and Recreate replacement, namespace-scoped RBAC,
 non-root execution, a read-only root filesystem and bounded temporary storage.

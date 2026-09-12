@@ -923,5 +923,17 @@
       }
     ],
     "status": "not accepted; remaining high findings require assessment and remediation"
+  },
+  "dependency_refresh_scan": {
+    "image_id": "sha256:4280a47a8392685b922773b438f80041c17ca708c569fc7571ec14f7937d9b31",
+    "scanner": "Trivy 0.74.0",
+    "severity_counts": {
+      "LOW": 57,
+      "HIGH": 48,
+      "MEDIUM": 50,
+      "UNKNOWN": 1
+    },
+    "status": "not accepted; Azure supported dependency and OS/bundled findings remain",
+    "go_reachable_scan": "govulncheck 1.8.0: no vulnerabilities found"
   }
 }

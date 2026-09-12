@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real isolated Kubernetes Helm lifecycle; idle GitHub protocol fixture only."""
 import datetime
+import hashlib
 import json
 import ipaddress
 import os
@@ -26,7 +27,7 @@ def main():
     cluster_attempted = False
     env = os.environ.copy()
     env["KIND_EXPERIMENTAL_DOCKER_NETWORK"] = identity
-    kind = ["go", "run", "sigs.k8s.io/kind@v0.31.0"]
+    kind = ["go", "run", "sigs.k8s.io/kind@v0.33.0"]
 
     def diagnose():
         commands = [["docker", "logs", "--tail", "120", identity + "-control-plane"]]
@@ -90,7 +91,7 @@ def main():
             kind_config = temp / "kind.yaml"
             kind_config.write_text(yaml.safe_dump({"kind": "Cluster", "apiVersion": "kind.x-k8s.io/v1alpha4", "nodes": [{"role": "control-plane", "extraMounts": [{"hostPath": str(hosts), "containerPath": "/etc/hosts", "readOnly": True}]}]}))
             cluster_attempted = True
-            created = run("create-cluster", kind + ["create", "cluster", "--name", identity, "--image", "kindest/node:v1.35.0", "--kubeconfig", str(kubeconfig), "--config", str(kind_config), "--wait", "120s", "--retain"], timeout=240, check=False)
+            created = run("create-cluster", kind + ["create", "cluster", "--name", identity, "--image", "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5", "--kubeconfig", str(kubeconfig), "--config", str(kind_config), "--wait", "120s", "--retain"], timeout=240, check=False)
             # Docker intentionally does not publish ports on an internal network.
             # kind may finish bootstrap but fail to export an external endpoint.
             # Accept only that specific export failure; independently require a
@@ -111,16 +112,17 @@ def main():
                 raise RuntimeError("test node IP differs from explicit internal-network hosts mapping")
             run("load-image", kind + ["load", "docker-image", "runnerscout:development", "--name", identity], timeout=240)
             version = json.loads(run("cluster-version", kubectl + ["version", "-o", "json"]).stdout)
-            if not version["serverVersion"]["gitVersion"].startswith("v1.35."):
+            if not version["serverVersion"]["gitVersion"].startswith("v1.37."):
                 raise RuntimeError("unexpected Kubernetes qualification version")
             manifest["kubernetes"] = version["serverVersion"]["gitVersion"]
             run("fixture-cert", ["openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048", "-days", "1", "-keyout", str(temp / "tls.key"), "-out", str(temp / "tls.crt"), "-subj", "/CN=RunnerScout test fixture", "-addext", "subjectAltName=DNS:api.github.com,DNS:github.com"])
+            run("app-key", ["openssl", "genrsa", "-out", str(temp / "app.key"), "2048"])
             labels = {"app": "github-fixture"}
             objects = [
                 {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}},
                 {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "fixture-tls", "namespace": ns}, "type": "kubernetes.io/tls", "stringData": {"tls.crt": (temp / "tls.crt").read_text(), "tls.key": (temp / "tls.key").read_text()}},
                 {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fixture-ca", "namespace": ns}, "data": {"ca.crt": (temp / "tls.crt").read_text()}},
-                {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "github-test", "namespace": ns}, "stringData": {"token": "fixture-token"}},
+                {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "github-test", "namespace": ns}, "stringData": {"token": "fixture-token", "privateKey": (temp / "app.key").read_text()}},
                 {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fixture-script", "namespace": ns}, "data": {"github_server.py": (ROOT / "tools/fixtures/github_server.py").read_text()}},
                 {"apiVersion": "v1", "kind": "Service", "metadata": {"name": "github-fixture", "namespace": ns}, "spec": {"selector": labels, "ports": [{"port": 443, "targetPort": 8443}]}},
                 {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "github-fixture", "namespace": ns, "labels": labels}, "spec": {"automountServiceAccountToken": False, "restartPolicy": "Never", "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}}, "containers": [{"name": "fixture", "image": "runnerscout:development", "imagePullPolicy": "Never", "command": ["python3", "/fixture/github_server.py"], "ports": [{"containerPort": 8443}], "readinessProbe": {"tcpSocket": {"port": 8443}, "periodSeconds": 1}, "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}, "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "256Mi"}}, "volumeMounts": [{"name": "script", "mountPath": "/fixture", "readOnly": True}, {"name": "tls", "mountPath": "/tls", "readOnly": True}]}], "volumes": [{"name": "script", "configMap": {"name": "fixture-script"}}, {"name": "tls", "secret": {"secretName": "fixture-tls", "defaultMode": 288}}]}},
@@ -139,9 +141,16 @@ def main():
             values["fullnameOverride"] = "runnerscout"
             values_path = temp / "values.json"
             values_path.write_text(json.dumps(values))
-            install = helm + ["upgrade", "--install", "qualification", str(ROOT / "charts/runnerscout"), "--values", str(values_path), "--post-renderer", str(postrenderer), "--wait", "--timeout", "120s"]
+            run("package-chart", ["helm", "package", str(ROOT / "charts/runnerscout"), "--destination", str(temp)])
+            archives = list(temp.glob("runnerscout-*.tgz"))
+            if len(archives) != 1:
+                raise RuntimeError("expected one packaged chart artifact")
+            manifest["chart_archive_sha256"] = hashlib.sha256(archives[0].read_bytes()).hexdigest()
+            manifest["fixture_sha256"] = hashlib.sha256((ROOT / "tools/fixtures/github_server.py").read_bytes()).hexdigest()
+            install = helm + ["upgrade", "--install", "qualification", str(archives[0]), "--values", str(values_path), "--post-renderer", str(postrenderer), "--wait", "--timeout", "120s"]
             run("helm-install", install, timeout=150)
             manifest["checks"]["install_ready"] = "pass"
+            manifest["checks"]["packaged_chart_install"] = "pass"
             run("helm-test", helm + ["test", "qualification", "--timeout", "90s"])
             manifest["checks"]["helm_test"] = "pass"
             fleet = json.loads(run("fleet-before", kubectl + ["-n", ns, "get", "configmap", "test-class-fleet", "-o", "json"]).stdout)
@@ -154,6 +163,7 @@ def main():
                 if result.stdout.strip() != expected:
                     raise RuntimeError("unexpected effective RBAC for " + verb + " " + resource)
             manifest["checks"]["effective_rbac"] = "pass"
+            values["github"].update(mode="app", appClientID="Iv1.fixture", appInstallationID=42)
             values["config"]["maxRunners"] = 2
             values["tests"] = {"retainPod": True}
             values_path.write_text(json.dumps(values))
@@ -164,7 +174,9 @@ def main():
             pods = json.loads(run("pods-upgraded", kubectl + ["-n", ns, "get", "pods", "-l", "app.kubernetes.io/instance=qualification", "-o", "json"]).stdout)["items"]
             if len(pods) != 1 or pods[0]["metadata"]["uid"] == pod_uid:
                 raise RuntimeError("upgrade did not replace the controller pod")
-            run("helm-test-retained-logs", helm + ["test", "qualification", "--logs", "--timeout", "90s"])
+            test_result = run("helm-test-retained-logs", helm + ["test", "qualification", "--logs", "--timeout", "90s"])
+            if "configuration valid; no external operations performed" not in test_result.stdout:
+                raise RuntimeError("Helm test did not demonstrate the actual configuration parser")
             manifest["checks"]["retained_test_logs"] = "pass"
             manifest["checks"]["upgrade_ready"] = "pass"
             run("helm-rollback", helm + ["rollback", "qualification", "1", "--wait", "--timeout", "120s"], timeout=150)
@@ -182,6 +194,9 @@ def main():
             stats = json.loads(run("protocol-stats", kubectl + ["-n", ns, "exec", "deployment/runnerscout", "--", "python3", "-c", stats_code]).stdout)
             if stats.get("unexpected", 0) or not any("/sessions" in key and key.startswith("POST") and value >= 3 for key, value in stats.items()) or not stats.get("GET /fixture/messages", 0):
                 raise RuntimeError("fixture did not observe expected controller session lifecycle")
+            if not stats.get("POST /app/installations/42/access_tokens", 0):
+                raise RuntimeError("GitHub App installation-token exchange was not exercised")
+            manifest["checks"]["app_authentication"] = "pass"
             manifest["checks"]["idle_scaleset_protocol"] = "pass"
             manifest["fixture_requests"] = stats
             run("helm-uninstall", helm + ["uninstall", "qualification", "--wait", "--timeout", "90s"])
@@ -194,7 +209,7 @@ def main():
             manifest["checks"]["uninstall_retains_state"] = "pass"
             run("delete-namespace", kubectl + ["delete", "namespace", ns, "--wait=true", "--timeout=90s"])
             manifest["checks"]["namespace_cleanup"] = "pass"
-            required = {"internal_network", "install_ready", "helm_test", "effective_rbac", "upgrade_ready", "retained_test_logs", "rollback_ready", "idle_scaleset_protocol", "uninstall_retains_state", "namespace_cleanup"}
+            required = {"packaged_chart_install", "app_authentication", "internal_network", "install_ready", "helm_test", "effective_rbac", "upgrade_ready", "retained_test_logs", "rollback_ready", "idle_scaleset_protocol", "uninstall_retains_state", "namespace_cleanup"}
             if any(manifest["checks"].get(check) != "pass" for check in required):
                 raise RuntimeError("required lifecycle evidence missing")
             manifest["verdict"] = "pass"

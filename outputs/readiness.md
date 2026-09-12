@@ -1,61 +1,47 @@
-# Development readiness — DEV-0001 revision 2
+# Development readiness — DEV-0001 revision 3
 
-The experimental controller is implemented. This is not a qualified release.
+Experimental development candidate; no qualified release. BASE-0002 remains a
+partial discovery baseline. Full development and checked PR merges are authorized;
+production deployment and paid cloud execution remain outside the current allocation.
 
-| Claim | Evidence and limits |
+| Claim | Current evidence and limits |
 |---|---|
-| Specification readiness | G01 scope and authority defined. G02–G08 remain partial: full provider pricing/retry composition and protected controller qualification are open. |
-| Local harness | Formatting, vet, build and the previously recorded 27-test baseline passed, including Azure, started-job recovery and AWS account drift. Eight completion-manifest integrity controls passed. CI verifies the exact PR revision; see PR #6. |
-| Semantic controls | Three deliberate defects were detected, each after its unchanged positive control passed: unknown spot search treated as exhausted, wrong deadline boundary, delete acknowledgment treated as absence. |
-| Kubernetes integration | Passed against a real isolated Kubernetes v1.35.0 kind cluster: durable reload, stale resourceVersion rejection and observed namespace cleanup. The test cluster was removed. |
-| Candidate acceptance | Not accepted. Live GitHub-to-VM execution, AWS/Azure/GCP cleanup inventory and interruption retry composition are not demonstrated. |
-| Protected evaluator | Not established. Editable local scripts/CI do not provide independent acceptance custody. CQ-01–CQ-12 remain open. |
+| Specification | DEV-0001 defines scope and preserved behavioral decisions. G02–G08 and CQ-01–CQ-12 remain partial. |
+| Local controller/harness | Go 1.27.1 formatting, vet, build and 33 test executions passed with no missing, failed or skipped tests. Eight completion-manifest controls passed. Diagnostic evaluator custody is not independently protected. |
+| Chart contracts | Ten render/package/parser/RBAC/Secret/probe/configuration tests passed with Helm 3.22.0 and the Kubernetes 1.37 target. |
+| Real Helm lifecycle | Packaged chart on isolated Kubernetes 1.37 passed 12 checks: install, tests, RBAC, App/PAT upgrade, rollback, session reconnection, retained fleet state and namespace cleanup. Cluster/network cleanup had zero errors. |
+| Runtime | Updated amd64 image passed non-root, read-only, network-disabled controller and AWS/Azure/GCP CLI smoke tests. Arm64 remains unqualified. |
+| Emulators | Updated AWS CLI passed Ministack adapter create-response-loss/reconciliation/cleanup; Floci Azure REST smoke passed. Both environments were removed. Full Azure ARM adapter and GCP Compute are not emulator-qualified. |
+| Go vulnerability check | govulncheck 1.8.0 completed with no vulnerabilities found. The preceding 1.1.4 parser crash on Go 1.27 is retained as failed tooling evidence. |
+| Image security | Trivy 0.74.0: zero critical, 48 high findings remain. Image security is not accepted; official Azure constraints and OS/bundled findings remain tracked. |
+| Live end-to-end | Real GitHub-to-VM execution, multicloud image/network behavior, independent resource inventory and interruption retries remain unqualified. |
 
-Implemented: resource-constrained finite-catalog placement; explicit on-demand opt-in;
-aggregate admission with persisted pending capacity; original provisioning deadlines;
-Kubernetes CAS state and lease leadership; upstream scale-set listener; mounted App/PAT
-authentication; AWS/Azure/GCP command adapters; durable create intent; observed cleanup;
-class-wide capacity cooldown; new-admission catalog reload; provider-binding checks;
-default-disabled retry eligibility guard; diagnostic evidence and CI.
+The Helm test uses an idle HTTPS GitHub fixture. App key parsing and installation-
+token exchange are exercised, but the fixture does not validate JWT signatures and
+no real GitHub job or cloud VM executes. These claims are deliberately separate
+from live integration. Exact image, chart, fixture and evaluator identities appear
+in local-evidence.json; CI checks the published revision independently.
 
-Pending implementation/qualification: provider-driven quote discovery and complete GCP
-capacity classifications; actual rerun REST effects and ambiguity reconciliation; image
-and network qualification; automatic archival beyond 1,000 retained allocations;
-complete protected development-controller policy and qualification. These gaps remain
-visible in issues #2–#5 and are not represented as passing contracts.
+Implemented: finite-catalog resource-constrained placement; explicit on-demand
+opt-in; bounded aggregate admission; durable creation intent and original deadlines;
+Kubernetes ConfigMap CAS and Lease leadership; direct scale-set listener; mounted
+App/PAT authentication; AWS/Azure/GCP adapters; observed cleanup; class cooldown;
+catalog reload; immutable provider identity and mutable admission-limit binding;
+default-disabled retry eligibility guard; Helm deployment and local diagnostics.
 
-Infrastructure history: the first local race build encountered a full host filesystem.
-Its failure record remains retained. The user authorized cleanup; rebuildable Go caches
-and inactive temporary build directories were removed. The subsequent full lane passed.
-The first CI security scan found vulnerable dependencies; fixes are subject to a fresh
-required scan rather than waiver. No live cloud spending or production deployment occurred.
+Pending: complete provider quote discovery/rejection classification; actual bounded
+rerun composition and ambiguity reconciliation; allocation archival beyond 1,000;
+CRD API and comprehensive examples; optional uniform private networking; architecture
+and image security acceptance; independent evaluator qualification and live cloud
+end-to-end evidence. The latest user requests are recorded in records.json and
+release-0.1.0-plan.md. ConfigMap-only configuration does not satisfy the CRD request.
 
-Next integration prerequisite: explicit isolated AWS/Azure/GCP configuration and GitHub
-credential references, pinned images/networks, numeric spend/VM-runtime allocation and
-cleanup owner. The requested allocation is pending. Public source and collaboration:
-https://github.com/tsouza/runnerscout/pull/6
+Dependency freshness and compatible-version exceptions are in dependency-status.md.
+Go module/build caching is explicit in all seven Go CI/CodeQL jobs; observed logs
+already demonstrate reuse from main. The new runtime Buildx cache awaits published
+CI evidence. Development PRs merge only after the existing required checks pass.
 
-User scope correction: Azure is mandatory alongside AWS and GCP. Its adapter and
-four initial contract tests are implemented; live qualification is not claimed.
-The user selected local emulator investigation instead of supplying paid-cloud
-allocation. `make emulators` covers the supported API paths; unsupported GCP
-Compute and Azure full CLI/ARM composition remain explicit gaps.
-
-Emulator execution: Ministack 1.5.10 passed the actual AWS CLI/provider adapter
-lost-create-response, operation reconciliation and cleanup test. Floci Azure 0.12.0
-passed REST VM create/read/delete smoke checks. Both emulator containers and their
-internal network were removed with no cleanup errors. Images are pinned by digest.
-No Docker socket was mounted and no real cloud credentials were supplied. The initial
-network-harness failure was retained before the corrected run. `pass` in that lane
-means the two named supported paths; full Azure adapter, GCP Compute and live VM
-execution remain unqualified.
-
-Patched dependency scan: zero reachable vulnerabilities reported for Go 1.26.7 and
-the updated modules. One advisory exists in a required module without a reachable
-call according to govulncheck; this is not a claim that every dependency is advisory-free.
-
-Helm development: chart 0.1.0-dev.1 has ten local render/package/configuration contract tests. The test hook invokes the real controller parser; it does not establish GitHub/VM execution. Real install, upgrade, rollback and uninstall qualification and runtime image packaging remain required by release-0.1.0-plan.md.
-
-Runtime milestone: an amd64 image executed the controller config check and AWS/Azure/GCP CLIs under non-root, read-only, network-disabled restrictions. Two health tests add session rejection and shutdown coverage (31 total test executions including subtests). Initial Trivy image scanning found unresolved vulnerabilities; supported updates are being verified. No image security acceptance or real Helm lifecycle acceptance is claimed.
-
-Real Helm lifecycle: passed on isolated Kubernetes v1.35.0 with the actual amd64 runtime and an idle HTTPS GitHub fixture. Install readiness, default test cleanup, retained test logs, effective namespace RBAC, maxRunners upgrade, rollback, session reconnection and uninstall preserving the fleet ConfigMap UID passed. Namespace/cluster/internal-network cleanup completed with zero errors. This is PAT-mode idle-session qualification, not live GitHub or cloud execution. App-mode lifecycle, packaged-chart installation, arm64 and image security acceptance remain open. The current merged source passed 33 test executions and ten chart contracts.
+No paid cloud or networking allocation exists. Continue independent implementation
+and local qualification. Any later cloud test needs explicit isolated provider and
+GitHub configuration references, pinned images/networks, numeric spending/runtime
+limits and a cleanup owner. No release tag has been created.

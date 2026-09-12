@@ -14,15 +14,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - run: make verify
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: verification-${{ github.run_id }}-${{ github.run_attempt }}
@@ -34,46 +35,52 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+          cache: true
+          cache-dependency-path: go.sum
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   kubernetes-integration:
     name: kubernetes-integration
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
       - name: Create isolated Kubernetes
-        run: go run sigs.k8s.io/kind@v0.31.0 create cluster --name runnerscout-ci --image kindest/node:v1.35.0 --kubeconfig "$RUNNER_TEMP/kubeconfig" --wait 120s
+        run: go run sigs.k8s.io/kind@v0.33.0 create cluster --name runnerscout-ci --image kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5 --kubeconfig "$RUNNER_TEMP/kubeconfig" --wait 120s
       - name: Verify real persistence and CAS
         run: RUNNERSCOUT_TEST_KUBECONFIG="$RUNNER_TEMP/kubeconfig" make integration
       - name: Delete isolated cluster
         if: always()
-        run: go run sigs.k8s.io/kind@v0.31.0 delete cluster --name runnerscout-ci
+        run: go run sigs.k8s.io/kind@v0.33.0 delete cluster --name runnerscout-ci
 
   cloud-emulators:
     name: cloud-emulators
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
       - run: make emulators
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: cloud-emulators-${{ github.run_id }}-${{ github.run_attempt }}
@@ -86,16 +93,18 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
       - name: Install pinned chart tools
         run: |
-          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.16.4-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
-          echo "fc307327959aa38ed8f9f7e66d45492bb022a66c3e5da6063958254b9767d179  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
+          echo "1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/linux-amd64" >> "$GITHUB_PATH"
           python3 -m venv "$RUNNER_TEMP/chart-venv"
@@ -108,29 +117,40 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
       - name: Install pinned Helm and kubectl
         run: |
-          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.16.4-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
-          echo "fc307327959aa38ed8f9f7e66d45492bb022a66c3e5da6063958254b9767d179  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
+          echo "1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/linux-amd64" >> "$GITHUB_PATH"
-          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl --output "$RUNNER_TEMP/linux-amd64/kubectl"
-          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.35.0/bin/linux/amd64/kubectl.sha256 --output "$RUNNER_TEMP/kubectl.sha256"
+          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl --output "$RUNNER_TEMP/linux-amd64/kubectl"
+          curl --fail --silent --show-error --location https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl.sha256 --output "$RUNNER_TEMP/kubectl.sha256"
           echo "$(cat "$RUNNER_TEMP/kubectl.sha256")  $RUNNER_TEMP/linux-amd64/kubectl" | sha256sum --check
           chmod +x "$RUNNER_TEMP/linux-amd64/kubectl"
           python3 -m venv "$RUNNER_TEMP/chart-venv"
           "$RUNNER_TEMP/chart-venv/bin/pip" install PyYAML==6.0.3
           echo "$RUNNER_TEMP/chart-venv/bin" >> "$GITHUB_PATH"
-      - run: make image
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build runtime with persistent layer cache
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: runnerscout:development
+          cache-from: type=gha,scope=runnerscout-runtime-amd64
+          cache-to: type=gha,scope=runnerscout-runtime-amd64,mode=max
       - run: make image-test
       - run: make helm-integration
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: runtime-image-${{ github.run_id }}-${{ github.run_attempt }}

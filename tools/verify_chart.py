@@ -13,7 +13,7 @@ CHART = ROOT / "charts/runnerscout"
 FIXTURE = json.loads((CHART / "tests/values.json").read_text())
 
 
-def render(values, success=True, version="1.35.0"):
+def render(values, success=True, version="1.37.0"):
     with tempfile.TemporaryDirectory(prefix="runnerscout-chart-") as tmp:
         values_path = Path(tmp) / "values.json"
         values_path.write_text(json.dumps(values))
@@ -54,7 +54,7 @@ class ChartContracts(unittest.TestCase):
             subprocess.run(["helm", "package", str(CHART), "--destination", tmp], check=True, capture_output=True)
             package = next(Path(tmp).glob("*.tgz"))
             result = subprocess.run(["helm", "template", "qualification", str(package),
-                "--namespace", "runnerscout-test", "--kube-version", "1.35.0",
+                "--namespace", "runnerscout-test", "--kube-version", "1.37.0",
                 "-f", str(CHART / "tests/values.json")], check=True, capture_output=True, text=True)
             docs = [d for d in yaml.safe_load_all(result.stdout) if d]
             self.assertEqual(resource(docs, "Pod")["metadata"]["annotations"]["helm.sh/hook"], "test")
