@@ -9,6 +9,7 @@ verify:
 .PHONY: integration
 integration:
 	go test -tags integration -run TestRealKubernetesPersistenceAndCAS -count=1 -v ./internal/state
+	go test -tags integration -run TestRealKubernetesCRDSchemasAndConfigurationSnapshot -count=1 -v ./internal/configapi
 
 .PHONY: qualify
 qualify:
@@ -34,3 +35,12 @@ image-test:
 .PHONY: helm-integration
 helm-integration:
 	python3 tools/helm_integration.py
+
+.PHONY: generate verify-generated crd-integration
+generate:
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 object crd paths=./api/... output:crd:artifacts:config=config/crd/bases
+verify-generated: generate
+	git diff --exit-code -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases
+	@test -z "$$(git ls-files --others --exclude-standard -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases)"
+crd-integration:
+	python3 tools/crd_integration.py

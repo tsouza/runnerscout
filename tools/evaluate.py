@@ -96,7 +96,7 @@ def main():
    return (run/name).read_text()
   try:
    report['registry_records']=validate_records(ROOT/'outputs/records.json')
-   formatting=command(['gofmt','-l','cmd','internal'],'format.log')
+   formatting=command(['gofmt','-l','cmd','internal','api'],'format.log')
    if formatting.strip():raise RuntimeError('unformatted Go files')
    command([sys.executable,'-m','unittest','discover','-s','tools','-p','test_*.py'],'harness.log')
    command(['go','vet','./...'],'vet.log')

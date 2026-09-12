@@ -695,6 +695,184 @@
       "verdict": "pass",
       "seconds": 5.086151523049921,
       "run_id": "45a15cc8-fb10-4b74-9eec-c2ebacda5669"
+    },
+    {
+      "baseline": "DEV-0001",
+      "candidate_sha256": "fe294db7fd330fcce77b46876be218e75df3acd6226bb965f49c57d5c7e69c46",
+      "evaluator_sha256": "c1656a8a8fd4cd11f8e45366dbbb917abd4fb2de366ccff6a05058fccbfee095",
+      "protected": false,
+      "live_cloud_integration": false,
+      "commands": [
+        {
+          "argv": [
+            "gofmt",
+            "-l",
+            "cmd",
+            "internal",
+            "api"
+          ],
+          "exit_code": 0,
+          "log": "format.log"
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tools",
+            "-p",
+            "test_*.py"
+          ],
+          "exit_code": 0,
+          "log": "harness.log"
+        },
+        {
+          "argv": [
+            "go",
+            "vet",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "vet.log"
+        },
+        {
+          "argv": [
+            "go",
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "tests.jsonl"
+        },
+        {
+          "argv": [
+            "go",
+            "build",
+            "-trimpath",
+            "-o",
+            "bin/runnerscout",
+            "./cmd/runnerscout"
+          ],
+          "exit_code": 0,
+          "log": "build.log"
+        }
+      ],
+      "registry_records": 49,
+      "tests": {
+        "pass_": true,
+        "started": 60,
+        "completed": 60,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      },
+      "verdict": "pass",
+      "seconds": 7.167576304986142,
+      "run_id": "d3f8a373-7b54-466a-8b7e-5ded4873dee9"
+    },
+    {
+      "scope": "real isolated Kubernetes CRD validation and configuration snapshot; no runner or cloud execution",
+      "verdict": "pass",
+      "checks": {
+        "internal_network": "pass",
+        "schemas_and_snapshot": "pass",
+        "namespace_and_crd_cleanup": "pass"
+      },
+      "cleanup_errors": [],
+      "node_image": "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5",
+      "kind": "v0.33.0",
+      "schemas": {
+        "runnerscout.io_capacitycatalogs.yaml": "10e98c209c6bf29cf001dcc640f7b3f81e8ade5035c1d65ca60d16d918649e90",
+        "runnerscout.io_networkprofiles.yaml": "e61a1d1217ca68bb605e8a288a4aa82e3527d7e89aa83b966aacc4d1e4b82415",
+        "runnerscout.io_providerconfigs.yaml": "163b2f5b9480bff3c53fa92fc6163e914c40f9e3166ee9a24a0de7f072ad7198",
+        "runnerscout.io_runnerclasses.yaml": "78a0f7d29c14e9a0c8a9ef3900395714981b1e63691fefa297bae95d958dcb13",
+        "runnerscout.io_runnerscalesets.yaml": "9c43cf1ae9973ac3f1ef91d19b2174133f6f208bc4a9d94dc6d8df2a2584c685"
+      },
+      "run_id": "runnerscout-crd-873ef73e"
+    },
+    {
+      "baseline": "DEV-0001",
+      "candidate_sha256": "5a28be286517a524faa90f974015084a1997c045b3a4c7345e6f2c01314beac2",
+      "evaluator_sha256": "c1656a8a8fd4cd11f8e45366dbbb917abd4fb2de366ccff6a05058fccbfee095",
+      "protected": false,
+      "live_cloud_integration": false,
+      "commands": [
+        {
+          "argv": [
+            "gofmt",
+            "-l",
+            "cmd",
+            "internal",
+            "api"
+          ],
+          "exit_code": 0,
+          "log": "format.log"
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tools",
+            "-p",
+            "test_*.py"
+          ],
+          "exit_code": 0,
+          "log": "harness.log"
+        },
+        {
+          "argv": [
+            "go",
+            "vet",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "vet.log"
+        },
+        {
+          "argv": [
+            "go",
+            "test",
+            "-json",
+            "-race",
+            "-count=1",
+            "./..."
+          ],
+          "exit_code": 0,
+          "log": "tests.jsonl"
+        },
+        {
+          "argv": [
+            "go",
+            "build",
+            "-trimpath",
+            "-o",
+            "bin/runnerscout",
+            "./cmd/runnerscout"
+          ],
+          "exit_code": 0,
+          "log": "build.log"
+        }
+      ],
+      "registry_records": 49,
+      "tests": {
+        "pass_": true,
+        "started": 60,
+        "completed": 60,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      },
+      "verdict": "pass",
+      "seconds": 5.294623287045397,
+      "run_id": "2f140d74-8df1-4225-9121-7f657190a493"
     }
   ]
 }

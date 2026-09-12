@@ -45,3 +45,5 @@ No paid cloud or networking allocation exists. Continue independent implementati
 and local qualification. Any later cloud test needs explicit isolated provider and
 GitHub configuration references, pinned images/networks, numeric spending/runtime
 limits and a cleanup owner. No release tag has been created.
+
+CRD development foundation: ProviderConfig, RunnerClass, RunnerScaleSet, CapacityCatalog and NetworkProfile Go types and generated v1alpha1 schemas now exist on the development branch. The reader/compiler uses namespaced references, stable UID/resourceVersion snapshots, derived allocation ownership and external Secret references. Sixty local test executions passed; a real isolated Kubernetes 1.37 API server accepted all five CRD schemas and valid resources and rejected invalid limits/unknown fields. Snapshot and cleanup checks passed. This does not yet connect CRDs to the running controller, Helm CRD installation or complete worked examples. Enabled retries and shared-overlay execution remain explicitly unsupported until implemented.

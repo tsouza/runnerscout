@@ -13,6 +13,7 @@ The user requests a complete tested end-to-end 0.1.0, including a complete teste
 | Kubernetes CRD API and worked examples | Complete implemented CRD schemas/controller behavior, valid and invalid examples, applied lifecycle checks and ordinary workflows | Newly requested after dependency/PR sweep; ConfigMap-only configuration is insufficient |
 | Optional uniform private networking | Opt-in network configuration with isolated local overlay connectivity/DNS/cleanup tests; explicit real-cloud routing qualification boundary | Requested; default remains separate provider networks |
 | Controller assurance | Fault/timeout/restart tests, oracle controls, independently protected evaluator and CQ-01–CQ-12 | Local diagnostic controls only |
+| Release pipeline | Same-commit versioned multi-architecture images, Helm packages, checksums, SBOMs, provenance/signatures and release notes; enforce qualification/security and promotion controls | Requested; implement and dry-run before any release publication |
 | Qualified release | Exact-source passing required CI, complete above evidence, versioned chart/image/artifacts and release notes | Not accepted; no release tag |
 
 Implementation order: finish foundation PR #6; construct and qualify chart/runtime deployment; complete provider quote/rejection and retry composition; expand local end-to-end seams; obtain any indispensable bounded external qualification allocation; audit all requirements before publishing 0.1.0. Tests must distinguish fixture, emulator, real Kubernetes and real cloud/GitHub evidence. Missing external evidence does not prevent independent implementation work.
@@ -20,3 +21,7 @@ Implementation order: finish foundation PR #6; construct and qualify chart/runti
 Optional networking is dependency-ordered after the dependency/PR sweep and alongside the CRD API. [The networking plan](networking-plan.md) defines default-off behavior, provider mappings, least-privilege access, actual local WireGuard tests, failure/recovery and peer cleanup, and separately budgeted AWS/Azure/GCP qualification. It adds no paid infrastructure by default.
 
 Follow-on implementation is tracked in [CRD API and examples #15](https://github.com/tsouza/runnerscout/issues/15) and [optional networking #16](https://github.com/tsouza/runnerscout/issues/16).
+
+[Release pipeline and regression policy](release-pipeline-plan.md) defines same-artifact promotion, fail-closed required checks, accepted-baseline comparisons, regression negative controls and publication custody. Any required failing, skipped, missing, stale or inconclusive evidence blocks release.
+
+Release pipeline construction and regression rejection are tracked in [issue #17](https://github.com/tsouza/runnerscout/issues/17).

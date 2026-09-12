@@ -570,6 +570,43 @@
       ],
       "basis": "human_statement",
       "statement": "Expose an opt-in uniform logical private-network option spanning AWS VPC, Azure VNet and GCP VPC. Keep separate provider networks as default. Start qualification locally using isolated network domains and a real overlay, with positive/negative connectivity, DNS and ephemeral cleanup checks; real cloud routing remains separately unqualified until bounded authorized tests. No paid network provisioning is authorized by this option request."
+    },
+    {
+      "id": "AUTH-RELEASE-PIPELINE-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "commissioning_user",
+      "sources": [
+        "AUTH-UBUNTU-001"
+      ],
+      "basis": "human_statement",
+      "statement": "Build a release pipeline for tested same-commit versioned multi-architecture images and packaged Helm charts, checksums, SBOMs, signatures/provenance and release notes. Require qualification and security gates, a verifiable promotion path and rollback guidance; do not create a 0.1.0 release before the full requested acceptance is proven."
+    },
+    {
+      "id": "DEC-RELEASE-REGRESSION-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "commissioning_user",
+      "sources": [
+        "AUTH-RELEASE-PIPELINE-001"
+      ],
+      "basis": "human_statement",
+      "statement": "Release promotion must reject regressions. Require bug-reproducing tests, accepted-baseline behavioral/API/CRD compatibility, Helm upgrade/rollback and preserved-state checks, provider/end-to-end qualification and security gates. Missing, skipped, stale, failed or inconclusive required evidence blocks publication. Never rewrite expected results automatically or treat the partial discovery baseline as an accepted release."
+    },
+    {
+      "id": "DEC-CRD-API-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "proposed",
+      "owner": "maintainer",
+      "sources": [
+        "AUTH-CRD-EXAMPLES-001",
+        "AUTH-OPTIONAL-NETWORK-001"
+      ],
+      "basis": "implementation-design-under-development-authority",
+      "statement": "The experimental runnerscout.io/v1alpha1 API uses namespaced ProviderConfig, RunnerClass, RunnerScaleSet, CapacityCatalog and NetworkProfile resources. Derive cloud resource owner from scale-set identity; provider references are reusable. Resolve only same-namespace dependencies and verify stable UID/resourceVersion snapshots. Generated schemas and compiler tests do not imply runtime reconciliation or supported shared-overlay/retry execution."
     }
   ]
 }
