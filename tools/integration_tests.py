@@ -21,9 +21,9 @@ def main():
                '-run', '^' + re.escape(args.test) + '$', args.package]
     report = {'command': command, 'verdict': 'fail'}
     try:
-        with (output / 'tests.jsonl').open('w') as log:
+        with (output / 'tests.jsonl').open('w') as log, (output / 'stderr.log').open('w') as diagnostics:
             result = subprocess.run(command, cwd=ROOT, stdout=log,
-                                    stderr=subprocess.STDOUT, timeout=600, check=False)
+                                    stderr=diagnostics, timeout=600, check=False)
         report['exit_code'] = result.returncode
         report['tests'] = test_manifest((output / 'tests.jsonl').read_text().splitlines(),
                                        {(args.package, args.test)})
