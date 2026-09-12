@@ -1,0 +1,11 @@
+# Requires an independently qualified dedicated RunnerScout scale set.
+name: RunnerScout example
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: runnerscout-example
+    timeout-minutes: 5
+    steps:
+      - run: uname -sm

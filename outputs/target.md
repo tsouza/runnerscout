@@ -5,9 +5,9 @@ This is an implementation target; full G01–G08 readiness is not inferred.
 
 ## Fixed scope and interfaces
 
-Go 1.26.2; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
+Go 1.26.7; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
 1.35 API target; Ubuntu 24.04 Linux amd64/arm64 images maintained by the operator.
-AWS EC2 and GCP Compute are the first provider targets. Azure/GHES/Windows are
+AWS EC2, Azure Virtual Machines and GCP Compute are provider targets. GHES/Windows are
 outside the first implementation matrix, not demonstrated unsupported by nature.
 ARC is optional at runtime and must own different scale sets.
 
@@ -59,8 +59,8 @@ The live recovery composition remains a release blocker until verified.
 ## Assurance and dependency plan
 
 M0 repository and target -> M1 placement/lifecycle, independent oracle and fault tests
--> M2 durable Kubernetes + direct scale-set + VM adapters -> M3 live AWS ordinary workflow
--> M4 live GCP and retry composition -> M5 protected evaluator and full qualification.
+-> M2 durable Kubernetes + direct scale-set + VM adapters -> M3 local cloud-emulator API qualification and live AWS ordinary workflow
+-> M4 live Azure/GCP and retry composition -> M5 protected evaluator and full qualification.
 Consumer coding may proceed before real seam qualification; promotion claims may not.
 
 Local checks: formatting, vet, race tests, independent catalog oracle, registry checks,
@@ -68,7 +68,7 @@ bounded evidence reporting. CI: same checks, build and vulnerability scan. Each 
 has a 10-minute local/15-minute CI cap; retain every failed attempt. Development campaign:
 60 evaluations, six hours cumulative evaluator wall time, no auto-renewal. Three identical
 failure families trigger diagnosis; no unattended restart loop. Release requires real
-GitHub/Kubernetes/AWS/GCP effects, independent cleanup inventory, positive and negative
+GitHub/Kubernetes/AWS/Azure/GCP effects, independent cleanup inventory, positive and negative
 controls, evaluator integrity challenges and CQ-01–CQ-12. Editable local reports are
 diagnostic evidence, not protected acceptance authority. Maintainer tsouza owns decisions,
 operations and evaluation custody. Protected evaluator isolation remains unestablished.
@@ -79,8 +79,32 @@ The initial runtime uses namespace-scoped ConfigMaps and one mounted class confi
 not a CRD API. The provider boundary currently uses external AWS CLI v2 / gcloud
 commands with workload credentials. GCP capacity errors remain commitment-unknown;
 only exact AWS InsufficientInstanceCapacity is classified as definitive rejection.
-Automatic quote/catalog refresh, complete GCP rejection classification, class-wide
-cooldown propagation and live rerun execution remain required implementation work.
-The pure retry guard exists but does not issue REST reruns. Initial authentication
-uses a mounted PAT; GitHub App runtime configuration remains work to add.
+Provider quote discovery, complete GCP rejection classification and live rerun execution remain required implementation work. The runtime reloads catalogPath at admission and persists class-wide five-minute cooldowns.
+The pure retry guard exists but does not issue REST reruns. Authentication supports mounted GitHub App credentials or a PAT; neither is stored in public configuration.
 These gaps prevent claiming the full target implemented or release-ready.
+
+Runtime recovery amendments: pricing validation cannot block startup cleanup. Existing
+allocations retain their admitted catalog snapshot; new admissions reload catalogPath
+when configured. Immutable class/provider/account bindings are persisted before effects;
+configuration drift fails explicitly and requires restoring the original binding for
+cleanup. The first runtime caps retained allocation records at 1,000 and stops admission
+at that bound; automatic archival is pending. This is an operational limit, not deletion
+of unconfirmed cleanup obligations.
+
+Azure scope correction: AUTH-AZURE-001 removes the agent-assumed Azure exclusion.
+The adapter uses tagged VM/NIC/managed-disk identities, a secure ARM bootstrap
+parameter, Spot eviction Delete, and explicit cleanup of owned residual resources.
+An active ARM deployment cannot be treated as absent. An untagged disk after an
+interrupted tagging operation remains an unresolved cleanup obligation; it is never
+silently deleted. Azure live image/network/ARM composition remains unqualified.
+
+Local integration now uses isolated emulator containers without cloud credentials
+or Docker socket mounts. AWS uses Ministack; Azure uses Floci control-plane smoke
+checks. GCP Compute remains fixture-backed because the inspected Floci GCP release
+does not implement standalone instances. Live qualification is a later separate
+allocation, not a prerequisite for these local development checks.
+
+AWS provider configurations require the expected 12-digit accountID. Every EC2
+operation verifies STS account identity first, so rebinding a credential profile
+cannot turn resources in the original account into falsely confirmed absence.
+Azure uses an explicit subscription and GCP an explicit project on every command.
