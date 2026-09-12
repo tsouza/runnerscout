@@ -11,7 +11,7 @@ COPY api/ api/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/runnerscout ./cmd/runnerscout
 
 FROM public.ecr.aws/aws-cli/aws-cli@sha256:e8467f2c319f9bc9a1471808a69949a76915e9c95eaf4a09ece9f9e85fd32747 AS aws
-FROM gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:2f2d80f4be75ffb2dc99d2048bd67248b830d1e52eb6a09ac1fa4b05e6e53a91 AS gcloud
+FROM gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:147cb346b1bdc3256085fc2c1ee98c6f3628bd5d99eba3fb3ac8287fa088a8d9 AS gcloud
 FROM python:3.14-slim-trixie@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS runtime
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 COPY docker/azure-cli-requirements.txt /tmp/azure-cli-requirements.txt
