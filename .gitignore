@@ -6,3 +6,6 @@ coverage.out
 .env
 *.pem
 *.key
+
+__pycache__/
+*.pyc

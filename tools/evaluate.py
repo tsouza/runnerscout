@@ -23,6 +23,8 @@ REQUIRED = {
  "TestDurableAdmissionSurvivesOperatorRestart",
  "TestCooldownRetainsUnknownSearch", "TestUnreadyVMExpiresButStartedJobDoesNot",
  "TestProviderBindingCannotChangeUnderExistingFleet", "TestMissingInventoryCannotConfirmCleanup",
+ "TestAzureCreateUsesSecureBootstrapAndSpotDelete", "TestAzureActiveDeploymentCannotProveAbsence",
+ "TestAzureForeignDiskCannotBeDeleted", "TestAzureResidualOwnedNICRetainsCleanup",
 }
 
 def validate_records(path):

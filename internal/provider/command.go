@@ -1,4 +1,4 @@
-// Package provider implements isolated AWS and GCP command adapters. Cloud CLI
+// Package provider implements isolated AWS, GCP and Azure command adapters. Cloud CLI
 // binaries are deployment dependencies. No shell evaluates configuration values.
 package provider
 
@@ -15,6 +15,9 @@ import (
 )
 
 type Config struct {
+	Subscription  string `json:"subscription,omitempty"`
+	ResourceGroup string `json:"resourceGroup,omitempty"`
+	SSHPublicKey  string `json:"sshPublicKey,omitempty"`
 	Kind          string `json:"kind"`
 	Project       string `json:"project,omitempty"`
 	Profile       string `json:"profile,omitempty"`
@@ -56,10 +59,13 @@ func (p *Command) Validate() error {
 	if p.Config.Kind == "aws" && p.Config.SecurityGroup != "" {
 		return nil
 	}
+	if p.Config.Kind == "azure" && p.Config.Subscription != "" && p.Config.ResourceGroup != "" && p.Config.SecurityGroup != "" && strings.HasPrefix(p.Config.SSHPublicKey, "ssh-") {
+		return nil
+	}
 	if p.Config.Kind == "gcp" && p.Config.Project != "" {
 		return nil
 	}
-	return errors.New("aws requires securityGroup; gcp requires project")
+	return errors.New("aws requires securityGroup; gcp requires project; azure requires subscription, resourceGroup, securityGroup and SSH public key")
 }
 func (p *Command) aws(ctx context.Context, region string, args ...string) ([]byte, error) {
 	all := []string{"ec2", "--region", region, "--output", "json", "--no-cli-pager"}
@@ -109,6 +115,9 @@ func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, e
 		return "", errors.New("empty JIT configuration")
 	}
 	script := Bootstrap(jit)
+	if p.Config.Kind == "azure" {
+		return p.createAzure(ctx, a, script)
+	}
 	if p.Config.Kind == "aws" {
 		body := map[string]any{"ImageId": a.Offering.Image, "InstanceType": a.Offering.Machine, "MinCount": 1, "MaxCount": 1, "ClientToken": a.ID, "SubnetId": p.Config.Subnet, "SecurityGroupIds": []string{p.Config.SecurityGroup}, "Placement": map[string]string{"AvailabilityZone": a.Offering.Zone}, "UserData": base64.StdEncoding.EncodeToString([]byte(script)), "MetadataOptions": map[string]any{"HttpEndpoint": "disabled"}, "InstanceInitiatedShutdownBehavior": "terminate", "TagSpecifications": []any{map[string]any{"ResourceType": "instance", "Tags": []any{map[string]string{"Key": "runnerscout-owner", "Value": p.Config.Owner}, map[string]string{"Key": "runnerscout-operation", "Value": a.ID}}}}}
 		if a.Offering.Spot {
@@ -191,6 +200,9 @@ func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycl
 		}
 		return lifecycle.Observation{Known: true, Exists: true, ResourceID: ids[0]}, nil
 	}
+	if p.Config.Kind == "azure" {
+		return p.observeAzure(ctx, a)
+	}
 	out, err := p.gcp(ctx, "instances", "list", "--zones", a.Offering.Zone, "--filter", "name="+a.ID)
 	if err != nil {
 		return lifecycle.Observation{}, err
@@ -226,6 +238,9 @@ func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
 	}
 	if a.ResourceID != "" && a.ResourceID != ob.ResourceID {
 		return errors.New("resource identity changed")
+	}
+	if p.Config.Kind == "azure" {
+		return p.deleteAzure(ctx, a)
 	}
 	if p.Config.Kind == "aws" {
 		_, err = p.aws(ctx, a.Offering.Region, "terminate-instances", "--instance-ids", ob.ResourceID)

@@ -13,3 +13,7 @@ integration:
 .PHONY: qualify
 qualify:
 	python3 tools/qualify.py
+
+.PHONY: emulators
+emulators:
+	python3 tools/emulators.py

@@ -1,21 +1,25 @@
 {
-  "scope": "diagnostic local evidence; no protected acceptance or live cloud claim",
+  "scope": "Diagnostic snapshots, not protected acceptance. CI binds current Git commit independently.",
   "runs": [
     {
-      "id": "ee130b7f-c280-49d6-98de-8cb82b307049",
-      "verdict": "fail",
-      "candidate_sha256": "1e7c6992c1d202ad63cb36150b2c25cb339529e5c62f234b2451b5554c37e180",
-      "evaluator_sha256": "0696fd1b8fe90767de2b3d8f32672253b870e7c7f674a10134925d35ce976118",
-      "seconds": 60.66692632297054,
-      "tests": null,
-      "reason": "tests.jsonl failed (exit 1)"
+      "run_id": "570c4a18-b75b-479e-b529-83f8af23b595",
+      "verdict": "pass",
+      "candidate_sha256": "db83d216407bbababaadcedf27c8a80e82ab05626142afb36457eadd2a6614f8",
+      "evaluator_sha256": "9d52856615e9963ec824959750a4ea13df7339a660994f3009e1c74e80972a30",
+      "tests": {
+        "pass_": true,
+        "started": 25,
+        "completed": 25,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
     },
     {
-      "id": "b9552702-c0bb-4b06-9e2f-c4cec59d6770",
+      "run_id": "b9552702-c0bb-4b06-9e2f-c4cec59d6770",
       "verdict": "pass",
       "candidate_sha256": "1cacd02b3e527cddc30f9911a64ed101ad724c203b5bd0d7fa72debf14a5e2f6",
       "evaluator_sha256": "3f83ad66669d15daade82ae6ae3905d98526f9645551abe700825cdcbb41eacb",
-      "seconds": 256.5660913310712,
       "tests": {
         "pass_": true,
         "started": 17,
@@ -23,8 +27,86 @@
         "failed": [],
         "skipped": [],
         "missing": []
+      }
+    },
+    {
+      "run_id": "cf8b1d38-de3c-40f4-ab67-39b3ea2af4cb",
+      "verdict": "pass",
+      "candidate_sha256": "484c5311f162924fb0c63cacf33e8cd35c599333d30c34a12b2023f12d68eac2",
+      "evaluator_sha256": "510403e4ce4bcc4a04a0a123d2974e55661a2e316d417893359a0aa760d41dff",
+      "tests": {
+        "pass_": true,
+        "started": 21,
+        "completed": 21,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      }
+    },
+    {
+      "run_id": "ee130b7f-c280-49d6-98de-8cb82b307049",
+      "verdict": "fail",
+      "candidate_sha256": "1e7c6992c1d202ad63cb36150b2c25cb339529e5c62f234b2451b5554c37e180",
+      "evaluator_sha256": "0696fd1b8fe90767de2b3d8f32672253b870e7c7f674a10134925d35ce976118",
+      "reason": "tests.jsonl failed (exit 1)"
+    },
+    {
+      "run_id": "qualification-56c18a25-2fb3-4d26-93c5-53906f1d479b",
+      "verdict": "pass",
+      "scope": "targeted semantic controls; not full protected harness qualification",
+      "mutants": [
+        {
+          "name": "unknown-is-exhausted",
+          "witness": "TestFallbackRequiresDefinitiveExhaustion",
+          "original_sha256": "cca25cdd179bd98e1af77ce106cb9885f924f891e15b96b54ae1fbc20e2abd06",
+          "detected": true,
+          "exit_code": 1
+        },
+        {
+          "name": "exclusive-deadline",
+          "witness": "TestDeadlineInclusiveNoCloudEffect",
+          "original_sha256": "1e450a7f4642b69bd3e9bfc8bbb26ce9799f4b1fda61f5b371d39e30fd93f877",
+          "detected": true,
+          "exit_code": 1
+        },
+        {
+          "name": "delete-ack-is-absence",
+          "witness": "TestLostCreateResponseRestartAndCleanup",
+          "original_sha256": "1e450a7f4642b69bd3e9bfc8bbb26ce9799f4b1fda61f5b371d39e30fd93f877",
+          "detected": true,
+          "exit_code": 1
+        }
+      ]
+    },
+    {
+      "run_id": "runnerscout-emulators-3138b150f26c",
+      "verdict": "pass",
+      "scope": "emulated cloud APIs, not real cloud VM execution",
+      "checks": {
+        "aws_adapter": "pass",
+        "azure_vm_rest_smoke": "pass",
+        "azure_full_adapter": "unqualified: ARM deployment/disk composition not exercised",
+        "gcp_compute": "unavailable: Floci GCP does not implement standalone Compute Engine instances"
       },
-      "reason": null
+      "images": {
+        "aws": "ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8",
+        "azure": "floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03",
+        "cli": "public.ecr.aws/aws-cli/aws-cli@sha256:bad3346a39098ab077be6ed58c7e1fe68321a4a844c7c740318100013e6c3581"
+      },
+      "cleanup_errors": []
+    },
+    {
+      "run_id": "runnerscout-emulators-60ac042d5779",
+      "verdict": "fail",
+      "scope": "emulated cloud APIs, not real cloud VM execution",
+      "checks": {},
+      "images": {
+        "aws": "ministackorg/ministack@sha256:706b2b83c6be7e4f4dbb6a0dc28ffdebb500c6c80b64cf7938f45040fb2158e8",
+        "azure": "floci/floci-az@sha256:0c673d49bb75b502ea0750f1c1347777483ffc33945539e1d9254438cb441a03",
+        "cli": "public.ecr.aws/aws-cli/aws-cli@sha256:bad3346a39098ab077be6ed58c7e1fe68321a4a844c7c740318100013e6c3581"
+      },
+      "cleanup_errors": [],
+      "reason": "Command '['docker', 'port', 'runnerscout-emulators-60ac042d5779-azure', '4577/tcp']' returned non-zero exit status 1."
     }
   ]
 }

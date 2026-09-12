@@ -365,7 +365,7 @@
     },
     {
       "id": "DEV-0001",
-      "revision": 2,
+      "revision": 3,
       "type": "ProjectBaseline",
       "status": "proposed",
       "owner": "maintainer",
@@ -376,7 +376,7 @@
     },
     {
       "id": "DEC-STACK-001",
-      "revision": 2,
+      "revision": 3,
       "type": "Decision",
       "status": "confirmed",
       "owner": "maintainer",
@@ -385,7 +385,7 @@
         "DEV-0001"
       ],
       "basis": "recommended_default_adopted_under_standing_authority",
-      "statement": "Go 1.26.7, upstream actions/scaleset v0.4.0, Kubernetes 1.35, Ubuntu 24.04 amd64/arm64 and AWS/GCP are the initial development matrix. Live paths are not yet qualified."
+      "statement": "Go 1.26.7, upstream actions/scaleset v0.4.0, Kubernetes 1.35, Ubuntu 24.04 amd64/arm64 and AWS/Azure/GCP are the initial development matrix. Live paths are not yet qualified."
     },
     {
       "id": "DEC-STATE-001",
@@ -476,6 +476,50 @@
       ],
       "basis": "observed_vulnerability_scan",
       "statement": "The initial CI scan rejected Go 1.26.2, x/net v0.52.0 and x/text v0.35.0. Update to Go 1.26.7, x/net v0.55.0 and x/text v0.39.0; retain the failed scan and require passing fresh scans. Use Node 24 GitHub Actions revisions."
+    },
+    {
+      "id": "AUTH-AZURE-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "commissioning_user",
+      "sources": [
+        "AUTH-UBUNTU-001"
+      ],
+      "basis": "human_statement",
+      "statement": "Azure belongs in the provider target alongside AWS and GCP. The earlier two-provider implementation scope was an agent assumption, corrected by the user. No Azure exclusion is retained."
+    },
+    {
+      "id": "DEC-EMULATOR-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "maintainer",
+      "sources": [
+        "AUTH-UBUNTU-001"
+      ],
+      "basis": "user_suggestion_and_upstream_evidence",
+      "statement": "Use local cloud emulators for the next API-integration stage, without paid cloud accounts. Ministack 1.5.10 covers EC2; Floci Azure 0.12.0 covers mocked VM control-plane APIs. Floci GCP currently lacks standalone Compute Engine instances. Keep emulator, fixture and live-cloud claims distinct; no emulator substitutes for the final real-VM matrix."
+    },
+    {
+      "id": "SRC-MINISTACK",
+      "revision": 1,
+      "type": "Source",
+      "status": "confirmed",
+      "owner": "maintainer",
+      "sources": [],
+      "location": "https://github.com/ministackorg/ministack/tree/v1.5.10",
+      "statement": "EC2 API metadata mode and optional container execution; pinned image used for isolated adapter tests."
+    },
+    {
+      "id": "SRC-FLOCI-AZ",
+      "revision": 1,
+      "type": "Source",
+      "status": "confirmed",
+      "owner": "maintainer",
+      "sources": [],
+      "location": "https://github.com/floci-io/floci-az/tree/0.12.0",
+      "statement": "VM control plane is mocked. Its official az-vm CLI compatibility test is best-effort and may skip; RunnerScout must not interpret that as full adapter support."
     }
   ]
 }
