@@ -87,3 +87,31 @@ func TestIndependentSmallCatalogOracle(t *testing.T) {
 		}
 	}
 }
+
+func TestOnDemandFallbackHonorsPriorOutcomes(t *testing.T) {
+	r := req()
+	r.AllowOnDemand = true
+	c := catalog()
+	c.Offerings = append(c.Offerings, offer("d", "gcp", false, 250))
+	for _, outcome := range []p.Outcome{p.CapacityRejected, p.Unknown, p.CoolingDown} {
+		t.Run(string(outcome), func(t *testing.T) {
+			outcomes := map[string]p.Outcome{"a": p.CapacityRejected, "b": p.CapacityRejected, "c": outcome}
+			got, err := p.Choose(now, r, c, outcomes)
+			if err != nil || got.ID != "d" {
+				t.Fatalf("failed fallback pool must not hide available alternative: got %s, %v", got.ID, err)
+			}
+			outcomes["d"] = p.CapacityRejected
+			expected := p.ErrIncomplete
+			if outcome == p.CapacityRejected {
+				expected = p.ErrExhausted
+			}
+			if _, err := p.Choose(now, r, c, outcomes); !errors.Is(err, expected) {
+				t.Fatalf("all fallback pools considered: got %v, want %v", err, expected)
+			}
+		})
+	}
+	// An available fallback never bypasses unresolved spot capacity.
+	if _, err := p.Choose(now, r, c, map[string]p.Outcome{"a": p.CapacityRejected, "b": p.Unknown}); !errors.Is(err, p.ErrIncomplete) {
+		t.Fatalf("fallback bypassed unresolved spot: %v", err)
+	}
+}

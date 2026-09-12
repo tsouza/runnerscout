@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real isolated Kubernetes Helm lifecycle; idle GitHub protocol fixture only."""
+import argparse
 import datetime
 import hashlib
 import json
@@ -16,6 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--image-tag", default="development")
+    args = parser.parse_args()
+    image = "runnerscout:" + args.image_tag
     identity = "runnerscout-helm-" + uuid.uuid4().hex[:8]
     evidence = ROOT / "evidence" / identity
     evidence.mkdir(parents=True)
@@ -66,7 +71,7 @@ def main():
         return result
 
     try:
-        metadata = json.loads(run("image", ["docker", "image", "inspect", "runnerscout:development"]).stdout)[0]
+        metadata = json.loads(run("image", ["docker", "image", "inspect", image]).stdout)[0]
         manifest["image_id"] = metadata["Id"]
         with tempfile.TemporaryDirectory(prefix=identity + "-") as tmp:
             temp = Path(tmp)
@@ -110,7 +115,7 @@ def main():
             node = json.loads(run("node-network", ["docker", "inspect", identity + "-control-plane"]).stdout)[0]
             if node["NetworkSettings"]["Networks"][identity]["IPAddress"] != node_ip:
                 raise RuntimeError("test node IP differs from explicit internal-network hosts mapping")
-            run("load-image", kind + ["load", "docker-image", "runnerscout:development", "--name", identity], timeout=240)
+            run("load-image", kind + ["load", "docker-image", image, "--name", identity], timeout=240)
             version = json.loads(run("cluster-version", kubectl + ["version", "-o", "json"]).stdout)
             if not version["serverVersion"]["gitVersion"].startswith("v1.37."):
                 raise RuntimeError("unexpected Kubernetes qualification version")
@@ -125,7 +130,7 @@ def main():
                 {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "github-test", "namespace": ns}, "stringData": {"token": "fixture-token", "privateKey": (temp / "app.key").read_text()}},
                 {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fixture-script", "namespace": ns}, "data": {"github_server.py": (ROOT / "tools/fixtures/github_server.py").read_text()}},
                 {"apiVersion": "v1", "kind": "Service", "metadata": {"name": "github-fixture", "namespace": ns}, "spec": {"selector": labels, "ports": [{"port": 443, "targetPort": 8443}]}},
-                {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "github-fixture", "namespace": ns, "labels": labels}, "spec": {"automountServiceAccountToken": False, "restartPolicy": "Never", "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}}, "containers": [{"name": "fixture", "image": "runnerscout:development", "imagePullPolicy": "Never", "command": ["python3", "/fixture/github_server.py"], "ports": [{"containerPort": 8443}], "readinessProbe": {"tcpSocket": {"port": 8443}, "periodSeconds": 1}, "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}, "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "256Mi"}}, "volumeMounts": [{"name": "script", "mountPath": "/fixture", "readOnly": True}, {"name": "tls", "mountPath": "/tls", "readOnly": True}]}], "volumes": [{"name": "script", "configMap": {"name": "fixture-script"}}, {"name": "tls", "secret": {"secretName": "fixture-tls", "defaultMode": 288}}]}},
+                {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "github-fixture", "namespace": ns, "labels": labels}, "spec": {"automountServiceAccountToken": False, "restartPolicy": "Never", "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}}, "containers": [{"name": "fixture", "image": image, "imagePullPolicy": "Never", "command": ["python3", "/fixture/github_server.py"], "ports": [{"containerPort": 8443}], "readinessProbe": {"tcpSocket": {"port": 8443}, "periodSeconds": 1}, "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}, "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "256Mi"}}, "volumeMounts": [{"name": "script", "mountPath": "/fixture", "readOnly": True}, {"name": "tls", "mountPath": "/tls", "readOnly": True}]}], "volumes": [{"name": "script", "configMap": {"name": "fixture-script"}}, {"name": "tls", "secret": {"secretName": "fixture-tls", "defaultMode": 288}}]}},
             ]
             run("fixture-apply", kubectl + ["apply", "-f", "-"], input=yaml.safe_dump_all(objects))
             run("fixture-ready", kubectl + ["-n", ns, "wait", "--for=condition=Ready", "pod/github-fixture", "--timeout=90s"])
@@ -137,7 +142,7 @@ def main():
             postrenderer.write_text("#!/usr/bin/env python3\nimport sys,yaml\ndocs=list(yaml.safe_load_all(sys.stdin))\nfor d in docs:\n if d and d.get('kind')=='Deployment':\n  p=d['spec']['template']['spec']\n  p['hostAliases']=[{'ip':" + repr(fixture_ip) + ",'hostnames':['api.github.com','github.com']}]\n  p['volumes'].append({'name':'fixture-ca','configMap':{'name':'fixture-ca'}})\n  p['containers'][0]['volumeMounts'].append({'name':'fixture-ca','mountPath':'/fixture-ca','readOnly':True})\n  p['containers'][0]['env'].append({'name':'SSL_CERT_FILE','value':'/fixture-ca/ca.crt'})\nyaml.safe_dump_all(docs,sys.stdout)\n")
             postrenderer.chmod(0o755)
             values = json.loads((ROOT / "charts/runnerscout/tests/values.json").read_text())
-            values["image"] = {"repository": "runnerscout", "tag": "development", "pullPolicy": "Never"}
+            values["image"] = {"repository": "runnerscout", "tag": args.image_tag, "pullPolicy": "Never"}
             values["fullnameOverride"] = "runnerscout"
             values_path = temp / "values.json"
             values_path.write_text(json.dumps(values))

@@ -99,6 +99,7 @@ func Choose(now time.Time, r Requirements, c Catalog, outcomes map[string]Outcom
 	spot := []Offering{}
 	ondemand := []Offering{}
 	blocked := false
+	onDemandBlocked := false
 	for _, o := range c.Offerings {
 		if o.ID == "" || seen[o.ID] {
 			return Offering{}, errors.New("missing or duplicate pool identity")
@@ -114,7 +115,13 @@ func Choose(now time.Time, r Requirements, c Catalog, outcomes map[string]Outcom
 			continue
 		}
 		if !o.Spot {
-			ondemand = append(ondemand, o)
+			switch outcomes[o.ID] {
+			case "":
+				ondemand = append(ondemand, o)
+			case CapacityRejected:
+			default:
+				onDemandBlocked = true
+			}
 			continue
 		}
 		switch outcomes[o.ID] {
@@ -150,6 +157,9 @@ func Choose(now time.Time, r Requirements, c Catalog, outcomes map[string]Outcom
 	if r.AllowOnDemand && len(ondemand) > 0 {
 		slices.SortFunc(ondemand, rank)
 		return ondemand[0], nil
+	}
+	if r.AllowOnDemand && onDemandBlocked {
+		return Offering{}, ErrIncomplete
 	}
 	return Offering{}, ErrExhausted
 }

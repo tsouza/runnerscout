@@ -22,6 +22,7 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - run: make verify-generated
       - run: make verify
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -60,11 +61,18 @@ jobs:
           cache-dependency-path: go.sum
       - name: Create isolated Kubernetes
         run: go run sigs.k8s.io/kind@v0.33.0 create cluster --name runnerscout-ci --image kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5 --kubeconfig "$RUNNER_TEMP/kubeconfig" --wait 120s
-      - name: Verify real persistence and CAS
+      - name: Verify persistence, CAS and CRDs
         run: RUNNERSCOUT_TEST_KUBECONFIG="$RUNNER_TEMP/kubeconfig" make integration
       - name: Delete isolated cluster
         if: always()
         run: go run sigs.k8s.io/kind@v0.33.0 delete cluster --name runnerscout-ci
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: kubernetes-integration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/integration-*/
+          if-no-files-found: error
+          retention-days: 14
 
   cloud-emulators:
     name: cloud-emulators

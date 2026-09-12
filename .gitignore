@@ -9,3 +9,5 @@ coverage.out
 
 __pycache__/
 *.pyc
+
+/outputs/
