@@ -25,3 +25,9 @@ weekly: Kubernetes modules are grouped, CI actions are grouped, and Docker base
 images have their own update lane. Azure's complete Python lock is refreshed with
 the official resolver and distribution hashes; incompatible forced overrides are
 not used to conceal vulnerabilities.
+
+Kubernetes modules move together. Keep kube-openapi compatible with the
+structured-merge-diff major version required by apimachinery; updating it alone
+to a different schema type breaks builds. Helm uses the maintained 3.x line
+until the Helm 4 post-renderer interface is qualified. Dependency updates must
+pass the existing build, behavior and security checks.

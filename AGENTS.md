@@ -1,14 +1,24 @@
-# RunnerScout
+# RunnerScout contributor instructions
 
-Read README.md, outputs/target.md, outputs/records.json and outputs/readiness.md before changes.
-The user authorized full development, harness/product construction, repository configuration,
-CI, commits, pushes, issues and PRs in tsouza/runnerscout on 2026-09-12.
-Use the account-scoped gh-tsouza wrapper for all GitHub operations on the Ubuntu host.
-Sandbox and automatic approval review remain enabled. No production deployment,
-unrelated repository work, or unbounded paid cloud usage. Cloud qualification requires
-a separately recorded bounded allocation and credentials. Do not expose raw handoff logs.
-RunnerScout is the canonical name; RunneScout/runnescout is the historical alias.
-Preserve decisions and uncertainty. Report specification, harness and candidate readiness
-separately. Tests against models or HTTP fixtures never establish live cloud integration.
-Run make verify for changes. Preserve evaluation failures and append development history.
-Do not describe these instructions or editable CI as a protected evaluator boundary.
+Read README.md, docs/architecture.md, docs/operations.md and docs/releases.md.
+Use focused changes and run `make verify`; generated API changes also require
+`make verify-generated`. Never weaken required checks to obtain a pass.
+
+Full development, harness/product construction, repository configuration, CI,
+commits, pushes, issues and PRs in tsouza/runnerscout are authorized. Use the account-scoped `gh-tsouza` wrapper for every GitHub operation.
+Sandbox and automatic approval review remain enabled. Production deployment,
+unrelated repository writes and unbounded paid cloud execution are excluded.
+No paid cloud test budget has been allocated.
+
+Preserve settled behavior and uncertainty. Keep handoffs, decision ledgers,
+progress reports and raw evidence in ignored `work/` or `evidence/`, never in
+release source. Existing private history is under `work/private-history/`.
+Publish concise user and contributor documentation; track unfinished work in
+GitHub issues. Do not mistake fixture tests for live-cloud qualification or
+editable CI for independent evaluator custody.
+
+Immediately before cutting 0.1.0, run project-wide Adversarial Critic Pass Review
+(ACPR) on the final release candidate, after implementation is complete. Review
+DRY, KISS, inconsistencies, illogical reasoning, unjustified deferrals,
+contradictions and tests that can pass without proving behavior. Resolve findings
+and re-review the final candidate. Keep review evidence outside release source.

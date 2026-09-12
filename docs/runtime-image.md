@@ -23,7 +23,7 @@ session and a successful latest reconciliation. Session failure, failed
 reconciliation and leader exit clear readiness. These endpoints neither promise
 available VM capacity nor prove a successful GitHub job.
 
-Initial amd64 image execution passed. Arm64 execution, real Helm lifecycle tests
+The amd64 image and Helm lifecycle have development qualification. Arm64 execution
 and image vulnerability acceptance remain pending. The first Trivy 0.74.0 scan
 found known vulnerabilities; its evidence is retained, not suppressed. Supported
 OS/AWS/Go fixes passed a rebuild and all five restricted-container checks. The

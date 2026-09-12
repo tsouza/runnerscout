@@ -12,6 +12,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    "TestOnDemandFallbackHonorsPriorOutcomes",
     "TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions",
     "TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity",
     "TestReadinessRequiresScaleSetSessionAndClearsOnExit",
@@ -32,19 +33,6 @@ REQUIRED = {
  "TestAzureForeignDiskCannotBeDeleted", "TestAzureResidualOwnedNICRetainsCleanup",
  "TestAWSAccountDriftCannotConfirmAbsence",
 }
-
-def validate_records(path):
- data=json.loads(path.read_text())
- if data.get('format_revision')!=1: raise ValueError('unsupported registry revision')
- records=data['records'];ids=[r['id'] for r in records]
- if len(ids)!=len(set(ids)): raise ValueError('duplicate record identity')
- if data['baseline_id'] not in ids: raise ValueError('missing baseline')
- for r in records:
-  for k in ['id','revision','type','status','owner','sources']:
-   if k not in r: raise ValueError(f'missing {k}')
-  if not isinstance(r['revision'],int) or r['revision']<1: raise ValueError('invalid revision')
-  if any(s not in ids for s in r['sources']): raise ValueError('dangling source')
- return len(records)
 
 def test_manifest(lines, required=REQUIRED):
  started=set();passed=set();failed=set();skipped=set()
@@ -95,7 +83,7 @@ def main():
    if p.returncode:raise RuntimeError(f'{name} failed (exit {p.returncode})')
    return (run/name).read_text()
   try:
-   report['registry_records']=validate_records(ROOT/'outputs/records.json')
+   command([sys.executable,'tools/source_hygiene.py'],'source-hygiene.log')
    formatting=command(['gofmt','-l','cmd','internal','api'],'format.log')
    if formatting.strip():raise RuntimeError('unformatted Go files')
    command([sys.executable,'-m','unittest','discover','-s','tools','-p','test_*.py'],'harness.log')
