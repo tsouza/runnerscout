@@ -12,6 +12,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    "TestJITPreparationFailureRetriesWithoutCloudCommitment",
     "TestOnDemandFallbackHonorsPriorOutcomes",
     "TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions",
     "TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity",

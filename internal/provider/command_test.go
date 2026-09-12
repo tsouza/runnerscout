@@ -108,3 +108,26 @@ func TestAWSAccountDriftCannotConfirmAbsence(t *testing.T) {
 		t.Fatal(ob, e, f.calls)
 	}
 }
+
+func TestJITPreparationFailureHasNoCloudEffects(t *testing.T) {
+	for _, mode := range []string{"failure", "empty"} {
+		t.Run(mode, func(t *testing.T) {
+			exec := &fakeExec{}
+			p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: exec,
+				Bootstrap: func(context.Context, string) (string, error) {
+					if mode == "failure" {
+						return "", errors.New("secret diagnostic must not escape")
+					}
+					return "", nil
+				},
+			}
+			id, err := p.Create(context.Background(), allocation())
+			if id != "" || !errors.Is(err, lifecycle.ErrNoEffect) || len(exec.calls) != 0 {
+				t.Fatalf("id=%q err=%v cloud calls=%d", id, err, len(exec.calls))
+			}
+			if strings.Contains(err.Error(), "secret diagnostic") {
+				t.Fatal("upstream diagnostic leaked")
+			}
+		})
+	}
+}
