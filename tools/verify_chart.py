@@ -94,6 +94,14 @@ class ChartContracts(unittest.TestCase):
         config = json.loads(resource(docs, "ConfigMap")["data"]["config.json"])
         self.assertEqual(config["catalogPath"], "/etc/runnerscout/catalog/catalog.json")
 
+    def test_probes_use_distinct_runtime_endpoints(self):
+        pod = resource(render(FIXTURE), "Deployment")["spec"]["template"]["spec"]
+        controller = pod["containers"][0]
+        self.assertEqual(controller["livenessProbe"]["httpGet"]["path"], "/healthz")
+        self.assertEqual(controller["readinessProbe"]["httpGet"]["path"], "/readyz")
+        self.assertEqual(controller["startupProbe"]["httpGet"]["port"], "health")
+        self.assertEqual(controller["ports"], [{"name": "health", "containerPort": 8080}])
+
     def test_existing_service_account_and_rbac(self):
         values = copy.deepcopy(FIXTURE)
         values.update(serviceAccount={"create": False, "name": "external"}, rbac={"create": False})

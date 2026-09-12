@@ -5,7 +5,7 @@ The experimental controller is implemented. This is not a qualified release.
 | Claim | Evidence and limits |
 |---|---|
 | Specification readiness | G01 scope and authority defined. G02–G08 remain partial: full provider pricing/retry composition and protected controller qualification are open. |
-| Local harness | Formatting, vet, build and all 27 current race tests passed, including Azure, started-job recovery and AWS account drift. Eight completion-manifest integrity controls passed. CI verifies the exact PR revision; see PR #6. |
+| Local harness | Formatting, vet, build and the previously recorded 27-test baseline passed, including Azure, started-job recovery and AWS account drift. Eight completion-manifest integrity controls passed. CI verifies the exact PR revision; see PR #6. |
 | Semantic controls | Three deliberate defects were detected, each after its unchanged positive control passed: unknown spot search treated as exhausted, wrong deadline boundary, delete acknowledgment treated as absence. |
 | Kubernetes integration | Passed against a real isolated Kubernetes v1.35.0 kind cluster: durable reload, stale resourceVersion rejection and observed namespace cleanup. The test cluster was removed. |
 | Candidate acceptance | Not accepted. Live GitHub-to-VM execution, AWS/Azure/GCP cleanup inventory and interruption retry composition are not demonstrated. |
@@ -54,4 +54,6 @@ Patched dependency scan: zero reachable vulnerabilities reported for Go 1.26.7 a
 the updated modules. One advisory exists in a required module without a reachable
 call according to govulncheck; this is not a claim that every dependency is advisory-free.
 
-Helm development: chart 0.1.0-dev.1 has eight local render/package/configuration contract tests. The test hook invokes the real controller parser; it does not establish GitHub/VM execution. Real install, upgrade, rollback and uninstall qualification and runtime image packaging remain required by release-0.1.0-plan.md.
+Helm development: chart 0.1.0-dev.1 has nine local render/package/configuration contract tests. The test hook invokes the real controller parser; it does not establish GitHub/VM execution. Real install, upgrade, rollback and uninstall qualification and runtime image packaging remain required by release-0.1.0-plan.md.
+
+Runtime milestone: an amd64 image executed the controller config check and AWS/Azure/GCP CLIs under non-root, read-only, network-disabled restrictions. Two health tests add session rejection and shutdown coverage (31 total test executions including subtests). Initial Trivy image scanning found unresolved vulnerabilities; supported updates are being verified. No image security acceptance or real Helm lifecycle acceptance is claimed.

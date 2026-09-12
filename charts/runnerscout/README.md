@@ -3,6 +3,8 @@
 Development chart version `0.1.0-dev.1`; no released runtime image is implied.
 Requires Kubernetes 1.35 and Helm 3.16 or later. Supply an explicitly built image
 containing `/usr/local/bin/runnerscout` and the AWS, Azure and GCP CLIs.
+Build the local development image with `make image`; validate it with `make image-test`.
+Runtime vulnerability acceptance and arm64 execution remain pending.
 
 Use `tests/values.json` as a structural example only: its dummy accounts and empty
 catalog cannot provision runners. Supply your controller configuration, image and
@@ -46,3 +48,5 @@ Helm does not delete runtime-created durable state ConfigMaps or cloud resources
 Retain state until independent inventory confirms cleanup. Do not reuse the
 same class/scale set concurrently from another release. Restoring a changed
 provider/class binding is necessary for cleanup; deleting state is not recovery.
+
+The deployment probes `/healthz` for liveness and `/readyz` for leader/session/reconciliation readiness. Cloud failures make the pod unready without causing liveness restart loops. See [runtime qualification](../../docs/runtime-image.md).

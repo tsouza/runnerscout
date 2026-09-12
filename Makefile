@@ -21,4 +21,12 @@ emulators:
 .PHONY: chart
 chart: build
 	helm lint charts/runnerscout --strict --kube-version 1.35.0 -f charts/runnerscout/tests/values.json
-	python3 tools/test_chart.py
+	python3 tools/verify_chart.py
+
+.PHONY: image
+image:
+	docker build --tag runnerscout:development .
+
+.PHONY: image-test
+image-test:
+	python3 tools/runtime_image.py

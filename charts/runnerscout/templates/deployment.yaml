@@ -55,6 +55,27 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          ports:
+            - name: health
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 1
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           env:

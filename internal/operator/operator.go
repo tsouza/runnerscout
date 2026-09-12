@@ -86,6 +86,8 @@ type fleet struct {
 	Pending   map[string]lifecycle.Allocation `json:"pending"`
 }
 type Operator struct {
+	// Readiness is an optional concurrency-safe observer of session/reconciliation state.
+	Readiness  func(bool)
 	Config     Config
 	Client     kubernetes.Interface
 	GitHub     *scaleset.Client
@@ -342,9 +344,18 @@ func (o *Operator) Tick(ctx context.Context) error {
 	}
 	return errors.Join(failures...)
 }
+func (o *Operator) setReady(ready bool) {
+	if o.Readiness != nil {
+		o.Readiness(ready)
+	}
+}
+
 func (o *Operator) runLeader(ctx context.Context) error {
+	o.setReady(false)
+	defer o.setReady(false)
 	// Cloud cleanup is attempted even if GitHub lookup/session establishment fails.
-	if e := o.Tick(ctx); e != nil {
+	startupErr := o.Tick(ctx)
+	if startupErr != nil {
 		slog.Warn("startup reconciliation incomplete; obligations retained")
 	}
 	ss, e := o.GitHub.GetRunnerScaleSetByID(ctx, o.Config.ScaleSetID)
@@ -372,6 +383,7 @@ func (o *Operator) runLeader(ctx context.Context) error {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- l.Run(runCtx, o) }()
+	o.setReady(startupErr == nil)
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	for {
@@ -384,6 +396,7 @@ func (o *Operator) runLeader(ctx context.Context) error {
 			if e = o.Tick(runCtx); e != nil {
 				slog.Warn("reconciliation incomplete; durable obligations retained")
 			}
+			o.setReady(e == nil)
 		}
 	}
 }

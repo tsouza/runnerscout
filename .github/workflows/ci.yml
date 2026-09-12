@@ -102,3 +102,21 @@ jobs:
           "$RUNNER_TEMP/chart-venv/bin/pip" install PyYAML==6.0.3
           echo "$RUNNER_TEMP/chart-venv/bin" >> "$GITHUB_PATH"
       - run: make chart
+
+  runtime-image:
+    name: runtime-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - run: make image
+      - run: make image-test
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: runtime-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
