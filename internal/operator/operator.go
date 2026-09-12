@@ -3,6 +3,7 @@ package operator
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/placement"
 	"github.com/tsouza/runnerscout/internal/provider"
 	"github.com/tsouza/runnerscout/internal/state"
+	"io"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +31,7 @@ import (
 )
 
 type Config struct {
+	CatalogPath         string                     `json:"catalogPath,omitempty"`
 	Name                string                     `json:"name"`
 	Namespace           string                     `json:"namespace"`
 	GitHubURL           string                     `json:"githubURL"`
@@ -70,15 +73,13 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
-	// Validate snapshot shape, while permitting a valid but exhausted catalog.
-	_, e = placement.Choose(time.Now(), c.Requirements, c.Catalog, nil)
-	if e != nil && !errors.Is(e, placement.ErrExhausted) {
-		return e
-	}
+	// Price freshness is checked at admission, never used to block cleanup on restart.
 	return nil
 }
 
 type fleet struct {
+	Condition string                          `json:"condition,omitempty"`
+	Binding   string                          `json:"binding"`
 	Released  map[string]bool                 `json:"released"`
 	Admission admission.State                 `json:"admission"`
 	Created   map[string]time.Time            `json:"created"`
@@ -109,6 +110,34 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 	o.Controller = &lifecycle.Controller{Store: s, Providers: providers, Now: time.Now}
 	return o
 }
+func (o *Operator) binding() string {
+	c := o.Config
+	c.Catalog = placement.Catalog{}
+	c.CatalogPath = ""
+	b, _ := json.Marshal(c)
+	return fmt.Sprintf("%x", sha256.Sum256(b))
+}
+func (o *Operator) catalog() (placement.Catalog, error) {
+	if o.Config.CatalogPath == "" {
+		return o.Config.Catalog, nil
+	}
+	f, e := os.Open(o.Config.CatalogPath)
+	if e != nil {
+		return placement.Catalog{}, errors.New("catalog unavailable")
+	}
+	defer f.Close()
+	d := json.NewDecoder(io.LimitReader(f, 4<<20))
+	d.DisallowUnknownFields()
+	var c placement.Catalog
+	if e = d.Decode(&c); e != nil {
+		return c, errors.New("invalid catalog")
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		return c, errors.New("invalid catalog trailer")
+	}
+	return c, nil
+}
 func (o *Operator) loadFleet(ctx context.Context) (*corev1.ConfigMap, fleet, error) {
 	maps := o.Client.CoreV1().ConfigMaps(o.Config.Namespace)
 	cm, e := maps.Get(ctx, o.Config.Name+"-fleet", metav1.GetOptions{})
@@ -124,6 +153,13 @@ func (o *Operator) loadFleet(ctx context.Context) (*corev1.ConfigMap, fleet, err
 	}
 	var f fleet
 	e = json.Unmarshal([]byte(cm.Data["fleet"]), &f)
+	if e != nil {
+		return nil, f, e
+	}
+	if f.Binding != "" && f.Binding != o.binding() {
+		return nil, f, errors.New("provider or class binding changed; restore original configuration for cleanup")
+	}
+	f.Binding = o.binding()
 	if f.Released == nil {
 		f.Released = map[string]bool{}
 	}
@@ -181,11 +217,29 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 	if e != nil {
 		return active, e
 	}
+	if n > 0 && len(f.Created)+n > 1000 {
+		return active, errors.New("retained allocation limit reached; operator maintenance required")
+	}
+	refuse := func(reason string) (int, error) {
+		f.Admission.Admitted -= n
+		f.Condition = reason
+		return active, o.saveFleet(ctx, cm, f)
+	}
+	catalog, e := o.catalog()
+	if e != nil && n > 0 {
+		return refuse("CatalogUnavailable")
+	}
+	if n > 0 {
+		if _, e = placement.Choose(time.Now(), o.Config.Requirements, catalog, nil); e != nil {
+			return refuse("CatalogNotAdmissible")
+		}
+	}
+	f.Condition = "DemandObserved"
 	for range n {
 		id := "rs-" + uuid.NewString()
 		now := time.Now()
 		f.Created[id] = now
-		f.Pending[id] = lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: o.Config.Catalog, Requirements: o.Config.Requirements}
+		f.Pending[id] = lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: catalog, Requirements: o.Config.Requirements}
 	}
 	if e = o.saveFleet(ctx, cm, f); e != nil {
 		return active, e
@@ -249,6 +303,15 @@ func (o *Operator) Tick(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
+	o.Controller.Cooldowns = map[string]time.Time{}
+	for _, a := range allocs {
+		for pool, at := range a.RejectedAt {
+			until := at.Add(5 * time.Minute)
+			if until.After(o.Controller.Cooldowns[pool]) {
+				o.Controller.Cooldowns[pool] = until
+			}
+		}
+	}
 	var failures []error
 	for _, a := range allocs {
 		created, ok := f.Created[a.ID]
@@ -265,6 +328,14 @@ func (o *Operator) Tick(ctx context.Context) error {
 		call, cancel := context.WithTimeout(ctx, 30*time.Second)
 		e = o.Controller.Step(call, a.ID)
 		cancel()
+		if updated, loadErr := o.Store.Load(ctx, a.ID); loadErr == nil {
+			for pool, at := range updated.RejectedAt {
+				until := at.Add(5 * time.Minute)
+				if until.After(o.Controller.Cooldowns[pool]) {
+					o.Controller.Cooldowns[pool] = until
+				}
+			}
+		}
 		if e != nil {
 			failures = append(failures, e)
 		}
@@ -272,6 +343,10 @@ func (o *Operator) Tick(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 func (o *Operator) runLeader(ctx context.Context) error {
+	// Cloud cleanup is attempted even if GitHub lookup/session establishment fails.
+	if e := o.Tick(ctx); e != nil {
+		slog.Warn("startup reconciliation incomplete; obligations retained")
+	}
 	ss, e := o.GitHub.GetRunnerScaleSetByID(ctx, o.Config.ScaleSetID)
 	if e != nil {
 		return errors.New("scale-set lookup failed")

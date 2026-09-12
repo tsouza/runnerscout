@@ -131,3 +131,30 @@ func TestCapacityRejectionKeepsDeadline(t *testing.T) {
 	}
 }
 func p2Capacity() p.Outcome { return p.CapacityRejected }
+
+func TestCooldownRetainsUnknownSearch(t *testing.T) {
+	c, s, cloud, now := setup()
+	c.Cooldowns = map[string]time.Time{"pool": now.Add(5 * time.Minute)}
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if cloud.created != 0 || s.a.Phase != l.Pending || s.a.Condition != p.ErrIncomplete.Error() {
+		t.Fatal(s.a)
+	}
+}
+func TestUnreadyVMExpiresButStartedJobDoesNot(t *testing.T) {
+	for _, ready := range []bool{false, true} {
+		c, s, _, now := setup()
+		if e := c.Step(context.Background(), "rs-test"); e != nil {
+			t.Fatal(e)
+		}
+		s.a.Ready = ready
+		*now = s.a.Deadline
+		if e := c.Step(context.Background(), "rs-test"); e != nil {
+			t.Fatal(e)
+		}
+		if (!ready && s.a.Phase != l.Deleting) || (ready && s.a.Phase != l.Running) {
+			t.Fatal(ready, s.a)
+		}
+	}
+}

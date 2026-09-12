@@ -85,3 +85,14 @@ func TestUnknownProviderOutputIsNotAbsence(t *testing.T) {
 		t.Fatal(ob, e)
 	}
 }
+
+func TestMissingInventoryCannotConfirmCleanup(t *testing.T) {
+	for _, body := range []string{`{}`, `null`} {
+		f := &fakeExec{responses: [][]byte{[]byte(body)}}
+		p := Command{Config: Config{Kind: "aws", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}
+		ob, e := p.Observe(context.Background(), allocation())
+		if e == nil || ob.Known {
+			t.Fatal(body, ob, e)
+		}
+	}
+}

@@ -365,7 +365,7 @@
     },
     {
       "id": "DEV-0001",
-      "revision": 1,
+      "revision": 2,
       "type": "ProjectBaseline",
       "status": "proposed",
       "owner": "maintainer",
@@ -376,7 +376,7 @@
     },
     {
       "id": "DEC-STACK-001",
-      "revision": 1,
+      "revision": 2,
       "type": "Decision",
       "status": "confirmed",
       "owner": "maintainer",
@@ -385,7 +385,7 @@
         "DEV-0001"
       ],
       "basis": "recommended_default_adopted_under_standing_authority",
-      "statement": "Go 1.26.2, upstream actions/scaleset v0.4.0, Kubernetes 1.35, Ubuntu 24.04 amd64/arm64 and AWS/GCP are the initial development matrix. Live paths are not yet qualified."
+      "statement": "Go 1.26.7, upstream actions/scaleset v0.4.0, Kubernetes 1.35, Ubuntu 24.04 amd64/arm64 and AWS/GCP are the initial development matrix. Live paths are not yet qualified."
     },
     {
       "id": "DEC-STATE-001",
@@ -464,6 +464,18 @@
       ],
       "basis": "recommended_default_adopted_under_standing_authority",
       "statement": "Local diagnostic evaluation is serialized and bounded to 60 invocations and six evaluator hours, ten minutes per invocation. It does not enforce total agent wall time or provide independent evaluator custody. Preserve failed/incomplete evidence; no CI pass implies live integration."
+    },
+    {
+      "id": "DEC-SECURITY-UPDATE-001",
+      "revision": 1,
+      "type": "Decision",
+      "status": "confirmed",
+      "owner": "maintainer",
+      "sources": [
+        "DEV-0001"
+      ],
+      "basis": "observed_vulnerability_scan",
+      "statement": "The initial CI scan rejected Go 1.26.2, x/net v0.52.0 and x/text v0.35.0. Update to Go 1.26.7, x/net v0.55.0 and x/text v0.39.0; retain the failed scan and require passing fresh scans. Use Node 24 GitHub Actions revisions."
     }
   ]
 }

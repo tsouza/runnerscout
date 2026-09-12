@@ -12,7 +12,7 @@ lowest recorded compute-price placement, opt-in on-demand fallback, durable
 allocation identities, bounded provisioning and cleanup after uncertain effects.
 Spot job retries default to disabled; repeated workflow effects must be acknowledged.
 
-Build and verify with Go 1.26.2 and Python 3:
+Build and verify with Go 1.26.7 and Python 3:
 
 ```sh
 make verify

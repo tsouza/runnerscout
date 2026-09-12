@@ -36,6 +36,18 @@ func (s *Kubernetes) Load(ctx context.Context, id string) (lifecycle.Allocation,
 	return a, nil
 }
 func (s *Kubernetes) Save(ctx context.Context, a lifecycle.Allocation, revision string) (lifecycle.Allocation, error) {
+	if revision != "" {
+		current, e := s.Maps.Get(ctx, a.ID, metav1.GetOptions{})
+		if e != nil {
+			return a, e
+		}
+		if current.Labels["runnerscout/owner"] != s.Owner {
+			return a, errors.New("state ownership mismatch")
+		}
+		if current.ResourceVersion != revision {
+			return a, lifecycle.ErrConflict
+		}
+	}
 	a.Revision = ""
 	b, err := json.Marshal(a)
 	if err != nil {

@@ -21,6 +21,8 @@ REQUIRED = {
  "TestGCPOwnershipBlocksDeletion", "TestUnknownProviderOutputIsNotAbsence",
  "TestPersistenceAcrossStoreInstances", "TestForeignStateRejected",
  "TestDurableAdmissionSurvivesOperatorRestart",
+ "TestCooldownRetainsUnknownSearch", "TestUnreadyVMExpiresButStartedJobDoesNot",
+ "TestProviderBindingCannotChangeUnderExistingFleet", "TestMissingInventoryCannotConfirmCleanup",
 }
 
 def validate_records(path):

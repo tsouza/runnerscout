@@ -5,7 +5,7 @@ This is an implementation target; full G01–G08 readiness is not inferred.
 
 ## Fixed scope and interfaces
 
-Go 1.26.2; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
+Go 1.26.7; GitHub.com with actions/scaleset v0.4.0 (public preview); Kubernetes
 1.35 API target; Ubuntu 24.04 Linux amd64/arm64 images maintained by the operator.
 AWS EC2 and GCP Compute are the first provider targets. Azure/GHES/Windows are
 outside the first implementation matrix, not demonstrated unsupported by nature.
@@ -79,8 +79,14 @@ The initial runtime uses namespace-scoped ConfigMaps and one mounted class confi
 not a CRD API. The provider boundary currently uses external AWS CLI v2 / gcloud
 commands with workload credentials. GCP capacity errors remain commitment-unknown;
 only exact AWS InsufficientInstanceCapacity is classified as definitive rejection.
-Automatic quote/catalog refresh, complete GCP rejection classification, class-wide
-cooldown propagation and live rerun execution remain required implementation work.
-The pure retry guard exists but does not issue REST reruns. Initial authentication
-uses a mounted PAT; GitHub App runtime configuration remains work to add.
+Provider quote discovery, complete GCP rejection classification and live rerun execution remain required implementation work. The runtime reloads catalogPath at admission and persists class-wide five-minute cooldowns.
+The pure retry guard exists but does not issue REST reruns. Authentication supports mounted GitHub App credentials or a PAT; neither is stored in public configuration.
 These gaps prevent claiming the full target implemented or release-ready.
+
+Runtime recovery amendments: pricing validation cannot block startup cleanup. Existing
+allocations retain their admitted catalog snapshot; new admissions reload catalogPath
+when configured. Immutable class/provider/account bindings are persisted before effects;
+configuration drift fails explicitly and requires restoring the original binding for
+cleanup. The first runtime caps retained allocation records at 1,000 and stops admission
+at that bound; automatic archival is pending. This is an operational limit, not deletion
+of unconfirmed cleanup obligations.

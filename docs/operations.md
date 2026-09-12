@@ -19,3 +19,21 @@ Before live qualification allocate a maximum currency spend, two concurrent VMs,
 private subnets/firewalls, outbound GitHub reachability and independent cloud inventory.
 Retain redacted evidence for each provider separately; stop creation on any ownership
 or cleanup failure. Cloud qualification remains pending until this allocation exists.
+
+
+Authentication supports `-github-app-client-id`, `-github-app-installation-id` and
+`-github-app-key-file` together, or `-github-token-file`. The modes are mutually
+exclusive. Credentials are mounted files; never put values into command arguments.
+
+Use `catalogPath` to reload a complete JSON price snapshot for new admissions.
+Update that file atomically. Each admitted allocation retains its original snapshot
+and deadline. Provider quote discovery is not yet automatic. Restore the original
+provider/class configuration if durable fleet binding rejects a change; do not delete
+state to bypass it. Admission stops at 1,000 retained allocations until archival is
+implemented. This experimental runtime is not yet suitable for unattended production.
+
+For local Kubernetes qualification, create a dedicated kind v0.31.0 cluster using
+kindest/node:v1.35.0, set `RUNNERSCOUT_TEST_KUBECONFIG` to its explicit kubeconfig,
+then run `make integration`. The test creates a unique namespace, exercises real
+resourceVersion conflict rejection and waits for namespace deletion. It never uses
+the default kubeconfig or skips when the explicit test environment is missing.

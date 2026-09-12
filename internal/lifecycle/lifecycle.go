@@ -22,6 +22,7 @@ const (
 )
 
 type Allocation struct {
+	RejectedAt   map[string]time.Time         `json:"rejectedAt,omitempty"`
 	Completed    bool                         `json:"completed"`
 	ID           string                       `json:"id"`
 	Revision     string                       `json:"revision,omitempty"`
@@ -57,6 +58,7 @@ type Store interface {
 	Save(context.Context, Allocation, string) (Allocation, error)
 }
 type Controller struct {
+	Cooldowns map[string]time.Time
 	Store     Store
 	Providers map[string]Provider
 	Now       func() time.Time
@@ -84,7 +86,16 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			a.Condition = "LocalProvisioningTimeout"
 			return save()
 		}
-		o, e := placement.Choose(now, a.Requirements, a.Catalog, a.Outcomes)
+		outcomes := make(map[string]placement.Outcome, len(a.Outcomes))
+		for k, v := range a.Outcomes {
+			outcomes[k] = v
+		}
+		for pool, until := range c.Cooldowns {
+			if now.Before(until) && outcomes[pool] == "" {
+				outcomes[pool] = placement.CoolingDown
+			}
+		}
+		o, e := placement.Choose(now, a.Requirements, a.Catalog, outcomes)
 		if e != nil {
 			a.Condition = e.Error()
 			return save()
@@ -108,6 +119,10 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 				a.Outcomes = map[string]placement.Outcome{}
 			}
 			a.Outcomes[o.ID] = placement.CapacityRejected
+			if a.RejectedAt == nil {
+				a.RejectedAt = map[string]time.Time{}
+			}
+			a.RejectedAt[o.ID] = now
 			a.Condition = "CapacityRejected"
 			return save()
 		}
