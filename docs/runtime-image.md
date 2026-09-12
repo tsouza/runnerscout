@@ -1,35 +1,25 @@
-# Runtime image qualification
+# Runtime image
 
-`make image` builds `runnerscout:development`. `make image-test` runs the image
-without networking under a non-root UID, read-only root filesystem, dropped
-capabilities, no-new-privileges and bounded memory/CPU/tmpfs. It checks the real
-controller configuration parser and all three cloud CLIs. Raw output and image
-identity are retained under ignored evidence directories.
+`make image` builds `runnerscout:development`. `make image-test` runs it without
+network access as a non-root user, with a read-only filesystem, dropped
+capabilities and bounded CPU, memory and temporary storage. Checks exercise the
+controller parser, AWS CLI and Google Cloud CLI and confirm the Azure Python
+authentication stack is absent. Evidence is retained under ignored `evidence/`.
 
-Go, Python, AWS CLI and Google Cloud CLI base stages are digest-pinned. Azure CLI
-2.90.0 and 148 transitive Python distributions are version/hash-locked. Debian
-security updates are currently resolved at build time; an immutable package
-snapshot is still required for a fully reproducible release image. The current
-AWS runtime stage uses AWS CLI 2.36.44; the independent Ministack emulator lane
-retains its previously qualified CLI version.
+Azure uses Microsoft's Go identity, deployments and resource-management SDKs.
+Authentication uses a configured federated workload identity, environment
+credential or managed identity. It never invokes Azure CLI or falls back to a
+developer login. GitHub and cloud credentials are external to the image.
 
-The image uses system Python for Google Cloud CLI and removes its unused bundled
-interpreter and dependencies. Azure and gcloud write configuration only under
-/tmp by default; named provider Secret paths or workload identity remain operator
-configuration. Telemetry is disabled. No credentials are built into the image.
+Go, Python, AWS CLI and Google Cloud CLI base stages are digest-pinned. The image
+uses system Python for gcloud and removes gcloud's bundled interpreter. Debian
+updates are resolved at build time; a reproducible release requires an immutable
+package snapshot. SDK versions and checksums are locked in `go.mod` and `go.sum`.
 
 `/healthz` reports process liveness. `/readyz` requires leadership, a scale-set
-session and a successful latest reconciliation. Session failure, failed
-reconciliation and leader exit clear readiness. These endpoints neither promise
-available VM capacity nor prove a successful GitHub job.
+session and successful latest reconciliation. These endpoints do not promise VM
+capacity or establish successful GitHub job execution.
 
-Initial amd64 image execution passed. Arm64 execution, real Helm lifecycle tests
-and image vulnerability acceptance remain pending. The first Trivy 0.74.0 scan
-found known vulnerabilities; its evidence is retained, not suppressed. Supported
-OS/AWS/Go fixes passed a rebuild and all five restricted-container checks. The
-fresh scan found zero critical and 48 high findings; image security acceptance
-remains open. Azure CLI 2.90.0 pins MSAL 1.36.0, which requires
-cryptography <49; current fixes require cryptography 49/50. The dependency
-constraints must be resolved and authenticated Azure behavior verified before
-claiming release acceptance. Do not force-install incompatible packages merely
-to obtain a green scan.
+A runtime smoke test or emulator pass does not qualify live cloud behavior.
+Release acceptance requires the complete architecture/provider matrix and fresh
+image vulnerability results; dependency removal alone is not security acceptance.
