@@ -1,32 +1,38 @@
 # RunnerScout
 
-RunnerScout is an open-source Kubernetes control plane for standalone ephemeral
-GitHub Actions runners across cloud spot capacity. It is a companion to ARC,
-with separate scale-set ownership and ordinary `runs-on` workflow targeting.
-The provider target includes **AWS, Azure and GCP**; live qualification remains pending for all three.
+A Kubernetes controller for ephemeral GitHub Actions runners on standalone cloud
+VMs. RunnerScout searches AWS, Azure and GCP spot capacity using portable resource
+requirements and ordinary `runs-on` targeting. It can run alongside
+[Actions Runner Controller](https://github.com/actions/actions-runner-controller)
+with separate scale-set ownership.
 
-**Development status:** experimental, no release. Live GitHub-to-VM execution and
-multicloud qualification are pending. See [readiness](outputs/readiness.md).
+**Experimental; no qualified release.** Live GitHub-to-VM execution across all
+three providers remains unqualified. The CRD schemas are under development;
+the running controller currently uses mounted configuration.
 
-The design preserves portable resource constraints, named provider configurations,
-lowest recorded compute-price placement, opt-in on-demand fallback, durable
-allocation identities, bounded provisioning and cleanup after uncertain effects.
-Spot job retries default to disabled; repeated workflow effects must be acknowledged.
+- Hard resource, region and price limits remain enforced during placement.
+- On-demand fallback is opt-in and requires definitive spot exhaustion.
+- Durable allocation identities preserve recovery and cleanup across restarts.
+- GitHub retains job-result authority when local provisioning times out.
 
-Build and verify with Go 1.27.1 and Python 3:
+## Get started
+
+Use the [Helm chart](charts/runnerscout/README.md) for development installation,
+and [operations guide](docs/operations.md) for configuration and recovery.
+See [architecture](docs/architecture.md) for placement and lifecycle contracts.
+
+To build locally, install the Go version in `go.mod` and Python 3:
 
 ```sh
 make verify
 make build
 ```
 
-Read [the target](outputs/target.md), [operations](docs/operations.md),
-[security](SECURITY.md), and [contributing](CONTRIBUTING.md).
-No production deployment or live cloud spend is part of repository bootstrap.
+`make emulators` runs isolated AWS/Azure API checks on a Linux Docker host.
+Emulators do not execute real cloud VMs or establish live-provider support.
 
-Run `make emulators` on a Linux Docker host for isolated Ministack AWS API tests
-and a Floci Azure VM-control-plane smoke test. This lane uses dummy credentials
-and an internal Docker network. It does not execute real cloud VMs. Floci GCP
-currently lacks standalone Compute Engine coverage; GCP uses explicit fixtures.
+## Contribute
 
-The [0.1.0 completion plan](outputs/release-0.1.0-plan.md) tracks the full release scope. The [development Helm chart](charts/runnerscout/README.md) is verified with `make chart`; the packaged-chart lifecycle passed on isolated Kubernetes with an idle GitHub fixture. Live end-to-end release qualification remains pending.
+Read [contributing](CONTRIBUTING.md), [CI](docs/ci.md),
+[security](SECURITY.md) and [release requirements](docs/releases.md).
+RunnerScout is [MIT licensed](LICENSE).

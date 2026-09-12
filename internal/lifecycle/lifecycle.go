@@ -43,6 +43,10 @@ type Allocation struct {
 var ErrConflict = errors.New("state revision conflict")
 var ErrCapacity = errors.New("definitive capacity rejection")
 
+// ErrNoEffect is returned only when preparation failed before any cloud create
+// request. It must never classify an ambiguous transport or provider response.
+var ErrNoEffect = errors.New("create preparation failed without cloud effects")
+
 type Observation struct {
 	Exists     bool
 	Known      bool
@@ -113,6 +117,11 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return err
 		}
 		resource, e := p.Create(ctx, a)
+		if errors.Is(e, ErrNoEffect) && resource == "" {
+			a.Phase = Pending
+			a.Condition = "CreatePreparationFailed"
+			return save()
+		}
 		if errors.Is(e, ErrCapacity) {
 			a.Phase = Pending
 			if a.Outcomes == nil {

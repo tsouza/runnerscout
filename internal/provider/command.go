@@ -125,10 +125,10 @@ func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, e
 	}
 	jit, err := p.Bootstrap(ctx, a.ID)
 	if err != nil {
-		return "", errors.New("JIT generation failed; reconciliation required")
+		return "", lifecycle.ErrNoEffect
 	}
 	if jit == "" {
-		return "", errors.New("empty JIT configuration")
+		return "", lifecycle.ErrNoEffect
 	}
 	script := Bootstrap(jit)
 	if p.Config.Kind == "azure" {

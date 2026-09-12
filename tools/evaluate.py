@@ -12,54 +12,71 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
-    "TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions",
-    "TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity",
-    "TestReadinessRequiresScaleSetSessionAndClearsOnExit",
-    "TestReadinessDoesNotTurnDependencyFailureIntoLivenessFailure",
- "TestFallbackRequiresDefinitiveExhaustion", "TestHardConstraintsAndFreshness",
- "TestIndependentSmallCatalogOracle", "TestLostCreateResponseRestartAndCleanup",
- "TestIntentConflictPreventsCloudCall", "TestUnknownAbsenceNeverBlindlyCreates",
- "TestDeadlineInclusiveNoCloudEffect", "TestCapacityRejectionKeepsDeadline",
- "TestRedeliveryAndBoundedRearming", "TestAdmissionLimits",
- "TestDisabledAndExactRESTIdentity", "TestAWSCreateUsesDurableTokenAndPrivateBootstrap",
- "TestGCPOwnershipBlocksDeletion", "TestUnknownProviderOutputIsNotAbsence",
- "TestPersistenceAcrossStoreInstances", "TestForeignStateRejected",
- "TestDurableAdmissionSurvivesOperatorRestart",
- "TestCooldownRetainsUnknownSearch", "TestUnreadyVMExpiresButStartedJobDoesNot",
- "TestUnknownCreateWithStartedJobSurvivesProvisioningDeadline",
- "TestProviderBindingCannotChangeUnderExistingFleet", "TestMissingInventoryCannotConfirmCleanup",
- "TestAzureCreateUsesSecureBootstrapAndSpotDelete", "TestAzureActiveDeploymentCannotProveAbsence",
- "TestAzureForeignDiskCannotBeDeleted", "TestAzureResidualOwnedNICRetainsCleanup",
- "TestAWSAccountDriftCannotConfirmAbsence",
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSAccountDriftCannotConfirmAbsence'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSCreateUsesDurableTokenAndPrivateBootstrap'),
+    ('github.com/tsouza/runnerscout/internal/admission', 'TestAdmissionLimits'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureActiveDeploymentCannotProveAbsence'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCreateUsesSecureBootstrapAndSpotDelete'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureForeignDiskCannotBeDeleted'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureResidualOwnedNICRetainsCleanup'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCapacityRejectionKeepsDeadline'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompileDoesNotPretendUnsupportedExecutionExists'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompileNetworkMappingsRequireIsolationAndCoverage'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompilePreservesMulticloudConstraintsAndReferenceIsolation'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompileRejectsBrokenOrCrossNamespaceReferences'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompileStaleCatalogAllowsRecoveryButNotAdmission'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCooldownRetainsUnknownSearch'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestDeadlineInclusiveNoCloudEffect'),
+    ('github.com/tsouza/runnerscout/internal/recovery', 'TestDisabledAndExactRESTIdentity'),
+    ('github.com/tsouza/runnerscout/internal/operator', 'TestDurableAdmissionSurvivesOperatorRestart'),
+    ('github.com/tsouza/runnerscout/internal/placement', 'TestFallbackRequiresDefinitiveExhaustion'),
+    ('github.com/tsouza/runnerscout/internal/state', 'TestForeignStateRejected'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestGCPOwnershipBlocksDeletion'),
+    ('github.com/tsouza/runnerscout/internal/placement', 'TestHardConstraintsAndFreshness'),
+    ('github.com/tsouza/runnerscout/internal/placement', 'TestIndependentSmallCatalogOracle'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestIntentConflictPreventsCloudCall'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestJITPreparationFailureHasNoCloudEffects'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestJITPreparationFailureRetriesWithoutCloudCommitment'),
+    ('github.com/tsouza/runnerscout/internal/operator', 'TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestLostCreateResponseRestartAndCleanup'),
+    ('github.com/tsouza/runnerscout/internal/admission', 'TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestMissingInventoryCannotConfirmCleanup'),
+    ('github.com/tsouza/runnerscout/internal/placement', 'TestOnDemandFallbackHonorsPriorOutcomes'),
+    ('github.com/tsouza/runnerscout/internal/state', 'TestPersistenceAcrossStoreInstances'),
+    ('github.com/tsouza/runnerscout/internal/operator', 'TestProviderBindingCannotChangeUnderExistingFleet'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestReadRejectsConcurrentMutationAndObjectRecreation'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestReadRejectsUnknownConfigurationAndNamespaceSpoofing'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestReadUsesOnlyLocalNamedDependenciesAndRechecksVersions'),
+    ('github.com/tsouza/runnerscout/internal/health', 'TestReadinessDoesNotTurnDependencyFailureIntoLivenessFailure'),
+    ('github.com/tsouza/runnerscout/internal/operator', 'TestReadinessRequiresScaleSetSessionAndClearsOnExit'),
+    ('github.com/tsouza/runnerscout/internal/admission', 'TestRedeliveryAndBoundedRearming'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestUnknownAbsenceNeverBlindlyCreates'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestUnknownCreateWithStartedJobSurvivesProvisioningDeadline'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestUnknownProviderOutputIsNotAbsence'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestUnreadyVMExpiresButStartedJobDoesNot'),
 }
-
-def validate_records(path):
- data=json.loads(path.read_text())
- if data.get('format_revision')!=1: raise ValueError('unsupported registry revision')
- records=data['records'];ids=[r['id'] for r in records]
- if len(ids)!=len(set(ids)): raise ValueError('duplicate record identity')
- if data['baseline_id'] not in ids: raise ValueError('missing baseline')
- for r in records:
-  for k in ['id','revision','type','status','owner','sources']:
-   if k not in r: raise ValueError(f'missing {k}')
-  if not isinstance(r['revision'],int) or r['revision']<1: raise ValueError('invalid revision')
-  if any(s not in ids for s in r['sources']): raise ValueError('dangling source')
- return len(records)
 
 def test_manifest(lines, required=REQUIRED):
  started=set();passed=set();failed=set();skipped=set()
+ package_started=set();package_passed=set();package_skipped=set()
  for line in lines:
   event=json.loads(line)
-  name=event.get('Test');key=(event.get('Package'),name)
+  package=event.get('Package');name=event.get('Test');key=(package,name)
   action=event.get('Action')
   if action=='fail':failed.add(key)
+  if not name and action=='start':package_started.add(package)
+  if not name and action=='pass':package_passed.add(package)
   if name and action=='run':started.add(key)
   if name and action=='pass':passed.add(key)
   if name and action=='skip':skipped.add(key)
- complete_names={n for p,n in started & passed}
- missing=required-complete_names
- complete=bool(started) and not failed and not skipped and not missing and started<=passed
- return dict(pass_=complete,started=len(started),completed=len(started & passed),failed=sorted(str(x) for x in failed),skipped=sorted(str(x) for x in skipped),missing=sorted(missing))
+  if not name and action=='skip':package_skipped.add(package)
+ missing=required-(started & passed)
+ required_packages={package for package,test in required}
+ relevant_packages=required_packages | {p for p,n in started}
+ skipped.update((p,None) for p in package_skipped & relevant_packages)
+ incomplete_packages=(package_started | relevant_packages)-package_passed-(package_skipped-relevant_packages)
+ complete=bool(started) and not failed and not skipped and not missing and not incomplete_packages and started<=passed
+ return dict(pass_=complete,started=len(started),completed=len(started & passed),failed=sorted(str(x) for x in failed),skipped=sorted(str(x) for x in skipped),missing=sorted(str(x) for x in missing),incomplete_packages=sorted(str(x) for x in incomplete_packages))
 
 def digest():
  h=hashlib.sha256()
@@ -95,8 +112,8 @@ def main():
    if p.returncode:raise RuntimeError(f'{name} failed (exit {p.returncode})')
    return (run/name).read_text()
   try:
-   report['registry_records']=validate_records(ROOT/'outputs/records.json')
-   formatting=command(['gofmt','-l','cmd','internal'],'format.log')
+   command([sys.executable,'tools/source_hygiene.py'],'source-hygiene.log')
+   formatting=command(['gofmt','-l','cmd','internal','api'],'format.log')
    if formatting.strip():raise RuntimeError('unformatted Go files')
    command([sys.executable,'-m','unittest','discover','-s','tools','-p','test_*.py'],'harness.log')
    command(['go','vet','./...'],'vet.log')
