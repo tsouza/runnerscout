@@ -1,0 +1,30 @@
+{
+  "scope": "diagnostic local evidence; no protected acceptance or live cloud claim",
+  "runs": [
+    {
+      "id": "ee130b7f-c280-49d6-98de-8cb82b307049",
+      "verdict": "fail",
+      "candidate_sha256": "1e7c6992c1d202ad63cb36150b2c25cb339529e5c62f234b2451b5554c37e180",
+      "evaluator_sha256": "0696fd1b8fe90767de2b3d8f32672253b870e7c7f674a10134925d35ce976118",
+      "seconds": 60.66692632297054,
+      "tests": null,
+      "reason": "tests.jsonl failed (exit 1)"
+    },
+    {
+      "id": "b9552702-c0bb-4b06-9e2f-c4cec59d6770",
+      "verdict": "pass",
+      "candidate_sha256": "1cacd02b3e527cddc30f9911a64ed101ad724c203b5bd0d7fa72debf14a5e2f6",
+      "evaluator_sha256": "3f83ad66669d15daade82ae6ae3905d98526f9645551abe700825cdcbb41eacb",
+      "seconds": 256.5660913310712,
+      "tests": {
+        "pass_": true,
+        "started": 17,
+        "completed": 17,
+        "failed": [],
+        "skipped": [],
+        "missing": []
+      },
+      "reason": null
+    }
+  ]
+}

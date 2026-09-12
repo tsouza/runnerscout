@@ -1,0 +1,8 @@
+/bin/
+/work/
+/evidence/
+*.test
+coverage.out
+.env
+*.pem
+*.key
