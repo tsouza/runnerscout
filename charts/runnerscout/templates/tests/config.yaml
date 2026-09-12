@@ -1,0 +1,43 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "runnerscout.fullname" . }}-config-test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: validate
+      image: {{ include "runnerscout.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command: ["/usr/local/bin/runnerscout"]
+      args: ["-config=/etc/runnerscout/config/config.json", "-validate"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+      volumeMounts:
+        - name: config
+          mountPath: /etc/runnerscout/config
+          readOnly: true
+  volumes:
+    - name: config
+      configMap:
+        name: {{ include "runnerscout.fullname" . }}-config
+{{- end }}

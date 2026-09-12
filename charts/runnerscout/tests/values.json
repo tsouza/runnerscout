@@ -1,0 +1,63 @@
+{
+  "image": {
+    "repository": "runnerscout-local",
+    "tag": "test"
+  },
+  "github": {
+    "existingSecret": "github-test",
+    "mode": "pat"
+  },
+  "config": {
+    "name": "test-class",
+    "githubURL": "https://github.com/tsouza",
+    "scaleSetID": 1,
+    "maxRunners": 1,
+    "provisioningSeconds": 60,
+    "maxLifetimeSeconds": 600,
+    "requirements": {
+      "cpu": 2,
+      "memoryMiB": 4096,
+      "architecture": "amd64",
+      "providers": [
+        "aws-test",
+        "azure-test",
+        "gcp-test"
+      ],
+      "regions": [
+        "us-east-1",
+        "eastus",
+        "us-central1"
+      ],
+      "maxPriceMicros": 100000,
+      "policy": "lowest-price"
+    },
+    "catalog": {
+      "offerings": [],
+      "complete": {}
+    },
+    "providers": {
+      "aws-test": {
+        "kind": "aws",
+        "owner": "test-class",
+        "accountID": "000000000000",
+        "subnet": "subnet-test",
+        "securityGroup": "sg-test"
+      },
+      "azure-test": {
+        "kind": "azure",
+        "owner": "test-class",
+        "subscription": "subscription-test",
+        "resourceGroup": "rg-test",
+        "subnet": "subnet-test",
+        "securityGroup": "nsg-test",
+        "sshPublicKey": "ssh-ed25519 test"
+      },
+      "gcp-test": {
+        "kind": "gcp",
+        "owner": "test-class",
+        "project": "project-test",
+        "subnet": "subnet-test"
+      }
+    }
+  }
+}

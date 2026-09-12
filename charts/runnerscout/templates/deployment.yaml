@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "runnerscout.fullname" . }}
+  labels:
+    {{- include "runnerscout.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # Do not overlap controller processes while replacing an experimental instance.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "runnerscout.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "runnerscout.selector" . | nindent 8 }}
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include "runnerscout.config" . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "runnerscout.sa" . }}
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: controller
+          image: {{ include "runnerscout.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/runnerscout"]
+          args:
+            - -config=/etc/runnerscout/config/config.json
+            {{- if eq .Values.github.mode "app" }}
+            - {{ printf "-github-app-client-id=%s" (required "github.appClientID required for app authentication" .Values.github.appClientID) | quote }}
+            - {{ printf "-github-app-installation-id=%v" (required "github.appInstallationID required for app authentication" .Values.github.appInstallationID) | quote }}
+            - -github-app-key-file=/etc/runnerscout/github/privateKey
+            {{- else }}
+            - -github-token-file=/etc/runnerscout/github/token
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: HOME
+              value: /tmp/home
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/runnerscout/config
+              readOnly: true
+            - name: github
+              mountPath: /etc/runnerscout/github
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.catalog.existingConfigMap }}
+            - name: catalog
+              mountPath: /etc/runnerscout/catalog
+              readOnly: true
+            {{- end }}
+            {{- range $i, $secret := .Values.credentialSecrets }}
+            - name: provider-{{ $i }}
+              mountPath: {{ printf "/etc/runnerscout/providers/%s" $secret.name | quote }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "runnerscout.fullname" . }}-config
+        - name: github
+          secret:
+            secretName: {{ required "github.existingSecret required" .Values.github.existingSecret }}
+            defaultMode: 0440
+            items:
+              {{- if eq .Values.github.mode "app" }}
+              - key: {{ .Values.github.privateKeyKey }}
+                path: privateKey
+              {{- else }}
+              - key: {{ .Values.github.tokenKey }}
+                path: token
+              {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        {{- if .Values.catalog.existingConfigMap }}
+        - name: catalog
+          configMap:
+            name: {{ .Values.catalog.existingConfigMap }}
+        {{- end }}
+        {{- range $i, $secret := .Values.credentialSecrets }}
+        - name: provider-{{ $i }}
+          secret:
+            secretName: {{ $secret.name }}
+            defaultMode: 0440
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

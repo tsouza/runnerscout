@@ -53,3 +53,5 @@ execution remain unqualified.
 Patched dependency scan: zero reachable vulnerabilities reported for Go 1.26.7 and
 the updated modules. One advisory exists in a required module without a reachable
 call according to govulncheck; this is not a claim that every dependency is advisory-free.
+
+Helm development: chart 0.1.0-dev.1 has eight local render/package/configuration contract tests. The test hook invokes the real controller parser; it does not establish GitHub/VM execution. Real install, upgrade, rollback and uninstall qualification and runtime image packaging remain required by release-0.1.0-plan.md.

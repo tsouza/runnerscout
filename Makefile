@@ -17,3 +17,8 @@ qualify:
 .PHONY: emulators
 emulators:
 	python3 tools/emulators.py
+
+.PHONY: chart
+chart: build
+	helm lint charts/runnerscout --strict --kube-version 1.35.0 -f charts/runnerscout/tests/values.json
+	python3 tools/test_chart.py

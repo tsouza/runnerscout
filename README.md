@@ -28,3 +28,5 @@ Run `make emulators` on a Linux Docker host for isolated Ministack AWS API tests
 and a Floci Azure VM-control-plane smoke test. This lane uses dummy credentials
 and an internal Docker network. It does not execute real cloud VMs. Floci GCP
 currently lacks standalone Compute Engine coverage; GCP uses explicit fixtures.
+
+The [0.1.0 completion plan](outputs/release-0.1.0-plan.md) tracks the full release scope. The [development Helm chart](charts/runnerscout/README.md) is verified with `make chart`; chart lifecycle and end-to-end release qualification remain pending.

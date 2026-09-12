@@ -80,3 +80,25 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 14
+
+  chart:
+    name: chart
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Install pinned chart tools
+        run: |
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.16.4-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
+          echo "fc307327959aa38ed8f9f7e66d45492bb022a66c3e5da6063958254b9767d179  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/linux-amd64" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/chart-venv"
+          "$RUNNER_TEMP/chart-venv/bin/pip" install PyYAML==6.0.3
+          echo "$RUNNER_TEMP/chart-venv/bin" >> "$GITHUB_PATH"
+      - run: make chart
