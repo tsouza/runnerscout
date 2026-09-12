@@ -6,6 +6,15 @@ tracked in [#17](https://github.com/tsouza/runnerscout/issues/17).
 
 ## Required acceptance
 
+Release is blocked while the repository has any open pull request or open issue.
+All work must be resolved before closure. The release commit must be the current
+`main` head, and its CI must pass; failed, pending, cancelled or missing required
+checks block release. Recheck repository state immediately before promotion.
+Run `python3 tools/release_preflight.py --candidate "$RUNNERSCOUT_RELEASE_COMMIT"`
+with the account-scoped `gh-tsouza` wrapper available. The preflight retains its
+read-only repository snapshot under ignored `evidence/` and does not publish or
+certify the remaining qualification requirements below.
+
 Before 0.1.0, complete the requested runtime, all five CRDs and worked examples,
 Helm lifecycle, optional networking and provider/retry behavior. Complete
 project-wide ACPR immediately before cutting the release, against the final
