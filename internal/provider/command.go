@@ -30,10 +30,14 @@ type Config struct {
 type Executor interface {
 	Run(context.Context, string, ...string) ([]byte, error)
 }
-type OSExecutor struct{}
+type OSExecutor struct{ environment []string }
 
-func (OSExecutor) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+func (OSExecutor) String() string   { return "cloud executor (credentials redacted)" }
+func (OSExecutor) GoString() string { return "cloud executor (credentials redacted)" }
+
+func (e OSExecutor) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = e.environment
 	out, err := cmd.Output()
 	if err != nil {
 		var exit *exec.ExitError

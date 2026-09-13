@@ -137,12 +137,7 @@ func Compile(s Snapshot) (Resolved, error) {
 }
 
 func credentialVariable(kind, name string) bool {
-	allowed := map[string][]string{
-		"aws":   {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN"},
-		"azure": {"AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_FEDERATED_TOKEN_FILE", "AZURE_CLIENT_SECRET", "AZURE_CLIENT_CERTIFICATE_PATH", "AZURE_CLIENT_CERTIFICATE_PASSWORD", "AZURE_CLIENT_SEND_CERTIFICATE_CHAIN"},
-		"gcp":   {"GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"},
-	}
-	return slices.Contains(allowed[kind], name)
+	return provider.CredentialVariable(kind, name)
 }
 
 func network(s Snapshot, providers map[string]provider.Config) error {

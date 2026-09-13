@@ -381,6 +381,9 @@ func (o *Operator) runLeader(ctx context.Context) error {
 	if startupErr != nil {
 		slog.Warn("startup reconciliation incomplete; obligations retained")
 	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	ss, e := o.GitHub.GetRunnerScaleSetByID(ctx, o.Config.ScaleSetID)
 	if e != nil {
 		return errors.New("scale-set lookup failed")
@@ -405,7 +408,14 @@ func (o *Operator) runLeader(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- l.Run(runCtx, o) }()
+	go func() {
+		defer close(done)
+		done <- l.Run(runCtx, o)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
 	o.setReady(startupErr == nil)
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
@@ -428,15 +438,39 @@ func (o *Operator) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	leaderCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	elector, e := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{Lock: lock, LeaseDuration: 30 * time.Second, RenewDeadline: 20 * time.Second, RetryPeriod: 5 * time.Second, ReleaseOnCancel: false, Callbacks: leaderelection.LeaderCallbacks{OnStartedLeading: func(c context.Context) { errCh <- o.runLeader(c); cancel() }, OnStoppedLeading: func() { cancel() }}})
+	// Leader election starts its callback asynchronously and does not join it.
+	// Close the start gate before waiting so a delayed callback cannot start new
+	// operations after Run returns and its caller destroys credential scopes.
+	var gate sync.Mutex
+	var workers sync.WaitGroup
+	stopping := false
+	elector, e := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{Lock: lock, LeaseDuration: 30 * time.Second, RenewDeadline: 20 * time.Second, RetryPeriod: 5 * time.Second, ReleaseOnCancel: false, Callbacks: leaderelection.LeaderCallbacks{OnStartedLeading: func(c context.Context) {
+		gate.Lock()
+		if stopping {
+			gate.Unlock()
+			return
+		}
+		workers.Add(1)
+		gate.Unlock()
+		defer workers.Done()
+		errCh <- o.runLeader(c)
+		cancel()
+	}, OnStoppedLeading: func() { cancel() }}})
 	if e != nil {
 		return e
 	}
 	elector.Run(leaderCtx)
+	gate.Lock()
+	stopping = true
+	gate.Unlock()
+	workers.Wait()
 	select {
 	case e := <-errCh:
 		return e
 	default:
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("leadership ended; state retained")
 	}
 }

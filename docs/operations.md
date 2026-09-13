@@ -50,3 +50,11 @@ Otherwise the SDK uses managed identity, optionally selected by `AZURE_CLIENT_ID
 A failed configured credential does not fall back to developer CLI credentials.
 Mount credential files through Secrets or workload-identity admission; never place
 secret values in the public configuration. Existing `az login` caches are not used.
+
+Each named provider uses private CLI caches and an isolated authentication
+environment. AWS profiles require an explicit mounted `AWS_CONFIG_FILE` or
+`AWS_SHARED_CREDENTIALS_FILE`; implicit home-directory profiles are not used.
+GCP accepts a mounted file through `GOOGLE_APPLICATION_CREDENTIALS` or
+`CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; configuring different files in both
+variables is rejected. Shutdown waits for active operations before removing
+credential caches.

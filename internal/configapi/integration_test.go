@@ -154,6 +154,7 @@ func TestRealKubernetesCRDSchemasAndConfigurationSnapshot(t *testing.T) {
 	if len(revisions) != 6 || len(s.Providers) != 3 {
 		t.Fatal("real snapshot is incomplete")
 	}
+	verifyRealSecretResolution(t, ctx, kc, dc, namespace)
 	scaleSets := dc.Resource(schema.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: "runnerscalesets"}).Namespace(namespace)
 	invalid := fixture.objects["runnerscalesets/build"].DeepCopy()
 	invalid.SetName("invalid")
