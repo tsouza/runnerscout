@@ -14,16 +14,16 @@ type Status struct {
 	// WireGuardPeers optionally mounts the narrow, allocation-scoped,
 	// bearer-token-authenticated WireGuard peer-poll endpoint
 	// (docs/networking-peer-model.md's "Revocation" section) alongside the
-	// /healthz and /readyz probes below, on this same HTTP server. Nil by
-	// default, and nothing in this codebase constructs a non-nil value here
-	// today - internal/configapi/compile.go's network() still rejects every
-	// NetworkProfileSpec.Mode other than "separate", so no allocation this
-	// codebase's own configuration path can produce ever has anything for
-	// this endpoint to serve. This mirrors the same "declared, inert, zero
-	// callers" pattern already used by provider.Command.NetworkPeers and
-	// operator.Operator.AzureInterruptions: the shape exists so a later,
-	// separate, more carefully reviewed change can start constructing one
-	// without first landing this wiring.
+	// /healthz and /readyz probes below, on this same HTTP server. Both
+	// cmd/runnerscout/main.go entry points (mounted-config and CRD-driven)
+	// always construct a real, non-nil *health.WireGuardPeersHandler here
+	// (see wireGuardPeersHandler in main.go) - it is never gated behind a
+	// Config opt-in, since it costs nothing beyond one idle
+	// internal/state.Kubernetes value and is a complete no-op for any
+	// allocation whose NetworkProfile is "" (see
+	// WireGuardPeersHandler.ServeHTTP's own eligibility check). nil remains
+	// a valid value (e.g. in tests exercising only /healthz and /readyz);
+	// Handler below mounts the route only when it is non-nil.
 	WireGuardPeers http.Handler
 }
 

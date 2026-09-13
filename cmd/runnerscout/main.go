@@ -22,6 +22,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/health"
 	"github.com/tsouza/runnerscout/internal/operator"
 	"github.com/tsouza/runnerscout/internal/provider"
+	"github.com/tsouza/runnerscout/internal/state"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -190,10 +191,36 @@ func azureInterruptionsObserver(controller *operator.Operator, cfg operator.Conf
 	return command.Azure.InterruptionQueue(cfg.AzureInterruptionQueueURL)
 }
 
-func withHealth(ctx context.Context, address string, run func(context.Context, *health.Status) error) error {
+// wireGuardPeersHandler builds the narrow, allocation-scoped WireGuard
+// peer-poll endpoint (docs/networking-peer-model.md's "Revocation" section;
+// internal/health.WireGuardPeersHandler) for one scale set, from exactly the
+// same (namespace, owner-name) pair internal/operator.New already uses to
+// build its own internal/state.Kubernetes Store. Unlike
+// awsPricesObserver/azurePricesObserver/azureInterruptionsObserver, this is
+// never gated behind an opt-in Config flag: it costs nothing beyond one
+// idle *state.Kubernetes value until a request actually arrives, and it is
+// a complete no-op for every allocation whose NetworkProfile is "" - see
+// WireGuardPeersHandler.ServeHTTP's own eligibility check. There is also no
+// startup misconfiguration to error on: namespace and name are already
+// validated (parseOptions's DNS1123 checks for the CRD path,
+// operator.Config.Validate for the mounted-config path) before this is
+// ever called, unlike the price/interruption observers above, which can
+// fail because they each depend on one specific provider actually being
+// configured.
+func wireGuardPeersHandler(client kubernetes.Interface, namespace, name string) http.Handler {
+	return &health.WireGuardPeersHandler{Store: &state.Kubernetes{Maps: client.CoreV1().ConfigMaps(namespace), Owner: name}}
+}
+
+// withHealth serves /healthz, /readyz and (when wireGuardPeers is non-nil)
+// the WireGuard peer-poll endpoint for the lifetime of run. wireGuardPeers
+// must be supplied here, before status.Handler() builds its mux below,
+// rather than assigned onto status from inside run: Status.Handler builds
+// its route table exactly once, so setting status.WireGuardPeers any later
+// would silently never register the route.
+func withHealth(ctx context.Context, address string, wireGuardPeers http.Handler, run func(context.Context, *health.Status) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var status health.Status
+	status := health.Status{WireGuardPeers: wireGuardPeers}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("health listener: %w", err)
@@ -260,7 +287,18 @@ func run(args []string) error {
 		}
 		return runCheck(checkCtx, check)
 	}
-	return withHealth(ctx, o.healthAddress, func(ctx context.Context, status *health.Status) error {
+	// namespace/name identify the one internal/state.Kubernetes ConfigMap
+	// scope this scale set's allocations live in, under either configuration
+	// path - exactly the (Namespace, Name) pair operator.New itself uses to
+	// build its own Store. Known upfront in both branches below, which is
+	// what lets wireGuardPeersHandler be built before withHealth serves any
+	// request (see withHealth's own doc comment for why that ordering
+	// matters).
+	namespace, name := o.namespace, o.scaleSet
+	if o.configPath != "" {
+		namespace, name = cfg.Namespace, cfg.Name
+	}
+	return withHealth(ctx, o.healthAddress, wireGuardPeersHandler(client, namespace, name), func(ctx context.Context, status *health.Status) error {
 		if o.scaleSet != "" {
 			dynamicClient, err := dynamic.NewForConfig(kc)
 			if err != nil {
