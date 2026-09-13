@@ -56,4 +56,8 @@ concrete topology are all real implementation decisions this document
 does not make. Per the plan, none of that can be responsibly stubbed
 separately from real network I/O - this document only removes one
 prerequisite ambiguity (which library/approach) so that work can start
-from a settled choice instead of re-litigating it.
+from a settled choice instead of re-litigating it. Those four questions are
+now answered in
+[networking-peer-model.md](networking-peer-model.md); what remains open
+after that document is its own "What this document does not decide"
+section, not a restatement of these four.
