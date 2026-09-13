@@ -143,19 +143,24 @@ func (r *Runtime) start(ctx context.Context, worker Worker, cleanup func() error
 	}()
 }
 
-func (r *Runtime) condition(ctx context.Context, root *unstructured.Unstructured, ready bool, reason string) error {
-	r.setReady(ready)
+func sameRootRevision(a, b metav1.Object) bool {
+	return a.GetUID() == b.GetUID() && a.GetGeneration() == b.GetGeneration() && a.GetDeletionTimestamp().Equal(b.GetDeletionTimestamp())
+}
+
+func (r *Runtime) condition(ctx context.Context, root *unstructured.Unstructured, ready bool, reason string) (result error) {
+	defer func() { r.setReady(result == nil && root != nil && ready) }()
 	if root == nil {
 		return nil
 	}
 	current, err := r.roots().Get(ctx, r.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		ready = false
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if current.GetUID() != root.GetUID() {
+	if !sameRootRevision(current, root) {
 		return ErrChanged
 	}
 	status := "False"
@@ -320,6 +325,10 @@ func (r *Runtime) Reconcile(ctx context.Context) error {
 		}
 		return r.condition(ctx, root, false, "ConfigurationUnavailable")
 	}
+	if !sameRootRevision(root, &loaded.Snapshot.ScaleSet) {
+		r.pause()
+		return ErrChanged
+	}
 	if r.worker != nil {
 		select {
 		case <-r.worker.done:
@@ -366,7 +375,7 @@ func (r *Runtime) Reconcile(ctx context.Context) error {
 		return ErrChanged
 	}
 	current, err := r.roots().Get(ctx, r.Name, metav1.GetOptions{})
-	if err != nil || current.GetUID() != loaded.Snapshot.ScaleSet.UID {
+	if err != nil || !sameRootRevision(current, &loaded.Snapshot.ScaleSet) {
 		r.discard(cleanup)
 		return ErrChanged
 	}

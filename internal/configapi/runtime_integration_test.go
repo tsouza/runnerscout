@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
@@ -49,6 +50,35 @@ func verifyRealRuntimeLifecycle(t *testing.T, ctx context.Context, kc kubernetes
 			}
 		}
 	}()
+	// A real API spec update advances generation independently of status.
+	// Never certify that generation using the previously loaded root.
+	observed := root.DeepCopy()
+	suspended, _, _ := unstructured.NestedBool(root.Object, "spec", "suspend")
+	if err := unstructured.SetNestedField(root.Object, !suspended, "spec", "suspend"); err != nil {
+		t.Fatal(err)
+	}
+	root, err = r.roots().Update(ctx, root, metav1.UpdateOptions{})
+	if err != nil || root.GetGeneration() <= observed.GetGeneration() {
+		t.Fatal("API did not advance generation", err)
+	}
+	healthy := true
+	r.Readiness = func(value bool) { healthy = value }
+	if err := r.condition(ctx, observed, true, "Reconciled"); !errors.Is(err, ErrChanged) || healthy {
+		t.Fatal("unobserved API generation certified", err, healthy)
+	}
+	current, err := r.roots().Get(ctx, r.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := unstructured.NestedSlice(current.Object, "status", "conditions"); found {
+		t.Fatal("stale status reached API server")
+	}
+	if err := unstructured.SetNestedField(current.Object, suspended, "spec", "suspend"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.roots().Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	var workers []*runtimeWorker
 	var cleanups int
 	r.Factory = func(resolved Resolved, _ Credentials, mode WorkerMode, ready func(bool)) (Worker, func() error, error) {
@@ -110,7 +140,7 @@ func verifyRealRuntimeLifecycle(t *testing.T, ctx context.Context, kc kubernetes
 	close(w.finish)
 	awaitRuntime(t, r.worker.done)
 	reconcileRuntime(t, r)
-	current, err := r.roots().Get(ctx, r.Name, metav1.GetOptions{})
+	current, err = r.roots().Get(ctx, r.Name, metav1.GetOptions{})
 	if err != nil || !slices.Contains(current.GetFinalizers(), Finalizer) {
 		t.Fatal("unconfirmed cloud absence removed the finalizer", err)
 	}

@@ -415,3 +415,96 @@ func TestRuntimeBindingChangeRecoversOriginalFleetAfterRestart(t *testing.T) {
 		t.Fatal("recovery replaced the original fleet binding", err)
 	}
 }
+
+func TestRuntimeConditionRejectsUnobservedRootChanges(t *testing.T) {
+	for _, change := range []string{"generation", "deletion"} {
+		t.Run(change, func(t *testing.T) {
+			f := newRuntimeFixture(t)
+			root, err := f.r.roots().Get(context.Background(), f.r.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutateRoot(t, f.r, func(current *unstructured.Unstructured) {
+				if change == "generation" {
+					current.SetGeneration(root.GetGeneration() + 1)
+				} else {
+					now := metav1.Now()
+					current.SetDeletionTimestamp(&now)
+				}
+			})
+			ready := true
+			f.r.Readiness = func(value bool) { ready = value }
+			if err := f.r.condition(context.Background(), root, true, "Reconciled"); !errors.Is(err, ErrChanged) {
+				t.Errorf("unobserved %s certified: %v", change, err)
+			}
+			if ready {
+				t.Error("readiness certified an unobserved root change")
+			}
+			if runtimeReason(t, f.r) != "" {
+				t.Error("stale observation wrote a condition")
+			}
+		})
+	}
+}
+
+func TestRuntimeConditionWriteFailureClearsReadiness(t *testing.T) {
+	f := newRuntimeFixture(t)
+	root, err := f.r.roots().Get(context.Background(), f.r.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.r.Dynamic.(*dynamicfake.FakeDynamicClient).PrependReactor("update", "runnerscalesets", func(action kt.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() == "status" {
+			return true, nil, errors.New("status unavailable")
+		}
+		return false, nil, nil
+	})
+	ready := true
+	f.r.Readiness = func(value bool) { ready = value }
+	if err := f.r.condition(context.Background(), root, true, "Reconciled"); err == nil || ready {
+		t.Fatal("status failure left readiness true", err, ready)
+	}
+}
+
+func TestRuntimeRejectsRootChangedDuringWorkerPreparation(t *testing.T) {
+	f := newRuntimeFixture(t)
+	factory := f.r.Factory
+	f.r.Factory = func(resolved Resolved, credentials Credentials, mode WorkerMode, ready func(bool)) (Worker, func() error, error) {
+		worker, cleanup, err := factory(resolved, credentials, mode, ready)
+		mutateRoot(t, f.r, func(root *unstructured.Unstructured) {
+			root.SetGeneration(root.GetGeneration() + 1)
+			if err := unstructured.SetNestedField(root.Object, true, "spec", "suspend"); err != nil {
+				t.Fatal(err)
+			}
+		})
+		return worker, cleanup, err
+	}
+	if err := f.r.Reconcile(context.Background()); !errors.Is(err, ErrChanged) {
+		t.Errorf("worker used stale root: %v", err)
+	}
+	if f.r.worker != nil {
+		t.Error("started a session after the root changed during preparation")
+	}
+	if err := f.r.retryCleanups(); err != nil {
+		t.Fatal(err)
+	}
+	if f.cleanups != 1 {
+		t.Errorf("prepared credentials were not cleaned: %d", f.cleanups)
+	}
+}
+
+func TestRuntimeMissingRootCannotRemainReady(t *testing.T) {
+	f := newRuntimeFixture(t)
+	root, err := f.r.roots().Get(context.Background(), f.r.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.roots().Delete(context.Background(), f.r.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	ready := true
+	f.r.Readiness = func(value bool) { ready = value }
+	if err := f.r.condition(context.Background(), root, true, "Reconciled"); err != nil || ready {
+		t.Fatal("missing root remained ready", err, ready)
+	}
+}
