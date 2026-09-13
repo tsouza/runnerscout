@@ -123,6 +123,17 @@ func (r *Runtime) newWorker(resolved Resolved, credentials Credentials, mode Wor
 		}
 		op.AzurePrices = command.Azure.SpotPrices()
 	}
+	if resolved.Config.AzureInterruptionQueueURL != "" {
+		command, ok := op.Controller.Providers["azure"].(*provider.Command)
+		if !ok || command.Azure == nil {
+			return nil, nil, errors.New(`Azure interruption delivery requires a configured "azure" provider`)
+		}
+		queue, err := command.Azure.InterruptionQueue(resolved.Config.AzureInterruptionQueueURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		op.AzureInterruptions = queue
+	}
 	op.Readiness = ready
 	if mode == CleanupMode {
 		op.Drain()

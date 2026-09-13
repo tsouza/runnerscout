@@ -44,6 +44,25 @@ type Command struct {
 	// the allocation list this hook needs from internal/state.Kubernetes.List
 	// and filter it through internal/wireguard.Snapshot.
 	NetworkPeers func(context.Context, lifecycle.Allocation) ([]wireguard.Peer, error)
+	// AzureInterrupted is a per-Tick-cycle snapshot of confirmed Azure spot
+	// preemptions, keyed by the exact ARM resource ID azureID builds
+	// (compared case-insensitively - see azureConfirmedPreemption), mapped
+	// to that message's own Preempted verdict. internal/operator.Operator
+	// populates it once per Tick cycle - immediately before each allocation's
+	// Controller.Step call, never per-allocation - from exactly one
+	// internal/azurequeue.Client.Poll call, mirroring how refreshAWSPrices/
+	// refreshAzurePrices (internal/operator/prices.go) compute a live value
+	// once per Tick and thread it through rather than re-querying per
+	// offering. See docs/azure-interruption-delivery.md's "Correlation"
+	// section for why this is a plain map consulted at the exact allocation
+	// being observed, not a persisted cross-Tick cache or index.
+	//
+	// nil (the default, and every Command whose kind isn't "azure", and
+	// every deployment that never opts into internal/operator.Operator's
+	// AzureInterruptionQueueURL) is a complete no-op: observeAzure never
+	// reports Observation.Interrupted for Azure without an exact, present
+	// match in this map.
+	AzureInterrupted map[string]bool
 }
 
 func (p *Command) Validate() error {

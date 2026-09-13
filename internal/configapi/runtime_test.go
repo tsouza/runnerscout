@@ -125,6 +125,58 @@ func TestNewWorkerRequiresConfiguredAzureProviderWhenEnabled(t *testing.T) {
 	}
 }
 
+func azureInterruptionQueueConfig(url string, providers map[string]provider.Config, requirementProviders []string) operator.Config {
+	return operator.Config{Name: "test", Namespace: "test", GitHubURL: "https://github.com/tsouza/runnerscout", ScaleSetID: 1, MaxRunners: 2, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Requirements:              placement.Requirements{CPU: 1, MemoryMiB: 1, Architecture: "amd64", MaxPriceMicros: 100, Providers: requirementProviders, Regions: []string{"r"}, Policy: "lowest-price"},
+		Providers:                 providers,
+		AzureInterruptionQueueURL: url,
+	}
+}
+
+func TestNewWorkerWiresAzureInterruptionsWhenExplicitlySet(t *testing.T) {
+	cfg := azureInterruptionQueueConfig("https://fixture.queue.core.windows.net/interruptions", map[string]provider.Config{"azure": {Kind: "azure", Owner: "test", Subnet: "private", Subscription: "sub", ResourceGroup: "rg", SecurityGroup: "sg", SSHPublicKey: "ssh-ed25519 AAAA"}}, []string{"azure"})
+	r := &Runtime{Client: fake.NewClientset()}
+	credentials := Credentials{Providers: map[string]map[string]string{"azure": {"AZURE_CLIENT_ID": "fixture-client"}}}
+	worker, cleanup, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	op, ok := worker.(*operator.Operator)
+	if !ok {
+		t.Fatal("expected the real operator worker")
+	}
+	if op.AzureInterruptions == nil {
+		t.Fatal("AzureInterruptionQueueURL set but AzureInterruptions was not wired")
+	}
+}
+
+func TestNewWorkerLeavesAzureInterruptionsNilWhenUnset(t *testing.T) {
+	cfg := azureInterruptionQueueConfig("", map[string]provider.Config{"azure": {Kind: "azure", Owner: "test", Subnet: "private", Subscription: "sub", ResourceGroup: "rg", SecurityGroup: "sg", SSHPublicKey: "ssh-ed25519 AAAA"}}, []string{"azure"})
+	r := &Runtime{Client: fake.NewClientset()}
+	credentials := Credentials{Providers: map[string]map[string]string{"azure": {"AZURE_CLIENT_ID": "fixture-client"}}}
+	worker, cleanup, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	op, ok := worker.(*operator.Operator)
+	if !ok {
+		t.Fatal("expected the real operator worker")
+	}
+	if op.AzureInterruptions != nil {
+		t.Fatal("AzureInterruptionQueueURL unset but AzureInterruptions was wired anyway")
+	}
+}
+
+func TestNewWorkerRequiresConfiguredAzureProviderWhenInterruptionQueueSet(t *testing.T) {
+	cfg := azureInterruptionQueueConfig("https://fixture.queue.core.windows.net/interruptions", map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	r := &Runtime{Client: fake.NewClientset()}
+	if _, _, err := r.newWorker(Resolved{Config: cfg}, Credentials{}, CleanupMode, func(bool) {}); err == nil {
+		t.Fatal("expected an error when AzureInterruptionQueueURL is set without a configured \"azure\" provider")
+	}
+}
+
 type runtimeWorker struct {
 	paused, draining, drained atomic.Bool
 	started, finish, stopped  chan struct{}
