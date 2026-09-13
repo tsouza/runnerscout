@@ -78,6 +78,9 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 	if err := p.azureClient().requireVacantCreation(ctx, p.Config, a.ID); err != nil {
 		return "", err
 	}
+	if err := p.validateAzureImage(ctx, a); err != nil {
+		return "", err
+	}
 	tags := map[string]string{"runnerscout-owner": p.Config.Owner, "runnerscout-operation": a.ID}
 	nicID := p.azureID("Microsoft.Network/networkInterfaces", a.ID+"-nic")
 	properties := map[string]any{
