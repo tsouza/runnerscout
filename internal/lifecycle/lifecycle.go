@@ -57,6 +57,20 @@ type Allocation struct {
 	// RetryProcessed marks a confirmed interruption as already evaluated for a
 	// bounded rerun, whatever the outcome, so it is never re-evaluated.
 	RetryProcessed bool `json:"retryProcessed,omitempty"`
+	// NetworkProfile names the NetworkProfile this allocation's overlay
+	// membership belongs to. It is only ever non-empty for a "wireguard" mode
+	// NetworkProfile; internal/configapi/compile.go's network() still rejects
+	// every other NetworkProfileSpec.Mode unconditionally, so no allocation
+	// produced by this codebase's own configuration path can set it yet.
+	// WireGuardPublicKey and WireGuardOverlayAddress are that allocation's
+	// checkpointed overlay identity: generated once in controller memory at
+	// the Pending->Creating transition and persisted here exactly like
+	// ResourceID/Resources already are. The private key itself is never
+	// checkpointed - it is consumed once into cloud-init and discarded
+	// (docs/networking-peer-model.md, "Peer trust" and "Secret shape").
+	NetworkProfile          string `json:"networkProfile,omitempty"`
+	WireGuardPublicKey      []byte `json:"wireGuardPublicKey,omitempty"`
+	WireGuardOverlayAddress string `json:"wireGuardOverlayAddress,omitempty"`
 }
 
 var ErrConflict = errors.New("state revision conflict")
@@ -84,6 +98,13 @@ type Observation struct {
 type Creation struct {
 	ResourceID string
 	Resources  []ResourceReference
+	// WireGuardPublicKey carries a freshly minted overlay public key back to
+	// Step for checkpointing onto Allocation.WireGuardPublicKey, the same way
+	// ResourceID/Resources already flow from a create attempt into the
+	// durable Allocation record. No provider sets this today - it stays
+	// empty for every allocation until NetworkProfile becomes reachable (see
+	// Allocation.NetworkProfile).
+	WireGuardPublicKey []byte
 }
 type ResourceCreator interface {
 	CreateWithResources(context.Context, Allocation) (Creation, error)
@@ -189,6 +210,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		}
 		if creation.ResourceID != "" {
 			a.ResourceID = creation.ResourceID
+		}
+		if len(creation.WireGuardPublicKey) > 0 {
+			a.WireGuardPublicKey = creation.WireGuardPublicKey
 		}
 		resources, _, referenceError := MergeResources(a.Resources, creation.Resources)
 		if referenceError != nil {
