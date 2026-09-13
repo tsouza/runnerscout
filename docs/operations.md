@@ -53,13 +53,24 @@ A failed configured credential does not fall back to developer CLI credentials.
 Mount credential files through Secrets or workload-identity admission; never place
 secret values in the public configuration. Existing `az login` caches are not used.
 
-Each named provider uses private CLI caches and an isolated authentication
-environment. AWS profiles require an explicit mounted `AWS_CONFIG_FILE` or
-`AWS_SHARED_CREDENTIALS_FILE`; implicit home-directory profiles are not used.
-GCP accepts a mounted file through `GOOGLE_APPLICATION_CREDENTIALS` or
-`CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; configuring different files in both
-variables is rejected. Shutdown waits for active operations before removing
-credential caches.
+Each named provider uses its own credential scope. AWS profiles require an
+explicit mounted `AWS_CONFIG_FILE` or `AWS_SHARED_CREDENTIALS_FILE`; implicit
+home-directory profiles are not used. Shutdown joins operations before removing
+AWS CLI caches.
+
+GCP uses the native Go SDK. Select a mounted credential JSON file with
+`GOOGLE_APPLICATION_CREDENTIALS` or `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`;
+different files in both variables are rejected. An explicit file never falls
+back to another identity after failure. Without a file, the SDK uses metadata
+workload identity; developer ADC and gcloud login caches are not read. Executable
+credential sources are rejected. Credential-file changes require a controller
+reload or restart. Grant access to instance and disk inventory/creation/deletion
+and zonal operation inventory/observation in the configured project.
+
+GCP labels the VM and its boot disk at creation and checks operation commitment
+before cleanup. A residual disk retains the allocation until observed absent.
+An untagged or foreign disk is never adopted from its name; restore authoritative
+ownership evidence or investigate it before retiring the allocation.
 
 Run the CRD controller inside the cluster with
 `runnerscout -scale-set=build -namespace=runnerscout`. Install the five schemas

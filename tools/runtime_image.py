@@ -34,9 +34,7 @@ def main():
                 "controller_config": ["/usr/local/bin/runnerscout", "-config=/config.json", "-validate"],
                 "aws_cli": ["aws", "--version"],
                 "azure_python_dependency_absence": ["python", "-c", "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('azure', 'msal', 'cryptography')); print('Azure uses native Go SDK')"],
-                "gcp_cli": ["gcloud", "version", "--format=json"],
-                "gcp_compute_commands": ["gcloud", "compute", "instances", "create", "--help"],
-                "gcp_emulator_absence": ["python3", "-c", "from pathlib import Path; found=list(Path('/opt/google-cloud-sdk/platform').glob('*emulator*')); assert not found, 'unused cloud emulators are bundled'; print('no bundled cloud emulators')"],
+                "gcp_sdk_only": ["python3", "-c", "import importlib.util, shutil; from pathlib import Path; assert shutil.which('gcloud') is None; assert not Path('/opt/google-cloud-sdk').exists(); assert importlib.util.find_spec('google') is None; print('GCP uses the native Go SDK; no bundled CLI or emulators')"],
             }
             for name, command in commands.items():
                 container_name = "runnerscout-image-test-" + str(uuid.uuid4())

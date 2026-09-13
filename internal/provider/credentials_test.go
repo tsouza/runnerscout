@@ -58,16 +58,11 @@ func TestProviderCredentialScopesSeparateNamedIdentities(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cleanSecond() })
-	gcp, cleanGCP, err := NewCommand(credentialConfig("gcp"), map[string]string{"GOOGLE_APPLICATION_CREDENTIALS": "/mounted/gcp.json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cleanGCP() })
 	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := []*Command{first, second, gcp}
+	commands := []*Command{first, second}
 	results := make([]map[string]string, len(commands))
 	errors := make([]error, len(commands))
 	var wg sync.WaitGroup
@@ -109,8 +104,6 @@ func TestProviderCredentialScopesSeparateNamedIdentities(t *testing.T) {
 			if result["AWS_CONFIG_FILE"] != filepath.Join(home, "config") || result["AWS_SHARED_CREDENTIALS_FILE"] != filepath.Join(home, "credentials") || result["AWS_EC2_METADATA_DISABLED"] != "true" {
 				t.Fatal("AWS can read a shared default credential source")
 			}
-		} else if result["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"] != "/mounted/gcp.json" || result["CLOUDSDK_CONFIG"] != home || result["AWS_ACCESS_KEY_ID"] != "" {
-			t.Fatal("GCP scope did not select its own file and cache")
 		}
 		if strings.Contains(fmt.Sprintf("%v %+v %#v", commands[i].Exec, commands[i].Exec, commands[i].Exec), "-secret") {
 			t.Fatal("executor diagnostics exposed credentials")
