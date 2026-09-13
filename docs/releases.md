@@ -24,13 +24,45 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
    (`workflow_call`) against the same resolved SHA, producing the multi-arch
    image OCI archive, Helm chart package, SPDX SBOM and checksums as workflow
    artifacts. `release-build.yml` keeps its standalone `workflow_dispatch`
-   trigger for ad hoc manual builds against any commit.
+   trigger for ad hoc manual builds against any commit, but that path only
+   ever runs the `build` job, never the `publish` job below.
+3. **`publish`**, a job inside `release-build.yml`, runs only when that
+   workflow was itself invoked via `workflow_call` — which today only ever
+   happens from `release.yml`'s `build` job above, after `preflight` has
+   passed. It pushes the multi-arch image just built to
+   `ghcr.io/tsouza/runnerscout`, tagged with both the resolved commit SHA and
+   the release tag, using the workflow's own `GITHUB_TOKEN` (`packages:
+   write` permission) — GHCR accepts this for a public repository with no
+   registry secret configured. It then signs the pushed image keylessly with
+   `cosign sign` and attests the SBOM keylessly with `cosign attest --type
+   spdxjson`, both using the workflow's own GitHub Actions OIDC identity
+   (`id-token: write` permission) to obtain a short-lived certificate from
+   Sigstore's public Fulcio CA — no signing key is stored anywhere, and the
+   signature, certificate and attestation are published to Sigstore's public
+   Rekor transparency log. A downstream consumer verifies the image with:
 
-Nothing in this pipeline pushes an image to a registry, signs an artifact, or
-creates a GitHub Release — this repository has no signing keys or registry
-credentials configured yet, so building that half now would mean faking
-publication authority it doesn't actually have. It stays tracked follow-up
-work under issue #17 once real credentials exist.
+   ```sh
+   cosign verify ghcr.io/tsouza/runnerscout@<digest> \
+     --certificate-identity-regexp '^https://github\.com/tsouza/runnerscout/\.github/workflows/release-build\.yml@refs/tags/v.*$' \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+   ```
+
+   and the SBOM attestation with `cosign verify-attestation` using the same
+   `--certificate-identity-regexp`/`--certificate-oidc-issuer` pair and
+   `--type spdxjson`.
+
+Publishing has one required one-time manual step outside this automation:
+GHCR creates a package as **private** on its first-ever push, regardless of
+the pushing repository's own visibility, and GitHub does not expose an
+endpoint the workflow's `GITHUB_TOKEN` can call to change that — a repository
+admin must open the new package's settings on GitHub once, after the first
+tag release, and change its visibility to public (and confirm it's linked to
+this repository) before downstream consumers can pull or verify it without
+authentication. Every push after that stays public.
+
+This pipeline still never creates a GitHub Release object (`gh release
+create` or the equivalent API) — that remains a distinct, separate decision,
+made outside this automation, per issue #17.
 
 ## Required acceptance
 
