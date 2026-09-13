@@ -6,8 +6,24 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # pull_request: github.ref is unique per PR (refs/pull/<n>/merge), so
+  # cancelling an in-progress run when new commits supersede it is safe -
+  # only that PR's own stale run is ever cancelled.
+  # push: github.ref is always refs/heads/main, identical across every
+  # merge. The five heavy jobs gated in this workflow are the ONLY
+  # validation main gets post-merge (see docs/qualification.md) - if two
+  # merges land close together, a shared ref-only group would let the
+  # second push's run cancel the first's before it finishes, silently
+  # leaving that earlier commit's tree never actually validated by the
+  # suite this whole split exists to run. This is not hypothetical: it
+  # happened during this session's own ordinary merge cadence (runtime-image
+  # on a push run cancelled ~4 minutes in by the next merge, four minutes
+  # later, per an adversarial review that caught it against real run
+  # history). Including github.sha only for push events gives every push
+  # its own group, so pushes never cancel each other, while pull_request's
+  # per-PR cancellation behavior is completely unchanged.
+  group: ci-${{ github.ref }}${{ github.event_name == 'push' && format('-{0}', github.sha) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   changes:
     name: changes
