@@ -348,9 +348,16 @@ func TestAzureAbsenceRequiresRecognizedNotFoundResponses(t *testing.T) {
 	}
 }
 
+// azureFixtureNICPrivateIP is the private IP every fixture NIC's single
+// ipConfiguration reports, in the exact nested shape
+// (properties.ipConfigurations[].properties.privateIPAddress) ARM's real
+// network interface GET response uses - see azureInventory's own capture of
+// this same field for lifecycle.Allocation.WireGuardEndpoint.
+const azureFixtureNICPrivateIP = "10.20.0.9"
+
 func azureOwnedNIC() map[string]any {
 	nic := ownedResource("Microsoft.Network/networkInterfaces", "rs-test-nic", "test")
-	nic["properties"] = map[string]any{"resourceGuid": azureFixtureNICUID, "virtualMachine": map[string]string{"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/rs-test"}}
+	nic["properties"] = map[string]any{"resourceGuid": azureFixtureNICUID, "virtualMachine": map[string]string{"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/rs-test"}, "ipConfigurations": []any{map[string]any{"name": "private", "properties": map[string]any{"privateIPAddress": azureFixtureNICPrivateIP, "privateIPAllocationMethod": "Dynamic"}}}}
 	return nic
 }
 
