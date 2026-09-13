@@ -9,6 +9,7 @@ import (
 
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"github.com/tsouza/runnerscout/internal/testutil"
+	"github.com/tsouza/runnerscout/internal/wireguard"
 )
 
 func nativeAWSFixture(t *testing.T) (*Command, *testutil.AWS, lifecycle.Allocation) {
@@ -33,6 +34,47 @@ func awsEffects(requests []url.Values) []string {
 		}
 	}
 	return effects
+}
+
+// TestAWSSDKCreationCapturesPrivateIPAsWireGuardEndpoint proves the outer-
+// endpoint gap resolution for AWS (lifecycle.Allocation.WireGuardEndpoint's
+// doc comment): the private IP AWS already returns in the exact
+// RunInstances response createAWS already parses for other fields is
+// captured onto Creation.WireGuardEndpoint as "ip:internal/wireguard.
+// DefaultListenPort", with no new API call.
+func TestAWSSDKCreationCapturesPrivateIPAsWireGuardEndpoint(t *testing.T) {
+	p, _, a := nativeAWSFixture(t)
+	a.NetworkProfile = "profile-a"
+	a.WireGuardOverlayAddress = "10.60.0.7"
+	p.NetworkPeers = func(context.Context, lifecycle.Allocation) ([]wireguard.Peer, error) { return nil, nil }
+	receipt, err := p.CreateWithResources(context.Background(), a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := testutil.AWSPrivateIP + ":51820"
+	if receipt.WireGuardEndpoint != want {
+		t.Fatalf("wireguard endpoint: got %q want %q", receipt.WireGuardEndpoint, want)
+	}
+}
+
+// TestAWSSDKCreationWithoutWireGuardIntentNeverCapturesAnEndpoint is this
+// field's "zero effect until wired" regression guard, mirroring
+// TestCreateWithResourcesZeroEffectWithoutNetworkProfile in
+// wireguard_test.go for the new field: createAWS always has the private IP
+// available in its own response, but CreateWithResources must not surface it
+// onto Creation for an allocation that never asked for wireguard mode.
+func TestAWSSDKCreationWithoutWireGuardIntentNeverCapturesAnEndpoint(t *testing.T) {
+	p, _, a := nativeAWSFixture(t)
+	if a.NetworkProfile != "" {
+		t.Fatal("test fixture unexpectedly set NetworkProfile")
+	}
+	receipt, err := p.CreateWithResources(context.Background(), a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.WireGuardEndpoint != "" {
+		t.Fatalf("wireguard endpoint captured with no NetworkProfile intent: %q", receipt.WireGuardEndpoint)
+	}
 }
 
 func TestAWSSDKCreationReceiptAndOrderedCleanup(t *testing.T) {

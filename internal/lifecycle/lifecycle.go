@@ -71,6 +71,40 @@ type Allocation struct {
 	NetworkProfile          string `json:"networkProfile,omitempty"`
 	WireGuardPublicKey      []byte `json:"wireGuardPublicKey,omitempty"`
 	WireGuardOverlayAddress string `json:"wireGuardOverlayAddress,omitempty"`
+	// WireGuardEndpoint is this allocation's outer, dialable "host:port"
+	// address for its WireGuard UDP socket - distinct from
+	// WireGuardOverlayAddress, which is the peer's INNER address routed
+	// inside the tunnel via AllowedIPs. It is the resolution to the gap
+	// internal/wireguard/tunnel.Peer's own doc comment and
+	// docs/networking-peer-model.md's "What this document does not decide"
+	// section left open: within the single directly-routable private
+	// network this codebase already requires an allocation's NetworkMapping
+	// to provision (the same Subnet/SecurityGroup/NetworkID a NetworkProfile
+	// already references), a peer's outer endpoint can simply be that VM's
+	// already-cloud-assigned private IP on internal/wireguard.DefaultListenPort
+	// - every VM in one such mapping can already reach every other directly,
+	// with no NAT traversal or "roaming" needed. Populated once, from data
+	// each provider's create call already receives for its own other
+	// purposes (see Creation.WireGuardEndpoint's doc comment for exactly
+	// what each provider captures today). Left empty (never inferred, never
+	// synthesized) when unknown - Snapshot below just omits it from that
+	// peer's entry, which leaves the field unset in a Peer, not the peer
+	// excluded; a still-empty Endpoint falls back to WireGuard's own
+	// unset-endpoint "roaming" behavior, so a peer with an as-yet-uncaptured
+	// endpoint is not otherwise broken. This does NOT resolve reachability
+	// across two different NetworkMappings (a NetworkProfile may reference
+	// mappings on different providers or regions - api/v1alpha1.NetworkMapping
+	// is a list, MaxItems=32, precisely to allow that): private IPs in
+	// different clouds'/regions' subnets are not mutually routable without a
+	// VPN/peering this codebase's own design deliberately never provisions
+	// (docs/networking-control-plane.md: "never authorizes the controller to
+	// create a paid gateway"). Making WireGuard work across mappings is a
+	// separate, larger networking-topology decision this field does not
+	// make; it is safe as far as it goes because compile.go still rejects
+	// every wireguard-mode NetworkProfile unconditionally, so no allocation
+	// this codebase can produce today exercises a multi-mapping profile at
+	// all.
+	WireGuardEndpoint string `json:"wireGuardEndpoint,omitempty"`
 	// WireGuardPollTokenHash is the SHA-256 hash
 	// (internal/wireguard.HashPollToken) of the bearer token this
 	// allocation's VM presents to the controller's WireGuard peer-poll
@@ -128,6 +162,25 @@ type Creation struct {
 	// same reachability reason WireGuardPublicKey isn't (see
 	// Allocation.NetworkProfile).
 	WireGuardPollTokenHash []byte
+	// WireGuardEndpoint carries this allocation's own outer "host:port"
+	// dial address back to Step for checkpointing onto
+	// Allocation.WireGuardEndpoint - see that field's doc comment for what
+	// it means and its known limits. Unlike WireGuardPublicKey/
+	// WireGuardPollTokenHash (minted once in controller memory before the
+	// cloud create call is even made), this value only exists once the
+	// cloud provider has actually assigned the VM a private IP, so it is
+	// captured from the create call's own response rather than generated:
+	// internal/provider's AWS adapter sets it (the private IP is already
+	// present in the exact RunInstances response it already parses for
+	// other fields); the Azure and GCP adapters do not set it yet, even
+	// though each already fetches an API response that carries the same
+	// data for its own purposes (Azure: the network interface GET
+	// azureInventory already performs; GCP: the compute.Instance
+	// gcpInventory already fetches) - wiring those two through is left as
+	// explicit follow-up work, not silently assumed to be unneeded, because
+	// no allocation this codebase can produce today reaches any of this
+	// (see Allocation.NetworkProfile).
+	WireGuardEndpoint string
 }
 type ResourceCreator interface {
 	CreateWithResources(context.Context, Allocation) (Creation, error)
@@ -239,6 +292,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		}
 		if len(creation.WireGuardPollTokenHash) > 0 {
 			a.WireGuardPollTokenHash = creation.WireGuardPollTokenHash
+		}
+		if creation.WireGuardEndpoint != "" {
+			a.WireGuardEndpoint = creation.WireGuardEndpoint
 		}
 		resources, _, referenceError := MergeResources(a.Resources, creation.Resources)
 		if referenceError != nil {

@@ -121,6 +121,7 @@ func TestCreateWithResourcesEmbedsWireGuardIdentityWhenIntended(t *testing.T) {
 	p, f, a := nativeAWSFixture(t)
 	a.NetworkProfile = "profile-a"
 	a.WireGuardOverlayAddress = "10.60.0.7"
+	p.Config.WireGuardControllerURL = "https://controller.internal:8443"
 	wantPeers := []wireguard.Peer{{AllocationID: "rs-peer", PublicKey: "cGVlci1wdWJsaWMta2V5", OverlayAddress: "10.60.0.1"}}
 	var sawAllocationID string
 	p.NetworkPeers = func(_ context.Context, allocation lifecycle.Allocation) ([]wireguard.Peer, error) {
@@ -176,6 +177,12 @@ func TestCreateWithResourcesEmbedsWireGuardIdentityWhenIntended(t *testing.T) {
 	}
 	if decodedPayload.OverlayAddress != a.WireGuardOverlayAddress {
 		t.Fatalf("overlay address mismatch: got %q want %q", decodedPayload.OverlayAddress, a.WireGuardOverlayAddress)
+	}
+	if decodedPayload.AllocationID != a.ID {
+		t.Fatalf("allocation ID mismatch: got %q want %q", decodedPayload.AllocationID, a.ID)
+	}
+	if decodedPayload.ControllerURL != p.Config.WireGuardControllerURL {
+		t.Fatalf("controller URL mismatch: got %q want %q", decodedPayload.ControllerURL, p.Config.WireGuardControllerURL)
 	}
 	if len(decodedPayload.Peers) != 1 || decodedPayload.Peers[0] != wantPeers[0] {
 		t.Fatalf("peer snapshot mismatch: got %+v want %+v", decodedPayload.Peers, wantPeers)

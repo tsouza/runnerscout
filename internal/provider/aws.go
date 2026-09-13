@@ -95,6 +95,12 @@ func (p *Command) createAWS(ctx context.Context, a lifecycle.Allocation, script 
 			receipt.Resources = append(receipt.Resources, lifecycle.ResourceReference{Kind: "aws-network-interface", ID: id})
 		}
 	}
+	// The private IP is already present in this exact response - see
+	// lifecycle.Allocation.WireGuardEndpoint's doc comment for why this is
+	// captured (no new API call) and what it resolves.
+	if len(instance.NetworkInterfaces) == 1 {
+		receipt.WireGuardEndpoint = wireGuardEndpoint(aws.ToString(instance.NetworkInterfaces[0].PrivateIpAddress))
+	}
 	receipt.Resources, _, err = lifecycle.MergeResources(nil, receipt.Resources)
 	if err != nil {
 		return receipt, err
