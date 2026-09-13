@@ -176,19 +176,25 @@ type Creation struct {
 	// properties.ipConfigurations[].properties.privateIPAddress - is
 	// already present in the exact network interface GET response
 	// azureInventory already performs for ownership/UID verification, so
-	// this costs no new call either). The GCP adapter does NOT set it: its
-	// creation path (Instances.Insert, then polling ZoneOperations.Get/List)
-	// never receives a compute.Instance response at all - only
-	// compute.Operation ones, which carry no NetworkInterfaces field -
-	// so capturing this for GCP would require a genuinely new post-create
-	// Instances.Get call, a real API-call/latency/failure-mode tradeoff
-	// this codebase deliberately does not decide unilaterally here.
-	// gcpInventory's own Instances.Get does carry
-	// NetworkInterfaces[].NetworkIP, but only runs against an
-	// already-existing instance during observe/delete, never right after a
-	// create it did not just perform. No allocation this codebase can
-	// produce today reaches any of this regardless (see
-	// Allocation.NetworkProfile).
+	// this costs no new call either). The GCP adapter sets it too, but
+	// differently from its two siblings: its creation path
+	// (Instances.Insert, then polling ZoneOperations.Get/List) never
+	// receives a compute.Instance response at all - only compute.Operation
+	// ones, which carry no NetworkInterfaces field - so capturing this for
+	// GCP requires one genuinely new post-create Instances.Get call
+	// (gcpCaptureWireGuardEndpoint). That call is made only when
+	// a.NetworkProfile != "", the same central gate this field's capture
+	// already sits behind for every provider (see Command.
+	// CreateWithResources's clearing of this field), so it costs literally
+	// nothing for any allocation this codebase's configuration path can
+	// produce today; a failed or incomplete Get is best-effort and never
+	// fails the creation, matching how AWS/Azure already tolerate their own
+	// equivalent edge cases (an unexpected NetworkInterfaces count).
+	// gcpInventory's own separate Instances.Get (used during observe/
+	// delete) also carries NetworkInterfaces[].NetworkIP, but is not reused
+	// here - it performs a second Disks.Get this capture does not need. No
+	// allocation this codebase can produce today reaches any of this
+	// regardless (see Allocation.NetworkProfile).
 	WireGuardEndpoint string
 }
 type ResourceCreator interface {
