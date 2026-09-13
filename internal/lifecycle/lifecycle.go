@@ -71,6 +71,22 @@ type Allocation struct {
 	NetworkProfile          string `json:"networkProfile,omitempty"`
 	WireGuardPublicKey      []byte `json:"wireGuardPublicKey,omitempty"`
 	WireGuardOverlayAddress string `json:"wireGuardOverlayAddress,omitempty"`
+	// WireGuardPollTokenHash is the SHA-256 hash
+	// (internal/wireguard.HashPollToken) of the bearer token this
+	// allocation's VM presents to the controller's WireGuard peer-poll
+	// endpoint (docs/networking-peer-model.md's "Revocation" section). Only
+	// the hash is checkpointed here, never the raw token: this codebase's
+	// checkpoint layer (internal/state.Kubernetes) persists Allocation as a
+	// plain Kubernetes ConfigMap, not a Secret, and its existing
+	// Secret/ConfigMap split already treats ConfigMap-readable data as
+	// materially less protected than Secret-readable data (see
+	// internal/configapi/compile.go's secret() helper and
+	// docs/networking-peer-model.md's "Secret shape" section) - persisting
+	// the raw bearer credential here would hand read access to it to anyone
+	// with the (typically much broader) RBAC permission to list ConfigMaps.
+	// The raw token itself is generated once and consumed immediately into
+	// cloud-init, exactly like WireGuardPublicKey's private-key counterpart.
+	WireGuardPollTokenHash []byte `json:"wireGuardPollTokenHash,omitempty"`
 }
 
 var ErrConflict = errors.New("state revision conflict")
@@ -105,6 +121,13 @@ type Creation struct {
 	// empty for every allocation until NetworkProfile becomes reachable (see
 	// Allocation.NetworkProfile).
 	WireGuardPublicKey []byte
+	// WireGuardPollTokenHash carries a freshly minted poll token's SHA-256
+	// hash back to Step for checkpointing onto
+	// Allocation.WireGuardPollTokenHash, the same way WireGuardPublicKey
+	// above does for the public key. No provider sets this today for the
+	// same reachability reason WireGuardPublicKey isn't (see
+	// Allocation.NetworkProfile).
+	WireGuardPollTokenHash []byte
 }
 type ResourceCreator interface {
 	CreateWithResources(context.Context, Allocation) (Creation, error)
@@ -213,6 +236,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		}
 		if len(creation.WireGuardPublicKey) > 0 {
 			a.WireGuardPublicKey = creation.WireGuardPublicKey
+		}
+		if len(creation.WireGuardPollTokenHash) > 0 {
+			a.WireGuardPollTokenHash = creation.WireGuardPollTokenHash
 		}
 		resources, _, referenceError := MergeResources(a.Resources, creation.Resources)
 		if referenceError != nil {

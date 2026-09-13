@@ -1,6 +1,7 @@
 package wireguard
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -123,6 +124,51 @@ func TestSnapshotEmptyNetworkProfileYieldsNoPeers(t *testing.T) {
 	allocations := []lifecycle.Allocation{running("rs-a", "", "pub-a", "10.60.0.1")}
 	if peers := Snapshot("rs-b", "", allocations); len(peers) != 0 {
 		t.Fatalf("empty NetworkProfile produced peers: %+v", peers)
+	}
+}
+
+// TestGeneratePollTokenProducesDistinctHexTokensWithMatchingHash proves
+// GeneratePollToken's two return values are actually linked (the hash really
+// is of the token it returns, not some independent value) and that repeated
+// calls never collide - the two properties the poll endpoint's auth check
+// depends on.
+func TestGeneratePollTokenProducesDistinctHexTokensWithMatchingHash(t *testing.T) {
+	tokenA, hashA, err := GeneratePollToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenB, hashB, err := GeneratePollToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tokenA == tokenB || hashA == hashB {
+		t.Fatal("two calls to GeneratePollToken produced identical output")
+	}
+	raw, err := hex.DecodeString(tokenA)
+	if err != nil {
+		t.Fatalf("token is not valid hex: %v", err)
+	}
+	if len(raw) != PollTokenSize {
+		t.Fatalf("decoded token has wrong length: got %d want %d", len(raw), PollTokenSize)
+	}
+	recomputed, err := HashPollToken(tokenA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recomputed != hashA {
+		t.Fatal("HashPollToken(tokenA) does not match the hash GeneratePollToken returned for tokenA")
+	}
+	if recomputed == hashB {
+		t.Fatal("hash of tokenA matched tokenB's hash")
+	}
+}
+
+// TestHashPollTokenRejectsMalformedInput proves the endpoint's auth path can
+// treat "not valid hex" the same as "wrong token" rather than panicking or
+// silently hashing garbage bytes.
+func TestHashPollTokenRejectsMalformedInput(t *testing.T) {
+	if _, err := HashPollToken("not-hex!!"); err == nil {
+		t.Fatal("expected an error decoding a non-hex token")
 	}
 }
 

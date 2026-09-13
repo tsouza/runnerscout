@@ -51,3 +51,46 @@ func TestCreationWithoutWireGuardIntentNeverCheckpointsAKey(t *testing.T) {
 		t.Fatalf("wireguard public key checkpointed with no provider-supplied key: %q", durable.a.WireGuardPublicKey)
 	}
 }
+
+// wireGuardPollTokenCloud is a ResourceCreator that returns a WireGuard poll
+// token hash alongside its cloud resource identity - the same checkpoint
+// path wireGuardCloud above exercises for the public key, for the new field
+// this task adds.
+type wireGuardPollTokenCloud struct {
+	*cloud
+	pollTokenHash []byte
+}
+
+func (p *wireGuardPollTokenCloud) CreateWithResources(context.Context, l.Allocation) (l.Creation, error) {
+	p.created++
+	return l.Creation{ResourceID: "vm-1", WireGuardPollTokenHash: p.pollTokenHash}, nil
+}
+
+func TestCreationChecksPointsWireGuardPollTokenHashLikePublicKey(t *testing.T) {
+	controller, durable, base, _ := setup()
+	provider := &wireGuardPollTokenCloud{cloud: base, pollTokenHash: []byte("fixture-poll-token-hash")}
+	controller.Providers = map[string]l.Provider{"a": provider}
+	if err := controller.Step(context.Background(), durable.a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if string(durable.a.WireGuardPollTokenHash) != "fixture-poll-token-hash" {
+		t.Fatalf("wireguard poll token hash was not checkpointed: %q", durable.a.WireGuardPollTokenHash)
+	}
+}
+
+// TestCreationWithoutWireGuardIntentNeverCheckpointsAPollTokenHash mirrors
+// TestCreationWithoutWireGuardIntentNeverCheckpointsAKey for the new field:
+// a provider that never sets Creation.WireGuardPollTokenHash (every provider
+// in this codebase today) must never cause
+// Allocation.WireGuardPollTokenHash to become non-empty.
+func TestCreationWithoutWireGuardIntentNeverCheckpointsAPollTokenHash(t *testing.T) {
+	controller, durable, base, _ := setup()
+	provider := &receiptCloud{cloud: base}
+	controller.Providers = map[string]l.Provider{"a": provider}
+	if err := controller.Step(context.Background(), durable.a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(durable.a.WireGuardPollTokenHash) != 0 {
+		t.Fatalf("wireguard poll token hash checkpointed with no provider-supplied hash: %q", durable.a.WireGuardPollTokenHash)
+	}
+}

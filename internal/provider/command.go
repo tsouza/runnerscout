@@ -132,6 +132,7 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	// BootstrapWithWireGuard, which reproduces Bootstrap(jit) unchanged.
 	var wireGuardJSON string
 	var wireGuardPublicKey []byte
+	var wireGuardPollTokenHash []byte
 	if a.NetworkProfile != "" {
 		if p.NetworkPeers == nil {
 			return lifecycle.Creation{}, lifecycle.ErrNoEffect
@@ -140,12 +141,17 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 		if genErr != nil {
 			return lifecycle.Creation{}, genErr
 		}
+		pollToken, pollTokenHash, tokenErr := wireguard.GeneratePollToken()
+		if tokenErr != nil {
+			return lifecycle.Creation{}, tokenErr
+		}
 		peers, peersErr := p.NetworkPeers(ctx, a)
 		if peersErr != nil {
 			return lifecycle.Creation{}, peersErr
 		}
 		encoded, marshalErr := json.Marshal(wireguard.CloudInitPayload{
 			PrivateKey:     keyPair.Private.Base64(),
+			PollToken:      pollToken,
 			OverlayAddress: a.WireGuardOverlayAddress,
 			Peers:          peers,
 		})
@@ -154,6 +160,7 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 		}
 		wireGuardJSON = string(encoded)
 		wireGuardPublicKey = keyPair.Public.Bytes()
+		wireGuardPollTokenHash = pollTokenHash[:]
 	}
 	script, err := BootstrapWithWireGuard(jit, wireGuardJSON)
 	if err != nil {
@@ -172,6 +179,9 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	}
 	if len(wireGuardPublicKey) > 0 {
 		creation.WireGuardPublicKey = wireGuardPublicKey
+	}
+	if len(wireGuardPollTokenHash) > 0 {
+		creation.WireGuardPollTokenHash = wireGuardPollTokenHash
 	}
 	return creation, err
 }
