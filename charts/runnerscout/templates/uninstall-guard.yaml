@@ -1,0 +1,82 @@
+{{- if .Values.crd.scaleSetName }}
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "runnerscout.fullname" . }}-guard
+  labels:
+    {{- include "runnerscout.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+{{- end }}
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "runnerscout.fullname" . }}-guard
+rules:
+  - apiGroups: [runnerscout.io]
+    resources: [runnerscalesets]
+    resourceNames: [{{ .Values.crd.scaleSetName | quote }}]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "runnerscout.fullname" . }}-guard
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "runnerscout.fullname" . }}-guard
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "runnerscout.fullname" . }}-guard
+---
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-uninstall" (include "runnerscout.fullname" . | trunc 53 | trimSuffix "-") }}
+  annotations:
+    helm.sh/hook: pre-delete
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 90
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "runnerscout.podPolicySelector" . | nindent 8 }}
+        app.kubernetes.io/component: cleanup-check
+    spec:
+      serviceAccountName: {{ include "runnerscout.fullname" . }}-guard
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: check-cleanup
+          image: {{ include "runnerscout.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/runnerscout"]
+          args: [{{ printf "-scale-set=%s" .Values.crd.scaleSetName | quote }}, {{ printf "-namespace=%s" .Release.Namespace | quote }}, "-check-uninstall"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

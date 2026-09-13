@@ -1,3 +1,4 @@
+{{- if not .Values.crd.scaleSetName }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,3 +7,4 @@ metadata:
     {{- include "runnerscout.labels" . | nindent 4 }}
 data:
   config.json: {{ include "runnerscout.config" . | quote }}
+{{- end }}

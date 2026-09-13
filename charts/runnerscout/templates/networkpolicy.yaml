@@ -6,7 +6,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- include "runnerscout.selector" . | nindent 6 }}
+      {{- include "runnerscout.podPolicySelector" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress: []
   egress:

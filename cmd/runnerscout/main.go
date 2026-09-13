@@ -26,6 +26,7 @@ import (
 )
 
 type options struct {
+	checkCRD, checkUninstall                       bool
 	healthAddress, configPath, namespace, scaleSet string
 	tokenPath, appID, appKey                       string
 	installationID                                 int64
@@ -44,11 +45,16 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&o.appID, "github-app-client-id", "", "GitHub App client ID")
 	flags.Int64Var(&o.installationID, "github-app-installation-id", 0, "GitHub App installation ID")
 	flags.StringVar(&o.appKey, "github-app-key-file", "", "mounted GitHub App private-key file")
+	flags.BoolVar(&o.checkCRD, "check-crd", false, "check a CRD snapshot through Kubernetes without GitHub or cloud operations")
+	flags.BoolVar(&o.checkUninstall, "check-uninstall", false, "check that CRD deletion and durable cleanup are complete before uninstall")
 	if err := flags.Parse(args); err != nil {
 		return o, err
 	}
 	if flags.NArg() != 0 {
 		return o, errors.New("unexpected positional arguments")
+	}
+	if (o.checkCRD || o.checkUninstall) && o.scaleSet == "" || o.checkCRD && o.checkUninstall {
+		return o, errors.New("select only one CRD check and provide -scale-set and -namespace")
 	}
 	if o.scaleSet != "" {
 		if o.configPath != "" || o.tokenPath != "" || o.appID != "" || o.installationID != 0 || o.appKey != "" || o.validate {
@@ -167,6 +173,20 @@ func run(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if o.checkCRD || o.checkUninstall {
+		dc, err := dynamic.NewForConfig(kc)
+		if err != nil {
+			return err
+		}
+		checkCtx, stop := context.WithTimeout(ctx, time.Minute)
+		defer stop()
+		controller := &configapi.Runtime{Namespace: o.namespace, Name: o.scaleSet, Client: client, Dynamic: dc}
+		check := controller.CheckConfiguration
+		if o.checkUninstall {
+			check = controller.CheckUninstall
+		}
+		return runCheck(checkCtx, check)
+	}
 	return withHealth(ctx, o.healthAddress, func(ctx context.Context, status *health.Status) error {
 		if o.scaleSet != "" {
 			dynamicClient, err := dynamic.NewForConfig(kc)
@@ -191,6 +211,19 @@ func run(args []string) error {
 		}
 		return err
 	})
+}
+
+func runCheck(ctx context.Context, check func(context.Context) error) error {
+	err := check(ctx)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		// A controller can stop normally on cancellation. A one-shot safety
+		// check must not report success unless its verification completed.
+		return errors.Join(errors.New("Kubernetes safety check did not complete successfully"), err)
+	}
+	return nil
 }
 
 func main() {

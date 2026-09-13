@@ -38,3 +38,38 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- end -}}
 {{- toJson $cfg -}}
 {{- end -}}
+
+{{- define "runnerscout.mode" -}}
+{{- if .Values.crd.scaleSetName -}}crd{{- else -}}mounted{{- end -}}
+{{- end -}}
+
+{{- define "runnerscout.stateName" -}}
+{{- if .Values.crd.scaleSetName -}}{{ .Values.crd.scaleSetName }}{{- else -}}{{ .Values.config.name }}{{- end -}}
+{{- end -}}
+
+{{- define "runnerscout.validateOwnership" -}}
+{{- if .Release.IsUpgrade -}}
+{{- $deployments := lookup "apps/v1" "Deployment" .Release.Namespace "" -}}
+{{- range $existing := $deployments.items -}}
+{{- if eq (index (default dict $existing.metadata.labels) "app.kubernetes.io/instance") $.Release.Name -}}
+{{- $annotations := default dict $existing.metadata.annotations -}}
+{{- $oldMode := default "mounted" (index $annotations "runnerscout.io/configuration-mode") -}}
+{{- $oldName := default "" (index $annotations "runnerscout.io/state-name") -}}
+{{- if and (eq $oldName "") (eq $oldMode "mounted") -}}
+{{- $config := lookup "v1" "ConfigMap" $.Release.Namespace (printf "%s-config" $existing.metadata.name) -}}
+{{- if $config -}}
+{{- $oldConfig := fromJson (index $config.data "config.json") -}}
+{{- $oldName = default "" $oldConfig.name -}}
+{{- end -}}
+{{- end -}}
+{{- if or (ne $oldMode (include "runnerscout.mode" $)) (ne $oldName (include "runnerscout.stateName" $)) -}}
+{{- fail "configuration mode and scale-set state name cannot change during upgrade; finish existing cleanup before reinstalling" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "runnerscout.podPolicySelector" -}}
+runnerscout.io/instance: {{ .Release.Name | quote }}
+{{- end -}}

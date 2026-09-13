@@ -39,8 +39,10 @@ helm-integration:
 .PHONY: generate verify-generated crd-integration
 generate:
 	go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 object crd paths=./api/... output:crd:artifacts:config=config/crd/bases
+	mkdir -p charts/runnerscout/crds
+	cp config/crd/bases/*.yaml charts/runnerscout/crds/
 verify-generated: generate
-	git diff --exit-code -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases
-	@test -z "$$(git ls-files --others --exclude-standard -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases)"
+	git diff --exit-code -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases charts/runnerscout/crds
+	@test -z "$$(git ls-files --others --exclude-standard -- api/v1alpha1/zz_generated.deepcopy.go config/crd/bases charts/runnerscout/crds)"
 crd-integration:
 	python3 tools/crd_integration.py

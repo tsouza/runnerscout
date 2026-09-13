@@ -1,0 +1,102 @@
+# Illustrative, deliberately expired quotes. Replace with a real finite snapshot.
+apiVersion: runnerscout.io/v1alpha1
+kind: CapacityCatalog
+metadata:
+  name: multicloud
+  namespace: runnerscout
+spec:
+  offerings:
+  - id: aws-spot
+    provider: aws
+    region: us-east-1
+    zone: us-east-1a
+    machine: c7i.large
+    image: ami-00000000000000000
+    cpu: 2
+    memoryMiB: 4096
+    architecture: amd64
+    capabilities:
+    - docker
+    spot: true
+    priceMicros: 10000
+    currency: USD
+    observedAt: '2000-01-01T00:00:00Z'
+  - id: aws-ondemand
+    provider: aws
+    region: us-east-1
+    zone: us-east-1a
+    machine: c7i.large
+    image: ami-00000000000000000
+    cpu: 2
+    memoryMiB: 4096
+    architecture: amd64
+    capabilities:
+    - docker
+    spot: false
+    priceMicros: 50000
+    currency: USD
+    observedAt: '2000-01-01T00:00:00Z'
+  - id: azure-spot
+    provider: azure
+    region: eastus
+    zone: '1'
+    machine: Standard_F2s_v2
+    image: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/runner-images/providers/Microsoft.Compute/images/ubuntu-2404-runner-amd64
+    cpu: 2
+    memoryMiB: 4096
+    architecture: amd64
+    capabilities:
+    - docker
+    spot: true
+    priceMicros: 10000
+    currency: USD
+    observedAt: '2000-01-01T00:00:00Z'
+  - id: azure-ondemand
+    provider: azure
+    region: eastus
+    zone: '1'
+    machine: Standard_F2s_v2
+    image: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/runner-images/providers/Microsoft.Compute/images/ubuntu-2404-runner-amd64
+    cpu: 2
+    memoryMiB: 4096
+    architecture: amd64
+    capabilities:
+    - docker
+    spot: false
+    priceMicros: 50000
+    currency: USD
+    observedAt: '2000-01-01T00:00:00Z'
+  - id: gcp-spot
+    provider: gcp
+    region: us-central1
+    zone: us-central1-a
+    machine: e2-standard-2
+    image: projects/replace-with-project/global/images/ubuntu-2404-runner-amd64
+    cpu: 2
+    memoryMiB: 8192
+    architecture: amd64
+    capabilities:
+    - docker
+    spot: true
+    priceMicros: 10000
+    currency: USD
+    observedAt: '2000-01-01T00:00:00Z'
+  - id: gcp-ondemand
+    provider: gcp
+    region: us-central1
+    zone: us-central1-a
+    machine: e2-standard-2
+    image: projects/replace-with-project/global/images/ubuntu-2404-runner-amd64
+    cpu: 2
+    memoryMiB: 8192
+    architecture: amd64
+    capabilities:
+    - docker
+    spot: false
+    priceMicros: 50000
+    currency: USD
+    observedAt: '2000-01-01T00:00:00Z'
+  complete:
+    aws: false
+    azure: false
+    gcp: false

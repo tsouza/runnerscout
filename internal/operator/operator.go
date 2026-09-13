@@ -150,11 +150,18 @@ func (o *Operator) catalog() (placement.Catalog, error) {
 	return c, nil
 }
 func (o *Operator) loadFleet(ctx context.Context) (*corev1.ConfigMap, fleet, error) {
+	return o.readFleet(ctx, true)
+}
+
+func (o *Operator) readFleet(ctx context.Context, create bool) (*corev1.ConfigMap, fleet, error) {
 	maps := o.Client.CoreV1().ConfigMaps(o.Config.Namespace)
 	cm, e := maps.Get(ctx, o.Config.Name+"-fleet", metav1.GetOptions{})
 	if apierrors.IsNotFound(e) {
 		cm = &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: o.Config.Name + "-fleet", Labels: map[string]string{"runnerscout/owner": o.Config.Name}}, Data: map[string]string{"fleet": "{}"}}
-		cm, e = maps.Create(ctx, cm, metav1.CreateOptions{})
+		e = nil
+		if create {
+			cm, e = maps.Create(ctx, cm, metav1.CreateOptions{})
+		}
 	}
 	if e != nil {
 		return nil, fleet{}, e

@@ -72,7 +72,7 @@ func (o *Operator) Drain() {
 func (o *Operator) Drained(ctx context.Context) (bool, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	_, fleet, err := o.loadFleet(ctx)
+	_, fleet, err := o.readFleet(ctx, false)
 	if err != nil {
 		return false, err
 	}

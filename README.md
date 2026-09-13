@@ -8,8 +8,8 @@ with separate scale-set ownership.
 
 **Experimental; no qualified release.** Live GitHub-to-VM execution across all
 three providers remains unqualified. The The controller supports mounted
-configuration or a named RunnerScaleSet CRD. CRD chart installation and complete
-examples remain under development.
+configuration or a named RunnerScaleSet CRD. The Helm chart supports both modes; see the
+[complete CRD example](examples/multicloud/README.md).
 
 - Hard resource, region and price limits remain enforced during placement.
 - On-demand fallback is opt-in and requires definitive spot exhaustion.

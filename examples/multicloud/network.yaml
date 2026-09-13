@@ -1,0 +1,26 @@
+apiVersion: runnerscout.io/v1alpha1
+kind: NetworkProfile
+metadata:
+  name: private
+  namespace: runnerscout
+spec:
+  mode: separate
+  mappings:
+    - providerRef:
+        name: aws
+      region: us-east-1
+      networkID: vpc-00000000000000000
+      subnetID: subnet-00000000000000000
+      cidrs: [10.31.0.0/24]
+    - providerRef:
+        name: azure
+      region: eastus
+      networkID: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/runnerscout/providers/Microsoft.Network/virtualNetworks/runners
+      subnetID: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/runnerscout/providers/Microsoft.Network/virtualNetworks/runners/subnets/runners
+      cidrs: [10.32.0.0/24]
+    - providerRef:
+        name: gcp
+      region: us-central1
+      networkID: projects/replace-with-project/global/networks/runners
+      subnetID: projects/replace-with-project/regions/us-central1/subnetworks/runners
+      cidrs: [10.33.0.0/24]

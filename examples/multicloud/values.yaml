@@ -1,0 +1,16 @@
+fullnameOverride: runnerscout
+image:
+  repository: replace-with-your-registry/runnerscout
+  tag: development
+crd:
+  scaleSetName: build
+  secretNames: [github, aws-credentials, azure-identity, gcp-credentials]
+credentialSecrets:
+  - name: aws-credentials
+  - name: gcp-credentials
+# Requires a configured Azure federated identity and workload-identity webhook.
+serviceAccount:
+  annotations:
+    azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000000"
+podLabels:
+  azure.workload.identity/use: "true"
