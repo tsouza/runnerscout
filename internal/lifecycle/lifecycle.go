@@ -54,6 +54,9 @@ type Allocation struct {
 	Owner         string `json:"owner,omitempty"`
 	Repo          string `json:"repo,omitempty"`
 	ScaleSetJobID string `json:"scaleSetJobID,omitempty"`
+	// RetryProcessed marks a confirmed interruption as already evaluated for a
+	// bounded rerun, whatever the outcome, so it is never re-evaluated.
+	RetryProcessed bool `json:"retryProcessed,omitempty"`
 }
 
 var ErrConflict = errors.New("state revision conflict")
