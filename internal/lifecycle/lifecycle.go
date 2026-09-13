@@ -46,6 +46,14 @@ type Allocation struct {
 	Ready        bool                         `json:"ready"`
 	Retire       bool                         `json:"retire"`
 	Condition    string                       `json:"condition,omitempty"`
+	// RunID, Owner, Repo and ScaleSetJobID are captured once, from the job's
+	// first start event, and never overwritten - each allocation runs exactly
+	// one GitHub Actions job. They durably identify that job for later REST
+	// evidence lookups; RunID is zero until captured.
+	RunID         int64  `json:"runID,omitempty"`
+	Owner         string `json:"owner,omitempty"`
+	Repo          string `json:"repo,omitempty"`
+	ScaleSetJobID string `json:"scaleSetJobID,omitempty"`
 }
 
 var ErrConflict = errors.New("state revision conflict")
