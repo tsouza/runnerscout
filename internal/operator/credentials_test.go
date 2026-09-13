@@ -42,12 +42,12 @@ func TestOperatorNamedCredentialsStayOutOfDurableState(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cleanup() })
 	entries, err := os.ReadDir(tmp)
-	if err != nil || len(entries) != 1 {
-		t.Fatal("provider scopes not independently created")
+	if err != nil || len(entries) != 0 {
+		t.Fatal("native SDK created a CLI cache directory")
 	}
 	for _, command := range op.Controller.Providers {
 		p, ok := command.(*provider.Command)
-		if !ok || p.Bootstrap == nil || (p.Config.Kind == "aws" && p.Exec == nil) || (p.Config.Kind == "gcp" && (p.GCP == nil || p.Exec != nil)) {
+		if !ok || p.Bootstrap == nil || (p.Config.Kind == "aws" && p.AWS == nil) || (p.Config.Kind == "gcp" && p.GCP == nil) {
 			t.Fatal("provider lost its runtime wiring")
 		}
 	}

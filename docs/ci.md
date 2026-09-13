@@ -22,9 +22,8 @@ layers are separate caches.
 Look for setup-go restore/save messages and Buildx cached steps in job logs to
 verify actual hits. Cache misses must remain correct. Dependency updates are
 weekly: Kubernetes modules are grouped, CI actions are grouped, and Docker base
-images have their own update lane. Azure's complete Python lock is refreshed with
-the official resolver and distribution hashes; incompatible forced overrides are
-not used to conceal vulnerabilities.
+images have their own update lane. Cloud provider SDKs are Go modules; dependency
+updates must remain compatible and pass the existing checks.
 
 Kubernetes modules move together. Keep kube-openapi compatible with the
 structured-merge-diff major version required by apimachinery; updating it alone
@@ -45,3 +44,10 @@ dependency updates before merge.
 BuildKit retains Go compiler output within a reused builder. The Actions layer
 cache retains the module-download layer; compiler cache mounts are local to the
 builder and are not exported by that layer cache.
+
+Local API qualification uses pinned Moto with explicit `client-token` discovery and
+new-interface tagging extensions. Tests cover matching, unrelated and missing
+tokens, and refusal after ownership tags change. The manifest records
+both the image digest and extension hash. Ministack checks unsupported-image refusal;
+Floci Azure exercises its VM REST API. These tests do not boot cloud guests or qualify
+live execution. Ownership and cleanup requirements remain enforced by the adapter.

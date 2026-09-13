@@ -3,7 +3,6 @@ package provider
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,8 +26,7 @@ func CredentialVariable(kind, name string) bool {
 // NewCommand creates a provider-local authentication scope. A nil environment
 // selects the deployment's authentication variables for this provider kind only;
 // a non-nil map is a complete replacement, never merged with another identity.
-// The caller must stop all operations before cleaning up the private CLI caches.
-// Credential values are never placed in command arguments or process-wide env.
+// Credential values remain in memory or mounted files, never process-wide env.
 func NewCommand(c Config, environment map[string]string) (*Command, func() error, error) {
 	p := &Command{Config: c}
 	if err := p.Validate(); err != nil {
@@ -77,38 +75,8 @@ func NewCommand(c Config, environment map[string]string) (*Command, func() error
 		p.GCP = sdk
 		return p, func() error { return nil }, nil
 	}
-	dir, err := os.MkdirTemp("", "runnerscout-auth-")
-	if err != nil {
-		return nil, nil, errors.New("cannot create provider authentication scope")
-	}
-	cleanup := func() error { return os.RemoveAll(dir) }
-	// Inherit transport/runtime settings, not cloud identities, Python import
-	// overrides, shell initialization, or shared CLI credential caches.
-	env := map[string]string{"HOME": dir, "TMPDIR": dir, "PYTHONDONTWRITEBYTECODE": "1"}
-	for _, name := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"} {
-		if value, ok := os.LookupEnv(name); ok {
-			env[name] = value
-		}
-	}
-	if c.Kind == "aws" {
-		env["AWS_EC2_METADATA_DISABLED"] = "true"
-		env["AWS_CONFIG_FILE"] = filepath.Join(dir, "config")
-		env["AWS_SHARED_CREDENTIALS_FILE"] = filepath.Join(dir, "credentials")
-	}
-	for name, value := range values {
-		env[name] = value
-	}
-	names := make([]string, 0, len(env))
-	for name := range env {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	executor := OSExecutor{environment: make([]string, 0, len(names))}
-	for _, name := range names {
-		executor.environment = append(executor.environment, name+"="+env[name])
-	}
-	p.Exec = executor
-	return p, cleanup, nil
+	p.AWS = &AWSSDK{scope: &awsCredentialScope{values: values, profile: c.Profile}}
+	return p, func() error { return nil }, nil
 }
 
 func azureCredential(env map[string]string) (azcore.TokenCredential, error) {
