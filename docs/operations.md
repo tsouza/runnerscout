@@ -130,3 +130,101 @@ is confirmed. Providers that cannot reconcile a recorded dependency refuse work.
 Azure dependency records include a `uid` alongside each resource path. Older
 binaries that cannot read this field must not be used to resume those allocations.
 Never strip a generation ID to force rollback or adopt a replacement resource.
+
+A `NetworkProfile` with `spec.mode: wireguard` requires exactly one entry in
+`spec.mappings`; more than one is rejected with "wireguard networking supports
+exactly one network mapping". Each mapping's `providerRef`, `region`,
+`networkID`, `subnetID` and `cidrs` follow the same requirements `separate`
+mode already imposes on them (see `api/v1alpha1/types.go`'s `NetworkMapping`
+type and `examples/multicloud/network.yaml`/README.md for a worked `separate`
+example). `spec.allowedServices` has no meaning in `wireguard` mode and is
+rejected if set. The optional `spec.enrollmentRef` names a Secret holding an
+operator-supplied WireGuard pre-shared key; it is validated like every other
+Secret reference in this codebase and is defense-in-depth only, never a trust
+root — see [networking-peer-model.md](networking-peer-model.md)'s "Secret
+shape" section for what it actually protects. Leaving it unset is fully
+supported and is the default.
+
+A wireguard-mode runner VM image must include the
+`runnerscout-wireguard-agent` binary, built from
+`cmd/runnerscout-wireguard-agent`. It is a separate binary from the
+`runnerscout` controller, never imported by it, so that its netstack
+(gVisor) dependency tree never reaches the controller binary's own
+dependency graph or size. This repository does not ship a systemd unit,
+any other init-system integration, or a reference runner image build
+recipe that includes this binary. An operator must build their own
+boot-time integration into their own runner image today — for example a
+systemd unit that invokes `runnerscout-wireguard-agent -payload
+/run/runnerscout/wireguard.json`. The binary also accepts `-poll-interval`,
+which defaults to 30 seconds.
+
+The controller needs no additional configuration to serve wireguard mode.
+The WireGuard peer-poll endpoint and the `NetworkPeers` hook it depends on
+are wired unconditionally at startup, for both the CRD-driven and
+mounted-config entry points; no new Helm chart value, flag, environment
+variable or Secret name exists for this mode. It costs nothing extra when
+no `NetworkProfile` uses `wireguard` mode.
+
+Known limitations: a wireguard-mode `NetworkProfile` supports exactly one
+`NetworkMapping` — a single directly-routable subnet. Cross-region or
+cross-provider WireGuard peering is not supported. On GCP, capturing a VM's
+WireGuard endpoint costs one additional API call per VM creation when
+wireguard mode is used; AWS and Azure capture it from data their create
+paths already fetch, at no extra cost. The VM-side peer-poll endpoint has
+no rate limiting: it is read-only, costs one Load per request (and, only
+after a successful auth, one List), and its response size is bounded by
+the real number of allocations in one `NetworkProfile`, never by anything
+an unauthenticated caller controls; a compromised VM polling far faster
+than its intended interval is the accepted residual risk.
+
+A minimal wireguard-mode `NetworkProfile`, with one mapping and no
+`enrollmentRef`:
+
+```yaml
+apiVersion: runnerscout.io/v1alpha1
+kind: NetworkProfile
+metadata:
+  name: private-wireguard
+  namespace: runnerscout
+spec:
+  mode: wireguard
+  mappings:
+    - providerRef:
+        name: aws
+      region: us-east-1
+      networkID: vpc-00000000000000000
+      subnetID: subnet-00000000000000000
+      cidrs: [10.31.0.0/24]
+```
+
+A `RunnerClass` references it the same way it references a `separate` mode
+profile, via `spec.networkRef`:
+
+```yaml
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerClass
+metadata:
+  name: linux-amd64-wireguard
+  namespace: runnerscout
+spec:
+  resources:
+    cpu: 2
+    memoryMiB: 4096
+    architecture: amd64
+    capabilities: [docker]
+  placement:
+    policy: lowest-price
+    regions: [us-east-1]
+    maxPriceMicros: 100000
+    allowOnDemand: false
+  providers:
+    - name: aws
+  catalogRef:
+    name: multicloud
+  networkRef:
+    name: private-wireguard
+  retry:
+    enabled: false
+    maxRetries: 0
+    acknowledgeRepeatedEffects: false
+```
