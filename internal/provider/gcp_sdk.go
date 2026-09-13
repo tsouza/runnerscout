@@ -183,16 +183,16 @@ func (p *Command) waitGCPOperation(ctx context.Context, a lifecycle.Allocation, 
 	}
 }
 
-func (p *Command) createGCP(ctx context.Context, a lifecycle.Allocation, script string) (string, error) {
+func (p *Command) createGCP(ctx context.Context, a lifecycle.Allocation, script string) (lifecycle.Creation, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	service, err := p.gcpClient()
 	if err != nil {
-		return "", err
+		return lifecycle.Creation{}, err
 	}
 	inventory, err := p.gcpInventory(ctx, a)
 	if err != nil || inventory.vm != nil || inventory.disk != nil {
-		return "", errors.New("GCP create requires an unoccupied allocation identity")
+		return lifecycle.Creation{}, errors.New("GCP create requires an unoccupied allocation identity")
 	}
 	machine := a.Offering.Machine
 	if !strings.Contains(machine, "/") {
@@ -213,12 +213,43 @@ func (p *Command) createGCP(ctx context.Context, a lifecycle.Allocation, script 
 	}
 	op, err := service.Instances.Insert(p.Config.Project, a.Offering.Zone, instance).RequestId(p.gcpRequestID(a, "create")).Context(ctx).Do()
 	if err != nil {
-		return "", errors.New("GCP creation commitment unknown")
+		return lifecycle.Creation{}, errors.New("GCP creation commitment unknown")
 	}
 	if err = p.waitGCPOperation(ctx, a, op, "create", "instances", a.ID); err != nil {
-		return "", err
+		return lifecycle.Creation{}, err
 	}
-	return a.ID, nil
+	receipt := lifecycle.Creation{ResourceID: a.ID}
+	// Unlike AWS/Azure, GCP's create path (Instances.Insert, then polling
+	// ZoneOperations.Get/List) only ever receives compute.Operation
+	// responses, which carry no NetworkInterfaces field - so capturing this
+	// allocation's private IP costs one genuinely new Instances.Get call,
+	// made only when a.NetworkProfile != "" (see
+	// lifecycle.Creation.WireGuardEndpoint's doc comment for the cost/
+	// benefit reasoning). Every allocation without wireguard intent - every
+	// allocation this codebase's configuration path can produce today -
+	// takes none of this cost.
+	if a.NetworkProfile != "" {
+		receipt.WireGuardEndpoint = p.gcpCaptureWireGuardEndpoint(ctx, service, a)
+	}
+	return receipt, nil
+}
+
+// gcpCaptureWireGuardEndpoint performs the one additional Instances.Get
+// createGCP's own comment above describes, and extracts the just-created
+// VM's private IP as its WireGuardEndpoint - see
+// lifecycle.Allocation.WireGuardEndpoint's doc comment for what this value
+// means and wireGuardEndpoint for its exact "host:port" rendering. Best-
+// effort only: any transport failure, or a NetworkInterfaces shape other
+// than the single entry this codebase's own createGCP template ever
+// produces, returns "" rather than an error - a failed or incomplete
+// capture must never fail a creation that has already succeeded, exactly
+// like AWS's own equivalent single-NIC check in createAWS.
+func (p *Command) gcpCaptureWireGuardEndpoint(ctx context.Context, service *compute.Service, a lifecycle.Allocation) string {
+	vm, err := service.Instances.Get(p.Config.Project, a.Offering.Zone, a.ID).Context(ctx).Do()
+	if err != nil || vm == nil || len(vm.NetworkInterfaces) != 1 || vm.NetworkInterfaces[0] == nil {
+		return ""
+	}
+	return wireGuardEndpoint(vm.NetworkInterfaces[0].NetworkIP)
 }
 func (p *Command) observeGCP(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
 	if a.ResourceID != "" && a.ResourceID != a.ID {

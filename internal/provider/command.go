@@ -221,9 +221,7 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	case "azure":
 		creation, err = p.createAzure(ctx, a, script)
 	default:
-		var id string
-		id, err = p.createGCP(ctx, a, script)
-		creation = lifecycle.Creation{ResourceID: id}
+		creation, err = p.createGCP(ctx, a, script)
 	}
 	if len(wireGuardPublicKey) > 0 {
 		creation.WireGuardPublicKey = wireGuardPublicKey

@@ -187,13 +187,17 @@ dialable network address:port for the underlying UDP socket a
 address `CloudInitPayload.Peer` already carries, which only supplies an
 AllowedIPs entry) is now resolved *within a single `NetworkMapping`*:
 `lifecycle.Allocation.WireGuardEndpoint`/`wireguard.Peer.Endpoint` capture a
-VM's already-cloud-assigned private IP at creation time, with zero new API
-calls, for AWS (`internal/provider/aws.go`) and Azure
-(`internal/provider/azure_inventory.go`). GCP does not set it yet: its
-creation path never receives a `compute.Instance` response (only
-`compute.Operation` ones, which carry no NetworkInterfaces), so wiring it
-would need a genuinely new post-create API call — a real cost/latency/
-failure-mode tradeoff this document still leaves undecided. Reachability
+VM's already-cloud-assigned private IP at creation time for all three
+providers: AWS (`internal/provider/aws.go`) and Azure
+(`internal/provider/azure_inventory.go`) capture it with zero new API calls,
+from a response their create paths already fetch for other purposes. GCP's
+create path never receives a `compute.Instance` response of its own (only
+`compute.Operation` ones, which carry no NetworkInterfaces), so it captures
+this via one genuinely new post-create `Instances.Get` call
+(`internal/provider/gcp_sdk.go`'s `gcpCaptureWireGuardEndpoint`) — made only
+when `a.NetworkProfile != ""`, so it is inert (zero added calls) for every
+allocation this codebase's configuration path can produce today, and
+best-effort (never fails the creation) once that gate opens. Reachability
 *across* two different `NetworkMapping`s (different providers or regions
 referenced by one `NetworkProfile`) also remains fully undecided; see
 `Allocation.WireGuardEndpoint`'s own doc comment

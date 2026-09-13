@@ -135,9 +135,9 @@ func TestSnapshotCarriesCheckpointedEndpoint(t *testing.T) {
 
 // TestSnapshotToleratesMissingEndpoint proves a peer that has checkpointed
 // its public key/overlay address but not yet its endpoint (see
-// Creation.WireGuardEndpoint's doc comment: not every provider sets it yet)
-// is still included, with an empty Endpoint - never excluded, and never
-// synthesized.
+// lifecycle.Allocation.WireGuardEndpoint's doc comment: every provider's
+// capture is best-effort, so it can legitimately still be empty) is still
+// included, with an empty Endpoint - never excluded, and never synthesized.
 func TestSnapshotToleratesMissingEndpoint(t *testing.T) {
 	peers := Snapshot("rs-self", "profile-a", []lifecycle.Allocation{running("rs-a", "profile-a", "pub-a", "10.60.0.1")})
 	if len(peers) != 1 || peers[0].Endpoint != "" {
