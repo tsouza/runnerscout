@@ -148,7 +148,40 @@ func (p *Command) observeAzure(ctx context.Context, a lifecycle.Allocation) (lif
 	if e != nil {
 		return lifecycle.Observation{}, e
 	}
-	return p.azureObservation(a, resources)
+	observed, e := p.azureObservation(a, resources)
+	if e != nil {
+		return lifecycle.Observation{}, e
+	}
+	// VirtualMachinePreempted is Azure's own definitive confirmed-preemption
+	// signal (delivered via Event Grid/Storage Queue, see
+	// internal/azureevents and internal/azurequeue), correlated here by
+	// exact ARM resource ID equality against p.AzureInterrupted - mirroring
+	// AWS's Server.SpotInstanceTermination state reason
+	// (aws_inventory.go's observation) and GCP's compute.instances.preempted
+	// operation (gcp_sdk.go's gcpConfirmedPreemption). It is meaningful only
+	// once the resource is independently confirmed absent, and only for
+	// offerings requested as spot, exactly like both siblings.
+	observed.Interrupted = !observed.Exists && a.Offering.Spot && p.azureConfirmedPreemption(a)
+	return observed, nil
+}
+
+// azureConfirmedPreemption reports whether this Tick's AzureInterrupted
+// snapshot (see Command.AzureInterrupted) confirms this allocation's own VM
+// - not any other resource id observed this cycle - received a definitive
+// VirtualMachinePreempted annotation. A nil map, an absent entry, or an
+// entry recorded false all report false; never inferred from a bare
+// absence, matching CQ-09.
+func (p *Command) azureConfirmedPreemption(a lifecycle.Allocation) bool {
+	if len(p.AzureInterrupted) == 0 {
+		return false
+	}
+	want := p.azureID("Microsoft.Compute/virtualMachines", a.ID)
+	for id, preempted := range p.AzureInterrupted {
+		if preempted && strings.EqualFold(id, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Command) reconcileAzureCreation(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {

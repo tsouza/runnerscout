@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/actions/scaleset"
+	"github.com/tsouza/runnerscout/internal/azurequeue"
 	"github.com/tsouza/runnerscout/internal/configapi"
 	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/health"
@@ -171,6 +172,24 @@ func azurePricesObserver(controller *operator.Operator, cfg operator.Config) (*p
 	return command.Azure.SpotPrices(), nil
 }
 
+// azureInterruptionsObserver builds a live internal/azurequeue.Client from
+// the already-credentialed "azure" provider entry, mirroring
+// awsPricesObserver/azurePricesObserver: nil unless the operator explicitly
+// opts in via cfg.AzureInterruptionQueueURL, since this makes live Azure
+// Storage Queue calls on every Tick cycle. It reuses AzureSDK's own already-
+// resolved credential chain via InterruptionQueue rather than resolving a
+// separate one - see AzureSDK.InterruptionQueue's doc comment for why.
+func azureInterruptionsObserver(controller *operator.Operator, cfg operator.Config) (*azurequeue.Client, error) {
+	if cfg.AzureInterruptionQueueURL == "" {
+		return nil, nil
+	}
+	command, ok := controller.Controller.Providers["azure"].(*provider.Command)
+	if !ok || command.Azure == nil {
+		return nil, errors.New(`Azure interruption delivery requires a configured "azure" provider`)
+	}
+	return command.Azure.InterruptionQueue(cfg.AzureInterruptionQueueURL)
+}
+
 func withHealth(ctx context.Context, address string, run func(context.Context, *health.Status) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -278,6 +297,13 @@ func run(args []string) error {
 		}
 		if azurePrices != nil {
 			controller.AzurePrices = azurePrices
+		}
+		azureInterruptions, err := azureInterruptionsObserver(controller, cfg)
+		if err != nil {
+			return err
+		}
+		if azureInterruptions != nil {
+			controller.AzureInterruptions = azureInterruptions
 		}
 		controller.Readiness = status.SetReady
 		err = controller.Run(ctx)

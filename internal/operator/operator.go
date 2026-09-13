@@ -55,6 +55,19 @@ type Config struct {
 	// false so existing deployments never start making live Azure API
 	// calls without an explicit choice to do so.
 	AzurePriceRefresh bool `json:"azurePriceRefresh,omitempty"`
+	// AzureInterruptionQueueURL opts into live Azure Storage Queue polling
+	// for spot interruption delivery on every Tick cycle, using the "azure"
+	// entry in Providers for credentials (internal/provider.AzureSDK's own
+	// already-resolved credential chain, reused rather than separately
+	// scoped - see internal/provider.AzureSDK.InterruptionQueue's doc
+	// comment for why). It is the full Storage Queue endpoint Event Grid
+	// delivers Microsoft.ResourceNotifications.HealthResources.ResourceAnnotated
+	// messages to, e.g. "https://<account>.queue.core.windows.net/<queue>"
+	// (see docs/azure-interruption-delivery.md). It defaults to "" so
+	// existing deployments never start making live Azure Storage Queue
+	// calls without an explicit choice to do so - exactly the same opt-in
+	// default shape as AWSPriceRefresh/AzurePriceRefresh above.
+	AzureInterruptionQueueURL string `json:"azureInterruptionQueueURL,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -118,11 +131,14 @@ type Operator struct {
 	GitHubJobs  githubJobsClient
 	AWSPrices   awsPriceObserver
 	AzurePrices azurePriceObserver
-	// AzureInterruptions is declared but never read anywhere yet - see
-	// azure_interruptions.go and docs/azure-interruption-delivery.md. It
-	// exists only as the same nil-is-inert dependency-injection point
-	// AWSPrices/AzurePrices already are, so a future change can start
-	// constructing and consuming it without first landing this shape.
+	// AzureInterruptions polls one Azure Storage Queue for confirmed spot
+	// preemptions, once per Tick cycle (see pollAzureInterruptions and
+	// applyAzureInterruptions in azure_interruptions.go) - never per
+	// allocation, since Poll drains every currently-visible message in one
+	// call. nil (the default) is a complete no-op, exactly like
+	// AWSPrices/AzurePrices: no Azure allocation's observation is ever
+	// affected. See docs/azure-interruption-delivery.md's "Correlation"
+	// section.
 	AzureInterruptions azureInterruptionObserver
 	Store              *state.Kubernetes
 	Controller         *lifecycle.Controller
@@ -406,6 +422,11 @@ func (o *Operator) Tick(ctx context.Context) error {
 			}
 		}
 	}
+	// Exactly one poll per Tick cycle, threaded down to every azure-kind
+	// Command in Controller.Providers before any allocation this cycle is
+	// stepped - never per-allocation. See pollAzureInterruptions and
+	// applyAzureInterruptions's own doc comments for why.
+	o.applyAzureInterruptions(o.pollAzureInterruptions(ctx))
 	var failures []error
 	for _, a := range allocs {
 		created, ok := f.Created[a.ID]
