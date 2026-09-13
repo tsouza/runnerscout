@@ -9,7 +9,7 @@ IMAGES={'moto':'motoserver/moto@sha256:91fd602a21f49cf9eb82fdf474015a3c131d40104
 def command(args,**kw):return subprocess.run(args,check=True,text=True,capture_output=True,timeout=180,**kw).stdout.strip()
 def main():
  os.chdir(ROOT);token=uuid.uuid4().hex[:12];network='runnerscout-emulators-'+token;names=[]
- out=ROOT/'evidence'/network;out.mkdir(parents=True);report={'scope':'emulated cloud APIs, not real cloud VM execution','images':{},'checks':{},'required_paths':['aws_adapter','azure_vm_rest_smoke'],'aws_mode':'Moto API state transitions with explicit client-token and interface-tag extensions; no guest execution','aws_extension_sha256':hashlib.sha256((ROOT/'tools/fixtures/moto_server.py').read_bytes()).hexdigest()}
+ out=ROOT/'evidence'/network;out.mkdir(parents=True);report={'scope':'emulated cloud APIs, not real cloud VM execution','images':{},'checks':{},'required_paths':['aws_adapter','azure_vm_rest_smoke','azure_full_adapter'],'aws_mode':'Moto API state transitions with explicit client-token and interface-tag extensions; no guest execution','aws_extension_sha256':hashlib.sha256((ROOT/'tools/fixtures/moto_server.py').read_bytes()).hexdigest()}
  try:
   for key,image in IMAGES.items():
    command(['docker','pull',image]);digest=json.loads(command(['docker','image','inspect',image]))[0]['RepoDigests'][0];report['images'][key]=digest
@@ -35,15 +35,21 @@ def main():
     socket.create_connection((moto_ip,5000),timeout=1).close();break
    except OSError:time.sleep(1)
   else:raise RuntimeError('Moto emulator did not become ready')
-  env=os.environ.copy();env['RUNNERSCOUT_EMULATOR_NETWORK']=network;env['RUNNERSCOUT_MINISTACK_ENDPOINT']='http://'+json.loads(command(['docker','inspect',names[0]]))[0]['NetworkSettings']['Networks'][network]['IPAddress']+':4566';env['RUNNERSCOUT_AWS_ENDPOINT']='http://'+moto_ip+':5000'
-  test=subprocess.run(['go','test','-tags','emulators','-run','Test(MotoAWSLostResponseAndCleanup|MinistackAWSUnsupportedImageRetainsObligation)','-count=1','-json','./internal/provider'],env=env,text=True,capture_output=True,timeout=180)
+  env=os.environ.copy();env['RUNNERSCOUT_EMULATOR_NETWORK']=network;env['RUNNERSCOUT_MINISTACK_ENDPOINT']='http://'+json.loads(command(['docker','inspect',names[0]]))[0]['NetworkSettings']['Networks'][network]['IPAddress']+':4566';env['RUNNERSCOUT_AWS_ENDPOINT']='http://'+moto_ip+':5000';env['RUNNERSCOUT_AZURE_ENDPOINT']=azure
+  test=subprocess.run(['go','test','-tags','emulators','-run','Test(MotoAWSLostResponseAndCleanup|MinistackAWSUnsupportedImageRetainsObligation|FlociAzureUnsupportedImageRetainsObligation|FlociAzureDiskBindingAndNICIdentityUnsupported)','-count=1','-json','./internal/provider'],env=env,text=True,capture_output=True,timeout=180)
   (out/'aws-adapter.jsonl').write_text(test.stdout);(out/'aws-adapter-stderr.log').write_text(test.stderr)
-  required={('github.com/tsouza/runnerscout/internal/provider',name) for name in ['TestMotoAWSLostResponseAndCleanup','TestMinistackAWSUnsupportedImageRetainsObligation']}
-  report['aws_tests']=test_manifest(test.stdout.splitlines(),required)
+  aws_required={('github.com/tsouza/runnerscout/internal/provider',name) for name in ['TestMotoAWSLostResponseAndCleanup','TestMinistackAWSUnsupportedImageRetainsObligation']}
+  azure_required={('github.com/tsouza/runnerscout/internal/provider',name) for name in ['TestFlociAzureUnsupportedImageRetainsObligation','TestFlociAzureDiskBindingAndNICIdentityUnsupported']}
+  report['aws_tests']=test_manifest(test.stdout.splitlines(),aws_required)
+  report['azure_tests']=test_manifest(test.stdout.splitlines(),azure_required)
   aws_pass=test.returncode==0 and report['aws_tests']['pass_']
+  azure_adapter_pass=test.returncode==0 and report['azure_tests']['pass_']
   report['checks']['aws_adapter']='pass' if aws_pass else 'fail'
   # Floci Azure's own az-vm test is best-effort and may skip. Exercise its REST
-  # control plane explicitly, without representing this as full adapter coverage.
+  # control plane explicitly as a fast pre-flight smoke test; the real
+  # internal/provider Azure adapter is qualified separately above, by
+  # TestFlociAzureUnsupportedImageRetainsObligation and
+  # TestFlociAzureDiskBindingAndNICIdentityUnsupported in the same go test run.
   subscription='00000000-0000-0000-0000-000000000001';group='runnerscout-'+token;vm='rs-'+token
   base=azure+'/subscriptions/'+subscription+'/resourceGroups/'+group
   def request(method,path,body=None):
@@ -63,9 +69,9 @@ def main():
   else:raise RuntimeError('Azure emulator VM deletion not observed')
   request('DELETE',base+'?api-version=2021-04-01')
   report['checks']['azure_vm_rest_smoke']='pass'
-  report['checks']['azure_full_adapter']='unqualified: ARM deployment/disk composition not exercised'
+  report['checks']['azure_full_adapter']=('pass: real internal/provider adapter qualified against floci-az for image-preflight rejection, VM+NIC ARM resource lifecycle and the disk-ownership-binding boundary; Microsoft.Resources/deployments, Microsoft.Compute/images and Microsoft.Compute/disks remain unimplemented by floci-az and are not exercised' if azure_adapter_pass else 'fail: azure adapter emulator qualification did not pass')
   report['checks']['gcp_compute']='unavailable: Floci GCP does not implement standalone Compute Engine instances'
-  report['verdict']='pass' if aws_pass else 'fail'
+  report['verdict']='pass' if aws_pass and azure_adapter_pass else 'fail'
  except Exception as e:report['verdict']='fail';report['reason']=str(e)
  finally:
   cleanup=[]
