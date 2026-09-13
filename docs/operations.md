@@ -58,3 +58,19 @@ GCP accepts a mounted file through `GOOGLE_APPLICATION_CREDENTIALS` or
 `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`; configuring different files in both
 variables is rejected. Shutdown waits for active operations before removing
 credential caches.
+
+Run the CRD controller inside the cluster with
+`runnerscout -scale-set=build -namespace=runnerscout`. Install the five schemas
+under `config/crd/bases/` and create the referenced namespaced resources first.
+This mode reads GitHub and provider credentials from their named Secret
+references; mounted configuration and GitHub authentication flags are mutually
+exclusive with it. The current Helm chart still configures mounted JSON.
+
+Inspect the RunnerScaleSet `Ready` condition when configuration cannot be loaded.
+Suspension or invalid references stop new admissions while existing allocations
+remain under reconciliation. Fix invalid references or restore required cloud
+credentials; missing GitHub credentials do not prevent cloud recovery or deletion.
+Delete the RunnerScaleSet and wait for its cleanup finalizer before stopping its
+controller. Preserve its configuration checkpoint and allocation records while
+cleanup is unresolved. A missing/corrupt checkpoint or replacement object UID
+blocks adoption; it is not permission to recreate or erase ownership records.

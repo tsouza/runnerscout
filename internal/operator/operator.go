@@ -20,8 +20,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"log/slog"
 	"net/url"
 	"os"
@@ -95,6 +93,8 @@ type Operator struct {
 	Store      *state.Kubernetes
 	Controller *lifecycle.Controller
 	mu         sync.Mutex
+	paused     bool
+	draining   bool
 }
 
 func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
@@ -103,6 +103,9 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 	providers := map[string]lifecycle.Provider{}
 	for name, p := range c.Providers {
 		providers[name] = &provider.Command{Config: p, Exec: provider.OSExecutor{}, Bootstrap: func(ctx context.Context, id string) (string, error) {
+			if g == nil {
+				return "", errors.New("GitHub JIT client unavailable during recovery")
+			}
 			r, e := g.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: id, WorkFolder: "_work"}, c.ScaleSetID)
 			if e != nil {
 				return "", errors.New("GitHub JIT request failed")
@@ -238,6 +241,13 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 			active++
 		}
 	}
+	if o.paused || o.draining {
+		f.Condition = "AdmissionsSuspended"
+		if o.draining {
+			f.Condition = "ScaleSetDeleting"
+		}
+		return active, o.saveFleet(ctx, cm, f)
+	}
 	n, e := f.Admission.Reconcile(count, active, o.Config.MaxRunners, active == 0)
 	if e != nil {
 		return active, e
@@ -315,6 +325,9 @@ func (o *Operator) Tick(ctx context.Context) error {
 		return e
 	}
 	for id, a := range f.Pending {
+		if o.draining {
+			a.Retire = true
+		}
 		_, e = o.Store.Save(ctx, a, "")
 		if e != nil && !errors.Is(e, lifecycle.ErrConflict) {
 			return e
@@ -343,7 +356,7 @@ func (o *Operator) Tick(ctx context.Context) error {
 		if !ok {
 			return errors.New("allocation has no durable lifetime origin")
 		}
-		if !a.Retire && !time.Now().Before(created.Add(time.Duration(o.Config.MaxLifetimeSeconds)*time.Second)) {
+		if !a.Retire && (o.draining || !time.Now().Before(created.Add(time.Duration(o.Config.MaxLifetimeSeconds)*time.Second))) {
 			a.Retire = true
 			if _, e = o.Store.Save(ctx, a, a.Revision); e != nil {
 				failures = append(failures, e)
@@ -434,45 +447,11 @@ func (o *Operator) runLeader(ctx context.Context) error {
 	}
 }
 func (o *Operator) Run(ctx context.Context) error {
-	lock := &resourcelock.LeaseLock{LeaseMeta: metav1.ObjectMeta{Name: o.Config.Name, Namespace: o.Config.Namespace}, Client: o.Client.CoordinationV1(), LockConfig: resourcelock.ResourceLockConfig{Identity: uuid.NewString()}}
-	errCh := make(chan error, 1)
-	leaderCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	// Leader election starts its callback asynchronously and does not join it.
-	// Close the start gate before waiting so a delayed callback cannot start new
-	// operations after Run returns and its caller destroys credential scopes.
-	var gate sync.Mutex
-	var workers sync.WaitGroup
-	stopping := false
-	elector, e := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{Lock: lock, LeaseDuration: 30 * time.Second, RenewDeadline: 20 * time.Second, RetryPeriod: 5 * time.Second, ReleaseOnCancel: false, Callbacks: leaderelection.LeaderCallbacks{OnStartedLeading: func(c context.Context) {
-		gate.Lock()
-		if stopping {
-			gate.Unlock()
-			return
-		}
-		workers.Add(1)
-		gate.Unlock()
-		defer workers.Done()
-		errCh <- o.runLeader(c)
-		cancel()
-	}, OnStoppedLeading: func() { cancel() }}})
-	if e != nil {
-		return e
-	}
-	elector.Run(leaderCtx)
-	gate.Lock()
-	stopping = true
-	gate.Unlock()
-	workers.Wait()
-	select {
-	case e := <-errCh:
-		return e
-	default:
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("leadership ended; state retained")
-	}
+	return WithLease(ctx, o.Client, o.Config.Namespace, o.Config.Name, o.runLeader)
 }
+
+// RunSession serves a worker under an already-held scale-set Lease. The caller
+// must stop and join this worker before releasing that Lease or its credentials.
+func (o *Operator) RunSession(ctx context.Context) error { return o.runLeader(ctx) }
 
 var _ listener.Scaler = (*Operator)(nil)
