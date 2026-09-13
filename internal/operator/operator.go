@@ -42,6 +42,11 @@ type Config struct {
 	Catalog             placement.Catalog          `json:"catalog"`
 	Providers           map[string]provider.Config `json:"providers"`
 	Retry               recovery.Policy            `json:"retry"`
+	// AWSPriceRefresh opts into live EC2 spot price observation on every
+	// admission cycle, using the "aws" entry in Providers for credentials.
+	// It defaults to false so existing deployments never start making live
+	// AWS API calls without an explicit choice to do so.
+	AWSPriceRefresh bool `json:"awsPriceRefresh,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -97,6 +102,7 @@ type Operator struct {
 	Client     kubernetes.Interface
 	GitHub     *scaleset.Client
 	GitHubJobs githubJobsClient
+	AWSPrices  awsPriceObserver
 	Store      *state.Kubernetes
 	Controller *lifecycle.Controller
 	mu         sync.Mutex
@@ -280,6 +286,9 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 	catalog, e := o.catalog()
 	if e != nil && n > 0 {
 		return refuse("CatalogUnavailable")
+	}
+	if e == nil {
+		catalog = o.refreshAWSPrices(ctx, catalog)
 	}
 	if n > 0 {
 		if _, e = placement.Choose(time.Now(), o.Config.Requirements, catalog, nil); e != nil {

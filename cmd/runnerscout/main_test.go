@@ -12,8 +12,50 @@ import (
 
 	"github.com/tsouza/runnerscout/internal/health"
 	"github.com/tsouza/runnerscout/internal/operator"
+	"github.com/tsouza/runnerscout/internal/placement"
+	"github.com/tsouza/runnerscout/internal/provider"
 	"github.com/tsouza/runnerscout/internal/recovery"
+	"k8s.io/client-go/kubernetes/fake"
 )
+
+func awsPriceRefreshConfig(enabled bool, providers map[string]provider.Config, requirementProviders []string) operator.Config {
+	return operator.Config{Name: "test", Namespace: "test", GitHubURL: "https://github.com/tsouza/runnerscout", ScaleSetID: 1, MaxRunners: 2, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Requirements:    placement.Requirements{CPU: 1, MemoryMiB: 1, Architecture: "amd64", MaxPriceMicros: 100, Providers: requirementProviders, Regions: []string{"r"}, Policy: "lowest-price"},
+		Providers:       providers,
+		AWSPriceRefresh: enabled,
+	}
+}
+
+func TestAWSPricesObserverNilWhenDisabled(t *testing.T) {
+	cfg := awsPriceRefreshConfig(false, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	controller := operator.New(cfg, fake.NewClientset(), nil)
+	observer, err := awsPricesObserver(controller, cfg)
+	if err != nil || observer != nil {
+		t.Fatal("disabled price refresh still built an observer", observer, err)
+	}
+}
+
+func TestAWSPricesObserverRequiresConfiguredAWSProvider(t *testing.T) {
+	cfg := awsPriceRefreshConfig(true, map[string]provider.Config{"azure": {Kind: "azure", Owner: "test", Subnet: "private", Subscription: "sub", ResourceGroup: "rg", SecurityGroup: "sg", SSHPublicKey: "ssh-ed25519 AAAA"}}, []string{"azure"})
+	controller := operator.New(cfg, fake.NewClientset(), nil)
+	if observer, err := awsPricesObserver(controller, cfg); err == nil || observer != nil {
+		t.Fatal("expected an error without a configured \"aws\" provider", observer, err)
+	}
+}
+
+func TestAWSPricesObserverBuildsFromConfiguredAWSProvider(t *testing.T) {
+	cfg := awsPriceRefreshConfig(true, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	credentials := map[string]map[string]string{"aws": {"AWS_ACCESS_KEY_ID": "fixture-id", "AWS_SECRET_ACCESS_KEY": "fixture-secret"}}
+	controller, cleanup, err := operator.NewWithCredentials(cfg, fake.NewClientset(), nil, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	observer, err := awsPricesObserver(controller, cfg)
+	if err != nil || observer == nil {
+		t.Fatal("expected a configured observer", observer, err)
+	}
+}
 
 func TestCRDCommandRejectsMixedConfigurationAndAuthentication(t *testing.T) {
 	for _, args := range [][]string{

@@ -11,6 +11,7 @@ import (
 	api "github.com/tsouza/runnerscout/api/v1alpha1"
 	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/operator"
+	"github.com/tsouza/runnerscout/internal/provider"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -107,6 +108,13 @@ func (r *Runtime) newWorker(resolved Resolved, credentials Credentials, mode Wor
 		// Compile already refuses Retry.Enabled for App authentication, so
 		// credentials.GitHub here is always a PAT.
 		op.GitHubJobs = &githubjobs.Client{Token: string(credentials.GitHub)}
+	}
+	if resolved.Config.AWSPriceRefresh {
+		command, ok := op.Controller.Providers["aws"].(*provider.Command)
+		if !ok || command.AWS == nil {
+			return nil, nil, errors.New(`AWS price refresh requires a configured "aws" provider`)
+		}
+		op.AWSPrices = command.AWS.SpotPrices()
 	}
 	op.Readiness = ready
 	if mode == CleanupMode {
