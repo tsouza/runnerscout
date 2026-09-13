@@ -142,7 +142,9 @@ func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, e
 		return p.createAzure(ctx, a, script)
 	}
 	if p.Config.Kind == "aws" {
-		body := map[string]any{"ImageId": a.Offering.Image, "InstanceType": a.Offering.Machine, "MinCount": 1, "MaxCount": 1, "ClientToken": a.ID, "SubnetId": p.Config.Subnet, "SecurityGroupIds": []string{p.Config.SecurityGroup}, "Placement": map[string]string{"AvailabilityZone": a.Offering.Zone}, "UserData": base64.StdEncoding.EncodeToString([]byte(script)), "MetadataOptions": map[string]any{"HttpEndpoint": "disabled"}, "InstanceInitiatedShutdownBehavior": "terminate", "TagSpecifications": []any{map[string]any{"ResourceType": "instance", "Tags": []any{map[string]string{"Key": "runnerscout-owner", "Value": p.Config.Owner}, map[string]string{"Key": "runnerscout-operation", "Value": a.ID}}}}}
+		// cloud-init reads user data from IMDS. Require tokens and a single-hop
+		// response; no instance profile grants cloud credentials to the runner.
+		body := map[string]any{"ImageId": a.Offering.Image, "InstanceType": a.Offering.Machine, "MinCount": 1, "MaxCount": 1, "ClientToken": a.ID, "SubnetId": p.Config.Subnet, "SecurityGroupIds": []string{p.Config.SecurityGroup}, "Placement": map[string]string{"AvailabilityZone": a.Offering.Zone}, "UserData": base64.StdEncoding.EncodeToString([]byte(script)), "MetadataOptions": map[string]any{"HttpEndpoint": "enabled", "HttpTokens": "required", "HttpPutResponseHopLimit": 1, "HttpProtocolIpv6": "disabled", "InstanceMetadataTags": "disabled"}, "InstanceInitiatedShutdownBehavior": "terminate", "TagSpecifications": []any{map[string]any{"ResourceType": "instance", "Tags": []any{map[string]string{"Key": "runnerscout-owner", "Value": p.Config.Owner}, map[string]string{"Key": "runnerscout-operation", "Value": a.ID}}}}}
 		if a.Offering.Spot {
 			body["InstanceMarketOptions"] = map[string]any{"MarketType": "spot", "SpotOptions": map[string]any{"SpotInstanceType": "one-time", "InstanceInterruptionBehavior": "terminate"}}
 		}

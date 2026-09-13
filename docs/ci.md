@@ -36,3 +36,8 @@ Required tests are identified by package and name. Integration checks retain Go
 JSON events and reject missing, skipped or unfinished required tests even when
 the Go process exits successfully. CI uploads integration evidence on failures
 as well as successes.
+
+Keep Kubernetes libraries, OpenAPI and structured-merge-diff compatible as a set.
+Kubernetes 0.37 uses structured-merge-diff/v6; OpenAPI revisions requiring v7
+cannot be substituted until Kubernetes supports them. Required CI validates
+dependency updates before merge.

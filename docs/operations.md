@@ -41,7 +41,9 @@ the default kubeconfig or skips when the explicit test environment is missing.
 AWS configurations require `accountID` as well as their named credential profile
 or workload identity. STS caller identity must match before EC2 observations or
 effects. A profile rebound to another account produces an explicit error and
-retains cleanup obligations.
+retains cleanup obligations. AWS runner images must support IMDSv2 in cloud-init.
+The VM metadata endpoint requires tokens with a one-hop response limit; IPv6
+metadata and instance-tag access are disabled. Runner VMs have no instance profile.
 
 Azure authentication uses the native Go SDK. Set `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` for federated workload identity,

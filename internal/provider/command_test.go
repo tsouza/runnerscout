@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
@@ -60,6 +61,17 @@ func TestAWSCreateUsesDurableTokenAndPrivateBootstrap(t *testing.T) {
 		}
 		var body map[string]any
 		_ = json.Unmarshal(b, &body)
+		metadata, ok := body["MetadataOptions"].(map[string]any)
+		if !ok || metadata["HttpEndpoint"] != "enabled" || metadata["HttpTokens"] != "required" || metadata["HttpPutResponseHopLimit"] != float64(1) || metadata["InstanceMetadataTags"] != "disabled" || metadata["HttpProtocolIpv6"] != "disabled" {
+			t.Errorf("cloud-init requires reachable, token-protected metadata: %v", metadata)
+		}
+		if _, present := body["IamInstanceProfile"]; present {
+			t.Error("runner VM must not inherit a cloud role")
+		}
+		userData, err := base64.StdEncoding.DecodeString(body["UserData"].(string))
+		if err != nil || string(userData) != Bootstrap("secret-jit") {
+			t.Error("cloud-init user data cannot start the JIT runner")
+		}
 		if body["ClientToken"] != "rs-test" || body["MaxCount"] != float64(1) {
 			t.Fatal(body)
 		}
