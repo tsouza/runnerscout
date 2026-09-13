@@ -49,7 +49,42 @@ smuggling in a severity ranking through the ID scheme itself.
 
 It does not claim CQ-01 through CQ-12 are exhaustive or that passing all
 twelve qualifies a release on its own. The cited tests are the qualifying
-evidence for CQ-01 through CQ-12 today, since each already runs in the
-required CI suite on every change - re-running them is executing that CQ,
-not just motivation for it. A CQ whose citation is later removed or
-weakened reverts to unqualified until a replacement lands.
+evidence for CQ-01 through CQ-12 today, since each already runs, on every
+change, in the checked suite described in `qualification.md`'s Evaluator
+authority section - re-running them is executing that CQ, not just
+motivation for it. A CQ whose citation is later removed or weakened
+reverts to unqualified until a replacement lands.
+
+## Why the required-check suite was split into fast (pre-merge) and full
+(post-merge)
+
+Originally all seven CI checks were required before a PR could merge,
+including a multi-arch `runtime-image` build (~9 minutes), a real `kind`
+cluster spin-up (`kubernetes-integration`), and cloud emulator containers
+(`cloud-emulators`) - a docs-only two-file PR (#53) paid that same ~10-15
+minute bill as a real code change. Raised directly: "it feels to me that
+CI checks are getting super heavy, do we need it all like this for any
+tiny change?" A first, narrower fix (a `dorny/paths-filter`-gated skip for
+diffs containing only `**/*.md`, landed then superseded in #56) addressed
+the docs-only case specifically but left every other small PR paying the
+full cost. The broader instruction that followed - "make simple checks
+and then do full heavy check prior to releasing... change whatever is
+needed, even in project rules" - is what this split implements: `verify`
+and `vulnerability` gate every merge; the other five checks validate
+`main` immediately after each merge instead.
+
+This repo has no distinct release event yet (`release-build.yml` is
+`workflow_dispatch`-only, never automated - see `docs/releases.md`), so
+"prior to releasing" is approximated today as "immediately after merging
+to main," the earliest point after landing where a release could actually
+be cut. Wiring the full suite as an explicit pre-release gate is real,
+separate scope belonging to issue #17 (build a release pipeline that
+blocks regressions and unqualified promotion), not invented here.
+
+The trade-off this accepts: a regression the full suite would have caught
+can be live on `main`, however briefly, before the post-merge run flags
+it - the old model's absolute "nothing lands without qualifying" guarantee
+becomes "nothing lands without being checked shortly after, automatically
+and non-bypassably, with the result visible and fixed forward." This was
+a deliberate, explicit trade the instruction above accepted, not an
+oversight.
