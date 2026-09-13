@@ -14,8 +14,6 @@ FROM public.ecr.aws/aws-cli/aws-cli@sha256:e8467f2c319f9bc9a1471808a69949a76915e
 FROM gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:147cb346b1bdc3256085fc2c1ee98c6f3628bd5d99eba3fb3ac8287fa088a8d9 AS gcloud
 FROM python:3.14-slim-trixie@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS runtime
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
-COPY docker/azure-cli-requirements.txt /tmp/azure-cli-requirements.txt
-RUN python -m pip install --no-cache-dir --require-hashes -r /tmp/azure-cli-requirements.txt && rm /tmp/azure-cli-requirements.txt
 COPY --from=aws /usr/local/aws-cli /usr/local/aws-cli
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws
 COPY --from=gcloud /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
@@ -26,10 +24,10 @@ ENV PATH="/opt/google-cloud-sdk/bin:${PATH}" \
     HOME=/tmp/home \
     CLOUDSDK_CONFIG=/tmp/gcloud \
     CLOUDSDK_PYTHON=/usr/local/bin/python3 \
-    AZURE_CONFIG_DIR=/tmp/azure \
+    \
     PYTHONDONTWRITEBYTECODE=1 \
     AWS_EC2_METADATA_DISABLED=true \
-    AZURE_CORE_COLLECT_TELEMETRY=false \
+    \
     CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true
 USER 10001:10001
 EXPOSE 8080

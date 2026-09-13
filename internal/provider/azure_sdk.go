@@ -1,0 +1,177 @@
+package provider
+
+import (
+	"context"
+	"errors"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armdeployments"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources/v3"
+)
+
+// AzureSDK uses the official ARM and identity libraries. Options and Credential
+// allow an isolated transport in conformance tests; production uses Azure Public.
+type AzureSDK struct {
+	Credential azcore.TokenCredential
+	Options    *arm.ClientOptions
+	once       sync.Once
+	credential azcore.TokenCredential
+	err        error
+}
+
+func (a *AzureSDK) credentials() (azcore.TokenCredential, error) {
+	a.once.Do(func() {
+		if a.Credential != nil {
+			a.credential = a.Credential
+			return
+		}
+		// Select one explicit authentication mechanism. Never invoke developer CLIs
+		// or fall back to a different identity after configured credentials fail.
+		switch {
+		case os.Getenv("AZURE_FEDERATED_TOKEN_FILE") != "":
+			a.credential, a.err = azidentity.NewWorkloadIdentityCredential(nil)
+		case os.Getenv("AZURE_CLIENT_SECRET") != "" || os.Getenv("AZURE_CLIENT_CERTIFICATE_PATH") != "":
+			a.credential, a.err = azidentity.NewEnvironmentCredential(nil)
+		default:
+			options := &azidentity.ManagedIdentityCredentialOptions{}
+			if id := os.Getenv("AZURE_CLIENT_ID"); id != "" {
+				options.ID = azidentity.ClientID(id)
+			}
+			a.credential, a.err = azidentity.NewManagedIdentityCredential(options)
+		}
+	})
+	return a.credential, a.err
+}
+func (a *AzureSDK) resources(c Config) (*armresources.Client, error) {
+	credential, err := a.credentials()
+	if err != nil {
+		return nil, err
+	}
+	return armresources.NewClient(c.Subscription, credential, a.Options)
+}
+func (a *AzureSDK) deployments(c Config) (*armdeployments.DeploymentsClient, error) {
+	credential, err := a.credentials()
+	if err != nil {
+		return nil, err
+	}
+	return armdeployments.NewDeploymentsClient(c.Subscription, credential, a.Options)
+}
+func missingAzureResource(err error) bool {
+	var response *azcore.ResponseError
+	return errors.As(err, &response) && response.StatusCode == 404
+}
+func (a *AzureSDK) list(ctx context.Context, c Config, id string) ([]azureResource, error) {
+	client, err := a.resources(c)
+	if err != nil {
+		return nil, err
+	}
+	result := []azureResource{}
+	pager := client.NewListByResourceGroupPager(c.ResourceGroup, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if page.Value == nil {
+			return nil, errors.New("incomplete Azure inventory")
+		}
+		for _, entry := range page.Value {
+			if entry == nil || entry.Name == nil {
+				return nil, errors.New("invalid Azure inventory entry")
+			}
+			if *entry.Name != id && *entry.Name != id+"-nic" && *entry.Name != id+"-os" {
+				continue
+			}
+			if entry.ID == nil || entry.Type == nil {
+				return nil, errors.New("invalid Azure resource identity")
+			}
+			resource := azureResource{ID: *entry.ID, Name: *entry.Name, Type: *entry.Type, Tags: map[string]string{}}
+			for key, value := range entry.Tags {
+				if value != nil {
+					resource.Tags[key] = *value
+				}
+			}
+			result = append(result, resource)
+		}
+	}
+	return result, nil
+}
+func (a *AzureSDK) terminal(ctx context.Context, c Config, id string) (bool, error) {
+	client, err := a.deployments(c)
+	if err != nil {
+		return false, err
+	}
+	result, err := client.Get(ctx, c.ResourceGroup, id, nil)
+	if missingAzureResource(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if result.Properties == nil || result.Properties.ProvisioningState == nil {
+		return false, errors.New("invalid Azure deployment state")
+	}
+	switch *result.Properties.ProvisioningState {
+	case "Succeeded", "Failed", "Canceled":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+func (a *AzureSDK) deploy(ctx context.Context, c Config, id string, template map[string]any, bootstrap string) error {
+	client, err := a.deployments(c)
+	if err != nil {
+		return err
+	}
+	mode := armdeployments.DeploymentModeIncremental
+	poller, err := client.BeginCreateOrUpdate(ctx, c.ResourceGroup, id, armdeployments.Deployment{Properties: &armdeployments.DeploymentProperties{Mode: &mode, Template: template, Parameters: map[string]*armdeployments.DeploymentParameter{"bootstrap": {Value: bootstrap}}}}, nil)
+	if err != nil {
+		return err
+	}
+	_, err = poller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{Frequency: time.Second})
+	return err
+}
+func (a *AzureSDK) tagDisk(ctx context.Context, c Config, id string) error {
+	client, err := a.resources(c)
+	if err != nil {
+		return err
+	}
+	resourceID := "/subscriptions/" + c.Subscription + "/resourceGroups/" + c.ResourceGroup + "/providers/Microsoft.Compute/disks/" + id + "-os"
+	poller, err := client.BeginUpdateByID(ctx, resourceID, "2024-03-02", armresources.GenericResource{Tags: map[string]*string{"runnerscout-owner": &c.Owner, "runnerscout-operation": &id}}, nil)
+	if err != nil {
+		return err
+	}
+	_, err = poller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{Frequency: time.Second})
+	return err
+}
+func (a *AzureSDK) delete(ctx context.Context, c Config, resource azureResource) error {
+	client, err := a.resources(c)
+	if err != nil {
+		return err
+	}
+	version := ""
+	switch strings.ToLower(resource.Type) {
+	case "microsoft.compute/virtualmachines":
+		version = "2024-07-01"
+	case "microsoft.compute/disks":
+		version = "2024-03-02"
+	case "microsoft.network/networkinterfaces":
+		version = "2024-05-01"
+	default:
+		return errors.New("unsupported Azure cleanup resource")
+	}
+	// A successful start is not absence. Lifecycle keeps the cleanup obligation
+	// until a later independently observed inventory confirms removal.
+	_, err = client.BeginDeleteByID(ctx, resource.ID, version, nil)
+	if missingAzureResource(err) {
+		return nil
+	}
+	return err
+}

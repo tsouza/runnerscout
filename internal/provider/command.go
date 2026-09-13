@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -45,6 +46,8 @@ func (OSExecutor) Run(ctx context.Context, name string, args ...string) ([]byte,
 }
 
 type Command struct {
+	Azure     *AzureSDK
+	azureOnce sync.Once
 	Config    Config
 	Exec      Executor
 	Bootstrap func(context.Context, string) (string, error)

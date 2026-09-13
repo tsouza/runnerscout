@@ -4,14 +4,20 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+
 	"errors"
 	"fmt"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"strings"
 )
 
-func (p *Command) az(ctx context.Context, args ...string) ([]byte, error) {
-	return p.Exec.Run(ctx, "az", append(args, "--subscription", p.Config.Subscription, "--output", "json", "--only-show-errors")...)
+func (p *Command) azureClient() *AzureSDK {
+	p.azureOnce.Do(func() {
+		if p.Azure == nil {
+			p.Azure = &AzureSDK{}
+		}
+	})
+	return p.Azure
 }
 func (p *Command) azureID(kind, name string) string {
 	return "/subscriptions/" + p.Config.Subscription + "/resourceGroups/" + p.Config.ResourceGroup + "/providers/" + kind + "/" + name
@@ -25,14 +31,9 @@ type azureResource struct {
 }
 
 func (p *Command) azureResources(ctx context.Context, a lifecycle.Allocation) ([]azureResource, error) {
-	query := fmt.Sprintf("[?name=='%s' || name=='%s-nic' || name=='%s-os']", a.ID, a.ID, a.ID)
-	out, e := p.az(ctx, "resource", "list", "--resource-group", p.Config.ResourceGroup, "--query", query)
+	resources, e := p.azureClient().list(ctx, p.Config, a.ID)
 	if e != nil {
-		return nil, e
-	}
-	var resources []azureResource
-	if e = json.Unmarshal(out, &resources); e != nil || resources == nil {
-		return nil, errors.New("invalid Azure resource inventory")
+		return nil, errors.New("Azure resource inventory unavailable")
 	}
 	expected := map[string]string{a.ID: "Microsoft.Compute/virtualMachines", a.ID + "-nic": "Microsoft.Network/networkInterfaces", a.ID + "-os": "Microsoft.Compute/disks"}
 	seen := map[string]bool{}
@@ -49,27 +50,11 @@ func (p *Command) azureResources(ctx context.Context, a lifecycle.Allocation) ([
 	return resources, nil
 }
 func (p *Command) azureTerminal(ctx context.Context, a lifecycle.Allocation) (bool, error) {
-	out, e := p.az(ctx, "deployment", "group", "list", "--resource-group", p.Config.ResourceGroup, "--query", fmt.Sprintf("[?name=='%s']", a.ID))
-	if e != nil {
-		return false, e
+	terminal, err := p.azureClient().terminal(ctx, p.Config, a.ID)
+	if err != nil {
+		return false, errors.New("Azure deployment observation unavailable")
 	}
-	var deployments []struct {
-		Properties struct {
-			State string `json:"provisioningState"`
-		} `json:"properties"`
-	}
-	if e = json.Unmarshal(out, &deployments); e != nil || deployments == nil || len(deployments) > 1 {
-		return false, errors.New("invalid Azure deployment observation")
-	}
-	if len(deployments) == 0 {
-		return true, nil
-	} // Absence never permits blind create replay in the lifecycle.
-	switch deployments[0].Properties.State {
-	case "Succeeded", "Failed", "Canceled":
-		return true, nil
-	default:
-		return false, nil
-	}
+	return terminal, nil
 }
 func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, script string) (string, error) {
 	if !strings.HasPrefix(strings.ToLower(a.Offering.Image), "/subscriptions/") {
@@ -92,32 +77,14 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 		map[string]any{"type": "Microsoft.Network/networkInterfaces", "apiVersion": "2024-05-01", "name": a.ID + "-nic", "location": a.Offering.Region, "tags": tags, "properties": map[string]any{"networkSecurityGroup": map[string]string{"id": p.Config.SecurityGroup}, "ipConfigurations": []any{map[string]any{"name": "private", "properties": map[string]any{"privateIPAllocationMethod": "Dynamic", "subnet": map[string]string{"id": p.Config.Subnet}}}}}},
 		map[string]any{"type": "Microsoft.Compute/virtualMachines", "apiVersion": "2024-07-01", "name": a.ID, "location": a.Offering.Region, "zones": []string{a.Offering.Zone}, "tags": tags, "dependsOn": []string{nicID}, "properties": properties},
 	}}
-	b, e := json.Marshal(template)
-	if e != nil {
-		return "", e
+	bootstrap := base64.StdEncoding.EncodeToString([]byte(script))
+	if err := p.azureClient().deploy(ctx, p.Config, a.ID, template, bootstrap); err != nil {
+		return "", errors.New("Azure deployment commitment unknown")
 	}
-	path, clean, e := privateFile(string(b))
-	if e != nil {
-		return "", e
-	}
-	defer clean()
-	b, e = json.Marshal(map[string]any{"bootstrap": map[string]string{"value": base64.StdEncoding.EncodeToString([]byte(script))}})
-	if e != nil {
-		return "", e
-	}
-	params, cleanParams, e := privateFile(string(b))
-	if e != nil {
-		return "", e
-	}
-	defer cleanParams()
-	if _, e = p.az(ctx, "deployment", "group", "create", "--name", a.ID, "--resource-group", p.Config.ResourceGroup, "--mode", "Incremental", "--template-file", path, "--parameters", "@"+params); e != nil {
-		return "", e
-	}
-	// Explicitly tag the generated managed disk. If this response is lost or fails,
-	// reconciliation remains unknown; an untagged residual disk is never deleted.
-	diskID := p.azureID("Microsoft.Compute/disks", a.ID+"-os")
-	if _, e = p.az(ctx, "disk", "update", "--ids", diskID, "--set", "tags.runnerscout-owner="+p.Config.Owner, "tags.runnerscout-operation="+a.ID); e != nil {
-		return "", e
+	// A failure before disk tagging retains the existing uncertain-ownership
+	// cleanup obligation. Never infer ownership from a matching name alone.
+	if err := p.azureClient().tagDisk(ctx, p.Config, a.ID); err != nil {
+		return "", errors.New("Azure disk ownership tagging incomplete")
 	}
 	return p.azureID("Microsoft.Compute/virtualMachines", a.ID), nil
 }
@@ -145,8 +112,10 @@ func (p *Command) deleteAzure(ctx context.Context, a lifecycle.Allocation) error
 	for _, kind := range []string{"Microsoft.Compute/virtualMachines", "Microsoft.Network/networkInterfaces", "Microsoft.Compute/disks"} {
 		for _, resource := range resources {
 			if strings.EqualFold(resource.Type, kind) {
-				_, e = p.az(ctx, "resource", "delete", "--ids", resource.ID)
-				return e
+				if err := p.azureClient().delete(ctx, p.Config, resource); err != nil {
+					return errors.New("Azure deletion commitment unknown")
+				}
+				return nil
 			}
 		}
 	}
