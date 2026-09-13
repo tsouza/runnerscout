@@ -1,11 +1,23 @@
 # WireGuard peer model: trust, revocation, secrets and qualification
 
-> **Status: PROPOSED, not yet implemented.** This document answers the four
-> questions [networking-control-plane.md](networking-control-plane.md)
-> explicitly left open for issue #16's `wireguard` `NetworkProfile` mode. No
-> code in this repository implements any of it yet; `internal/configapi/compile.go`
-> (`network()`, `compile.go:162`) still rejects any `NetworkProfileSpec.Mode`
-> other than `"separate"` unconditionally.
+> **Status: PARTIALLY IMPLEMENTED, deliberately inert.** This document
+> answers the four questions
+> [networking-control-plane.md](networking-control-plane.md) explicitly left
+> open for issue #16's `wireguard` `NetworkProfile` mode. The "Peer trust"
+> and "Secret shape" sections are implemented (`internal/wireguard`'s
+> keypair/poll-token generation and peer-snapshot computation;
+> `internal/lifecycle.Allocation`'s checkpointed public-key/overlay-address/
+> poll-token-hash fields; `provider.Command`'s cloud-init embedding), and the
+> "Revocation" section's poll endpoint is implemented
+> (`internal/health.WireGuardPeersHandler`). The actual WireGuard tunnel/
+> data-plane bring-up this endpoint's peer list would feed is separate,
+> ongoing work. None of it is reachable yet:
+> `internal/configapi/compile.go` (`network()`, `compile.go:162`) still
+> rejects any `NetworkProfileSpec.Mode` other than `"separate"`
+> unconditionally, and no code path in this repository can set
+> `lifecycle.Allocation.NetworkProfile` to anything but its zero value - this
+> is deliberate, not a gap, per this document's own "What this document does
+> not decide" section below.
 
 ## Recommendation
 
