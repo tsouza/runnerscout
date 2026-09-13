@@ -130,7 +130,16 @@ func (h *WireGuardPeersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		copy(expected[:], allocation.WireGuardPollTokenHash)
 	}
 
-	if !tokenOK || !eligible || subtle.ConstantTimeCompare(presented[:], expected[:]) != 1 {
+	// Computed as its own statement, unconditionally, rather than as the
+	// last operand of a short-circuited `||` below: Go's || stops
+	// evaluating once an earlier operand is true, so folding this call in
+	// as a third clause would skip it entirely whenever !tokenOK or
+	// !eligible already was true - contradicting decoyHash's own doc
+	// comment above, which promises the comparison always runs so an
+	// ineligible allocation takes the same comparison shape as a wrong
+	// token for a real one, rather than skipping the comparison outright.
+	match := subtle.ConstantTimeCompare(presented[:], expected[:]) == 1
+	if !tokenOK || !eligible || !match {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
