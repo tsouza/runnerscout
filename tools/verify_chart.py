@@ -38,6 +38,14 @@ def resource(docs, kind):
 
 
 class ChartContracts(unittest.TestCase):
+    def test_controller_network_policy_keeps_legacy_selector_during_upgrade(self):
+        values = copy.deepcopy(FIXTURE)
+        values["networkPolicy"] = {"enabled": True, "egress": []}
+        docs = render(values)
+        deployment = resource(docs, "Deployment")
+        policy = next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == deployment["metadata"]["name"])
+        self.assertEqual(policy["spec"]["podSelector"]["matchLabels"], deployment["spec"]["selector"]["matchLabels"], "existing Pods can lose policy coverage before rollout")
+
     def test_hook_pods_share_network_policy_without_matching_deployment_selector(self):
         for fixture in [FIXTURE, json.loads((CHART / "tests/crd-values.json").read_text())]:
             values = copy.deepcopy(fixture)
@@ -45,7 +53,10 @@ class ChartContracts(unittest.TestCase):
             docs = render(values)
             deployment = resource(docs, "Deployment")
             selector = deployment["spec"]["selector"]["matchLabels"]
-            policy = resource(docs, "NetworkPolicy")["spec"]["podSelector"]["matchLabels"]
+            policies = {doc["metadata"]["name"]: doc["spec"]["podSelector"] for doc in docs if doc["kind"] == "NetworkPolicy"}
+            controller_policy = policies[deployment["metadata"]["name"]]["matchLabels"]
+            hook_policy = policies[deployment["metadata"]["name"] + "-checks"]
+            self.assertEqual(hook_policy["matchExpressions"], [{"key": "app.kubernetes.io/component", "operator": "In", "values": ["configuration-check", "cleanup-check"]}])
             for doc in docs:
                 if doc["kind"] not in {"Pod", "Job", "Deployment"}:
                     continue
@@ -53,6 +64,8 @@ class ChartContracts(unittest.TestCase):
                 labels = pod["metadata"].get("labels", {})
                 if doc["kind"] != "Deployment":
                     self.assertFalse(all(labels.get(key) == value for key, value in selector.items()), "hook Pod can match the controller ReplicaSet")
+                    self.assertIn(labels["app.kubernetes.io/component"], hook_policy["matchExpressions"][0]["values"])
+                policy = controller_policy if doc["kind"] == "Deployment" else hook_policy["matchLabels"]
                 self.assertTrue(all(labels.get(key) == value for key, value in policy.items()), "chart Pod escaped its NetworkPolicy")
 
     def test_workload_identity_labels_cannot_override_controller_ownership(self):
@@ -216,10 +229,11 @@ class ChartContracts(unittest.TestCase):
         values["networkPolicy"] = {"enabled": True, "egress": []}
         values["image"]["digest"] = "sha256:" + "a" * 64
         docs = render(values)
-        policy = resource(docs, "NetworkPolicy")["spec"]
+        deployment = resource(docs, "Deployment")
+        policy = next(d["spec"] for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == deployment["metadata"]["name"])
         self.assertEqual(policy["ingress"], [])
         self.assertEqual(policy["egress"], [])
-        self.assertEqual(policy["podSelector"]["matchLabels"], {"runnerscout.io/instance": "qualification"})
+        self.assertEqual(policy["podSelector"]["matchLabels"], deployment["spec"]["selector"]["matchLabels"])
         self.assertIn("@sha256:", resource(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0]["image"])
 
     def test_invalid_values_fail_closed(self):

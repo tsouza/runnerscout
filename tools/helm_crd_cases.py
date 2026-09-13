@@ -8,6 +8,7 @@ REQUIRED = {
     "crd_schema_retention", "crd_named_secret_rbac", "crd_install_and_check",
     "crd_secret_rotation", "crd_upgrade_rollback", "crd_ownership_changes_rejected",
     "crd_uninstall_guard", "crd_uninstall_retains_state", "crd_namespace_cleanup",
+    "network_policy_selector_stability",
 }
 
 
@@ -73,6 +74,8 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
 
     values = yaml.safe_load((root / "examples/multicloud/values.yaml").read_text())
     values["image"] = {"repository": "runnerscout", "tag": image_tag, "pullPolicy": "Never"}
+    # API/selector qualification only; kind's CNI is not an enforcement oracle.
+    values["networkPolicy"] = {"enabled": True, "egress": [{}]}
     values["crd"]["scaleSetName"] = "test-class"
     values["credentialSecrets"].append({"name": "azure-identity"})
     values_path = temp / "crd-values.json"
@@ -83,6 +86,13 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
     root_object = get("runnerscaleset", "test-class")
     checkpoint = get("configmap", "test-class-configuration")
     fleet = get("configmap", "test-class-fleet")
+    controller = get("deployment", "runnerscout")
+    controller_policy = get("networkpolicy", "runnerscout")
+    if controller_policy["spec"]["podSelector"]["matchLabels"] != controller["spec"]["selector"]["matchLabels"]:
+        raise RuntimeError("controller NetworkPolicy abandoned its legacy selector")
+    hook_policy = get("networkpolicy", "runnerscout-checks")
+    if hook_policy["spec"]["podSelector"].get("matchExpressions") != [{"key": "app.kubernetes.io/component", "operator": "In", "values": ["configuration-check", "cleanup-check"]}]:
+        raise RuntimeError("hook NetworkPolicy does not select both isolated hook types")
     if checkpoint["metadata"]["annotations"]["runnerscout.io/scale-set-uid"] != root_object["metadata"]["uid"]:
         raise RuntimeError("checkpoint did not retain the actual scale-set UID")
     if "PRIVATE KEY" in checkpoint["data"]["snapshot"] or "aws_secret_access_key" in checkpoint["data"]["snapshot"]:
@@ -111,6 +121,8 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
     manifest["checks"]["crd_secret_rotation"] = "pass"
 
     for name, changed in [
+        ("deployment", {**values, "fullnameOverride": "replacement"}),
+        ("selector", {**values, "nameOverride": "replacement"}),
         ("root", {**values, "crd": {**values["crd"], "scaleSetName": "another-root"}}),
         ("root-and-deployment", {**values, "fullnameOverride": "replacement", "crd": {**values["crd"], "scaleSetName": "another-root"}}),
     ]:
@@ -133,6 +145,11 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
     run("crd-helm-upgrade-test", helm + ["test", release, "--timeout", "90s"])
     run("crd-helm-rollback", helm + ["rollback", release, "1", "--wait", "--timeout", "120s"], timeout=150)
     run("crd-helm-rollback-test", helm + ["test", release, "--timeout", "90s"])
+    final_policy = get("networkpolicy", "runnerscout")
+    if final_policy["metadata"]["uid"] != controller_policy["metadata"]["uid"] or final_policy["spec"] != controller_policy["spec"]:
+        raise RuntimeError("upgrade or rollback replaced the controller policy or changed its selector")
+    manifest["checks"]["network_policy_selector_stability"] = "pass"
+    manifest["network_policy_scope"] = "real API admission and selector/UID continuity; not CNI traffic-enforcement qualification"
     if get("runnerscaleset", "test-class")["spec"]["maxRunners"] != 3 or get("configmap", "test-class-fleet")["metadata"]["uid"] != fleet["metadata"]["uid"]:
         raise RuntimeError("chart rollback rewound external CRD settings or replaced durable state")
     manifest["checks"]["crd_upgrade_rollback"] = "pass"
