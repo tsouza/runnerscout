@@ -172,14 +172,23 @@ type Creation struct {
 	// captured from the create call's own response rather than generated:
 	// internal/provider's AWS adapter sets it (the private IP is already
 	// present in the exact RunInstances response it already parses for
-	// other fields); the Azure and GCP adapters do not set it yet, even
-	// though each already fetches an API response that carries the same
-	// data for its own purposes (Azure: the network interface GET
-	// azureInventory already performs; GCP: the compute.Instance
-	// gcpInventory already fetches) - wiring those two through is left as
-	// explicit follow-up work, not silently assumed to be unneeded, because
-	// no allocation this codebase can produce today reaches any of this
-	// (see Allocation.NetworkProfile).
+	// other fields); the Azure adapter sets it too (the NIC's private IP -
+	// properties.ipConfigurations[].properties.privateIPAddress - is
+	// already present in the exact network interface GET response
+	// azureInventory already performs for ownership/UID verification, so
+	// this costs no new call either). The GCP adapter does NOT set it: its
+	// creation path (Instances.Insert, then polling ZoneOperations.Get/List)
+	// never receives a compute.Instance response at all - only
+	// compute.Operation ones, which carry no NetworkInterfaces field -
+	// so capturing this for GCP would require a genuinely new post-create
+	// Instances.Get call, a real API-call/latency/failure-mode tradeoff
+	// this codebase deliberately does not decide unilaterally here.
+	// gcpInventory's own Instances.Get does carry
+	// NetworkInterfaces[].NetworkIP, but only runs against an
+	// already-existing instance during observe/delete, never right after a
+	// create it did not just perform. No allocation this codebase can
+	// produce today reaches any of this regardless (see
+	// Allocation.NetworkProfile).
 	WireGuardEndpoint string
 }
 type ResourceCreator interface {

@@ -128,6 +128,18 @@ func (p *Command) azureInventory(ctx context.Context, a lifecycle.Allocation, al
 			VirtualMachine struct {
 				ID string `json:"id"`
 			} `json:"virtualMachine"`
+			// IPConfigurations mirrors the exact nested shape ARM's own
+			// network interface GET response uses
+			// (properties.ipConfigurations[].properties.privateIPAddress) -
+			// the same shape createAzure's own deployment template already
+			// constructs (azure.go's "ipConfigurations" literal). Read only
+			// for azure-network-interface below; every other resource kind
+			// leaves it empty and unused.
+			IPConfigurations []struct {
+				Properties struct {
+					PrivateIPAddress string `json:"privateIPAddress"`
+				} `json:"properties"`
+			} `json:"ipConfigurations"`
 		}
 		if azureProperties(resource.Properties, &properties) != nil {
 			return nil, errors.New("Azure resource generation missing")
@@ -139,6 +151,13 @@ func (p *Command) azureInventory(ctx context.Context, a lifecycle.Allocation, al
 		if spec.kind == "azure-network-interface" {
 			value = properties.ResourceGUID
 			item.ManagedBy = properties.VirtualMachine.ID
+			// createAzure's own deployment template provisions exactly one
+			// ipConfiguration per NIC (azure.go's "private" entry) - a
+			// different count is left uncaptured rather than guessing which
+			// one is primary.
+			if len(properties.IPConfigurations) == 1 {
+				item.PrivateIP = properties.IPConfigurations[0].Properties.PrivateIPAddress
+			}
 		}
 		uid, err := uuid.Parse(value)
 		if err != nil || uid == uuid.Nil {

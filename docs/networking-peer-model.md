@@ -174,18 +174,29 @@ which would defeat the entire point of updating a live peer list.
 
 The concrete wire schema of the poll endpoint and its response format, the
 polling interval and backoff policy, overlay IP address allocation and
-exhaustion handling, how a VM-side peer learns another peer's outer
-transport endpoint (the real dialable network address:port for the
-underlying UDP socket a `device.Device` sends encrypted packets to — distinct
-from the inner overlay address `CloudInitPayload.Peer` already carries, which
-only supplies an AllowedIPs entry; `internal/wireguard/tunnel.Peer` had to
-add its own `Endpoint` field to have anything to dial in its own
-qualification test, and nothing decides how a real VM-side agent would
-learn one from cloud-init or the poll response), PSK rotation policy when
-`EnrollmentRef` is set, rate limiting or abuse protection on the new
-controller-hosted endpoint, observability for peer-convergence lag, and the
-VM-side systemd unit or other boot-time integration that would actually
-call `internal/wireguard/tunnel.BringUp` on a running instance are all real
-implementation decisions this document does not make. See
+exhaustion handling, PSK rotation policy when `EnrollmentRef` is set, rate
+limiting or abuse protection on the new controller-hosted endpoint,
+observability for peer-convergence lag, and the VM-side systemd unit or
+other boot-time integration that would actually call
+`internal/wireguard/tunnel.BringUp` on a running instance are all real
+implementation decisions this document does not make.
+
+How a VM-side peer learns another peer's outer transport endpoint (the real
+dialable network address:port for the underlying UDP socket a
+`device.Device` sends encrypted packets to — distinct from the inner overlay
+address `CloudInitPayload.Peer` already carries, which only supplies an
+AllowedIPs entry) is now resolved *within a single `NetworkMapping`*:
+`lifecycle.Allocation.WireGuardEndpoint`/`wireguard.Peer.Endpoint` capture a
+VM's already-cloud-assigned private IP at creation time, with zero new API
+calls, for AWS (`internal/provider/aws.go`) and Azure
+(`internal/provider/azure_inventory.go`). GCP does not set it yet: its
+creation path never receives a `compute.Instance` response (only
+`compute.Operation` ones, which carry no NetworkInterfaces), so wiring it
+would need a genuinely new post-create API call — a real cost/latency/
+failure-mode tradeoff this document still leaves undecided. Reachability
+*across* two different `NetworkMapping`s (different providers or regions
+referenced by one `NetworkProfile`) also remains fully undecided; see
+`Allocation.WireGuardEndpoint`'s own doc comment
+(`internal/lifecycle/lifecycle.go`) for why. See
 [networking-peer-model.background.md](networking-peer-model.background.md)
 for the investigation and reasoning behind each recommendation above.

@@ -32,6 +32,13 @@ type azureResource struct {
 	UID       string             `json:"-"`
 	ManagedBy string             `json:"-"`
 	VM        *azureVMProperties `json:"-"`
+	// PrivateIP is this network interface's private IP address, read from
+	// the same GET response azureInventory already fetches for UID/ownership
+	// verification (properties.ipConfigurations[].properties.privateIPAddress
+	// - see azureInventory). Empty for every non-NIC resource and for a NIC
+	// whose ipConfigurations shape isn't exactly the single entry this
+	// codebase's own createAzure template ever produces.
+	PrivateIP string `json:"-"`
 }
 
 func (p *Command) azureResources(ctx context.Context, a lifecycle.Allocation) ([]azureResource, error) {
@@ -113,6 +120,15 @@ func (p *Command) finishAzureDiskOwnership(ctx context.Context, a lifecycle.Allo
 		return receipt, err
 	}
 	receipt.Resources = observed.Resources
+	// The NIC's private IP is already present in the exact network interface
+	// GET response azureInventory just performed above for ownership/UID
+	// verification - see lifecycle.Allocation.WireGuardEndpoint's doc comment
+	// for why this is captured (no new API call) and what it resolves.
+	for _, resource := range resources {
+		if strings.EqualFold(resource.Type, "Microsoft.Network/networkInterfaces") {
+			receipt.WireGuardEndpoint = wireGuardEndpoint(resource.PrivateIP)
+		}
+	}
 	if len(resources) != 3 {
 		return receipt, errors.New("Azure creation dependencies incomplete")
 	}
