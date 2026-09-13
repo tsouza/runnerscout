@@ -72,6 +72,7 @@ func TestRealKubernetesPersistenceAndCAS(t *testing.T) {
 		t.Fatal(b, e)
 	}
 	a.Phase = lifecycle.Creating
+	a.Resources = []lifecycle.ResourceReference{{Kind: "aws-volume", ID: "vol-fixture"}}
 	a, e = s.Save(ctx, a, a.Revision)
 	if e != nil {
 		t.Fatal(e)
@@ -81,7 +82,23 @@ func TestRealKubernetesPersistenceAndCAS(t *testing.T) {
 		t.Fatalf("stale revision was not rejected: %v", e)
 	}
 	got, e := s2.Load(ctx, a.ID)
-	if e != nil || got.Phase != lifecycle.Creating {
+	if e != nil || got.Phase != lifecycle.Creating || len(got.Resources) != 1 || got.Resources[0].ID != "vol-fixture" {
 		t.Fatal(got, e)
+	}
+	cm, e := s2.Maps.Get(ctx, a.ID, metav1.GetOptions{})
+	if e != nil || cm.Data["allocation"] != "" || cm.Data["allocation-v2"] == "" {
+		t.Fatal("dependency format did not migrate", e)
+	}
+	all, e := s2.List(ctx)
+	if e != nil || len(all) != 1 || len(all[0].Resources) != 1 {
+		t.Fatal("real list lost dependency", e)
+	}
+	got.Resources = nil
+	if _, e = s2.Save(ctx, got, got.Revision); e == nil {
+		t.Fatal("real state accepted dependency removal")
+	}
+	retained, e := s.Load(ctx, a.ID)
+	if e != nil || len(retained.Resources) != 1 {
+		t.Fatal("rejected update changed dependencies", e)
 	}
 }

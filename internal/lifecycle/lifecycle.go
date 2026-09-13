@@ -21,7 +21,13 @@ const (
 	TimedOut Phase = "timed-out"
 )
 
+type ResourceReference struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
 type Allocation struct {
+	Resources    []ResourceReference          `json:"resources,omitempty"`
 	RejectedAt   map[string]time.Time         `json:"rejectedAt,omitempty"`
 	Completed    bool                         `json:"completed"`
 	ID           string                       `json:"id"`
@@ -48,6 +54,7 @@ var ErrCapacity = errors.New("definitive capacity rejection")
 var ErrNoEffect = errors.New("create preparation failed without cloud effects")
 
 type Observation struct {
+	Resources  []ResourceReference
 	Exists     bool
 	Known      bool
 	ResourceID string
@@ -68,7 +75,7 @@ type Controller struct {
 	Now       func() time.Time
 }
 
-// Step makes at most one cloud request. A committed Creating intent survives
+// Step makes at most one provider operation. A committed Creating intent survives
 // crashes and must be observed; no blind create retry follows an ambiguous response.
 func (c *Controller) Step(ctx context.Context, id string) error {
 	a, err := c.Store.Load(ctx, id)
@@ -155,6 +162,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		if e != nil || !ob.Known {
 			return errors.New("create reconciliation unknown")
 		}
+		if err := c.rememberResources(ctx, &a, ob.Resources); err != nil {
+			return err
+		}
 		if !ob.Exists {
 			a.Condition = "CreateAbsenceNotCommitmentProof"
 			if expired {
@@ -180,6 +190,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		if e != nil || !ob.Known {
 			return errors.New("resource observation unknown")
 		}
+		if err := c.rememberResources(ctx, &a, ob.Resources); err != nil {
+			return err
+		}
 		if !ob.Exists {
 			a.Phase = Deleted
 			a.Condition = "ResourceAbsentInterruptionUnproven"
@@ -191,6 +204,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		ob, e := p.Observe(ctx, a)
 		if e != nil || !ob.Known {
 			return errors.New("cleanup observation unknown")
+		}
+		if err := c.rememberResources(ctx, &a, ob.Resources); err != nil {
+			return err
 		}
 		if !ob.Exists {
 			a.Phase = Deleted

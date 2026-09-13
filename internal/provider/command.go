@@ -122,6 +122,9 @@ func Bootstrap(jit string) string {
 	return "#!/bin/bash\nset -eu\numask 077\ninstall -d -m 0700 -o runner -g runner /run/runnerscout\nprintf '%s' '" + b64 + "' | base64 -d > /run/runnerscout/jit\nchown runner:runner /run/runnerscout/jit\ntrap 'rm -f /run/runnerscout/jit; shutdown -h now' EXIT\ncd /opt/actions-runner\nrunuser -u runner -- sh -c 'exec ./run.sh --jitconfig \"$(cat /run/runnerscout/jit)\"'\n"
 }
 func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, error) {
+	if len(a.Resources) > 0 {
+		return "", errors.New("cannot create over recorded cloud dependencies")
+	}
 	if err := ValidateName(a.ID); err != nil {
 		return "", err
 	}
@@ -169,6 +172,9 @@ func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, e
 	return p.createGCP(ctx, a, script)
 }
 func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
+	if len(a.Resources) > 0 {
+		return lifecycle.Observation{}, errors.New("provider cannot reconcile recorded cloud dependencies")
+	}
 	if err := ValidateName(a.ID); err != nil {
 		return lifecycle.Observation{}, err
 	}

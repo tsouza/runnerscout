@@ -12,6 +12,12 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCloudDependenciesPersistBeforeDeleteAndSurviveRestart'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCloudDependencyCheckpointConflictPreventsDeletion'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestInvalidCloudDependenciesPreventDeletion'),
+    ('github.com/tsouza/runnerscout/internal/state', 'TestDependencyStateCannotBeDowngradedOrDiscarded'),
+    ('github.com/tsouza/runnerscout/internal/state', 'TestUnknownAllocationFieldsAreNotSilentlyLost'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestUnsupportedDependencyRecordsRefuseCloudEffects'),
     ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestInterruptedSafetyCheckCannotReportSuccessfulExit'),
     ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompleteMulticloudExampleCompilesWithoutEnablingAdmissions'),
     ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestCRDChecksRequireOneExplicitMode'),
