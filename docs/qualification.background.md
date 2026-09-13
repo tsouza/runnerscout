@@ -22,7 +22,7 @@ Evaluator authority section: the non-bypassable required-CI ruleset on
 | CQ-09 | `TestAWSObservationConfirmsSpotInterruption` / `TestAWSObservationRequiresSpotOfferingForInterruption` (added alongside this document) — interruption requires the provider's own definitive code, gated by offering type. |
 | CQ-10 | `TestRedeliveryAndBoundedRearming`, `TestLoweredLimitDrainsWithoutRearmingOrDroppingAdmissions` — admission accounting under redelivery. |
 | CQ-11 | `TestRuntimeDeletionRequiresObservedDrainAndRetainsOtherFinalizers` — finalizer removal gated on observed drain, not requested drain. |
-| CQ-12 | No single test proves this — it is a documentation/process discipline (see `docs/releases.md`'s "Emulators and fixtures do not satisfy live gates"), included so an evaluator checks the *claim*, not just the code path. |
+| CQ-12 | `tools/test_evaluate.py`'s `EvidenceTypeIntegrity.test_evaluator_report_never_claims_live_cloud_integration` — statically proves `tools/evaluate.py`'s report can only ever claim `live_cloud_integration=False`, as a single unconditional literal (see `docs/releases.md`'s "Emulators and fixtures do not satisfy live gates"), included so an evaluator checks the *claim*, not just the code path. |
 
 ## Why a flat list instead of grouping by provider or by subsystem
 
@@ -49,8 +49,7 @@ smuggling in a severity ranking through the ID scheme itself.
 
 It does not claim CQ-01 through CQ-12 are exhaustive or that passing all
 twelve qualifies a release on its own. The cited tests are the qualifying
-evidence for CQ-01 through CQ-11 today, since each already runs in the
+evidence for CQ-01 through CQ-12 today, since each already runs in the
 required CI suite on every change - re-running them is executing that CQ,
-not just motivation for it. CQ-12 has no such test yet and is not
-qualified until one is added; a CQ whose citation is later removed or
+not just motivation for it. A CQ whose citation is later removed or
 weakened reverts to unqualified until a replacement lands.

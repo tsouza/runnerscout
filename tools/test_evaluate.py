@@ -1,5 +1,9 @@
+import ast
 import json
 import unittest
+from pathlib import Path
+
+import evaluate
 from evaluate import test_manifest
 
 
@@ -52,3 +56,53 @@ class ManifestIntegrity(unittest.TestCase):
         ]
         self.assertTrue(test_manifest(events, {('p', 'T')})['pass_'])
         self.assertFalse(test_manifest(events, {('p', 'T'), ('api', 'Required')})['pass_'])
+
+
+def _live_cloud_integration_claims(source):
+    """Every AST site in evaluate.py's source that sets the report's
+    'live_cloud_integration' key, whether via the dict(...) literal or a
+    later report['live_cloud_integration'] = ... assignment."""
+    tree = ast.parse(source)
+    claims = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg == 'live_cloud_integration':
+            claims.append(node.value)
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (isinstance(target, ast.Subscript)
+                        and isinstance(target.slice, ast.Constant)
+                        and target.slice.value == 'live_cloud_integration'):
+                    claims.append(node.value)
+    return claims
+
+
+class EvidenceTypeIntegrity(unittest.TestCase):
+    """CQ-12: a qualified controller must never present fixture, emulator or
+    real-cloud evidence as interchangeable in an acceptance decision.
+
+    tools/evaluate.py never performs a real cloud call - it is a bounded local
+    diagnostic (fixtures, emulators, `go test`). Its report must therefore
+    always say so as a literal, unconditional claim, not a value that could be
+    flipped or computed. This test inspects the actual source of evaluate.py
+    (not a mock of it), so it fails if the hardcoded claim is changed to
+    `True`, made conditional/computed, duplicated, or removed.
+    """
+
+    def test_evaluator_report_never_claims_live_cloud_integration(self):
+        source = Path(evaluate.__file__).read_text()
+        claims = _live_cloud_integration_claims(source)
+        self.assertEqual(
+            len(claims), 1,
+            'expected exactly one live_cloud_integration claim in tools/evaluate.py, '
+            'found %d - CQ-12 requires the evidence-type claim never be ambiguous or '
+            'duplicated' % len(claims))
+        claim, = claims
+        self.assertIsInstance(
+            claim, ast.Constant,
+            'live_cloud_integration must be a literal, not a computed or conditional '
+            'claim (CQ-12: fixture/emulator evidence must never be presentable as '
+            'real-cloud evidence)')
+        self.assertIs(
+            claim.value, False,
+            "tools/evaluate.py's local diagnostic run has no real-cloud evidence and "
+            "must not claim live_cloud_integration=True (CQ-12)")
