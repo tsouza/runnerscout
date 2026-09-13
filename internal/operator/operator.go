@@ -14,6 +14,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"github.com/tsouza/runnerscout/internal/placement"
 	"github.com/tsouza/runnerscout/internal/provider"
+	"github.com/tsouza/runnerscout/internal/recovery"
 	"github.com/tsouza/runnerscout/internal/state"
 	"io"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,7 @@ type Config struct {
 	Requirements        placement.Requirements     `json:"requirements"`
 	Catalog             placement.Catalog          `json:"catalog"`
 	Providers           map[string]provider.Config `json:"providers"`
+	Retry               recovery.Policy            `json:"retry"`
 }
 
 func (c Config) Validate() error {
@@ -83,6 +85,10 @@ type fleet struct {
 	Admission      admission.State                 `json:"admission"`
 	Created        map[string]time.Time            `json:"created"`
 	Pending        map[string]lifecycle.Allocation `json:"pending"`
+	// RetriesUsedByRun is keyed by GitHub workflow run ID, not allocation ID -
+	// a rerun keeps the same run ID but is reassigned as a brand new,
+	// otherwise unrelated allocation.
+	RetriesUsedByRun map[int64]int `json:"retriesUsedByRun,omitempty"`
 }
 type Operator struct {
 	// Readiness is an optional concurrency-safe observer of session/reconciliation state.
@@ -90,6 +96,7 @@ type Operator struct {
 	Config     Config
 	Client     kubernetes.Interface
 	GitHub     *scaleset.Client
+	GitHubJobs githubJobsClient
 	Store      *state.Kubernetes
 	Controller *lifecycle.Controller
 	mu         sync.Mutex
@@ -203,6 +210,9 @@ func (o *Operator) readFleet(ctx context.Context, create bool) (*corev1.ConfigMa
 	}
 	if f.Pending == nil {
 		f.Pending = map[string]lifecycle.Allocation{}
+	}
+	if f.RetriesUsedByRun == nil {
+		f.RetriesUsedByRun = map[int64]int{}
 	}
 	return cm, f, e
 }
@@ -389,6 +399,9 @@ func (o *Operator) Tick(ctx context.Context) error {
 		if e != nil {
 			failures = append(failures, e)
 		}
+	}
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		failures = append(failures, e)
 	}
 	return errors.Join(failures...)
 }

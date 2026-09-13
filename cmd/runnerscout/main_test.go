@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/tsouza/runnerscout/internal/health"
+	"github.com/tsouza/runnerscout/internal/operator"
+	"github.com/tsouza/runnerscout/internal/recovery"
 )
 
 func TestCRDCommandRejectsMixedConfigurationAndAuthentication(t *testing.T) {
@@ -136,5 +138,29 @@ func TestInterruptedSafetyCheckCannotReportSuccessfulExit(t *testing.T) {
 	}
 	if err := runCheck(context.Background(), func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGitHubJobsClientRequiresPATWhenRetryEnabled(t *testing.T) {
+	enabled := operator.Config{Retry: recovery.Policy{Enabled: true}}
+	if client, err := githubJobsClient(options{}, enabled); err == nil || client != nil {
+		t.Fatal("retry enabled without any GitHub auth was accepted", client, err)
+	}
+	if client, err := githubJobsClient(options{appID: "app", installationID: 1, appKey: "key"}, enabled); err == nil || client != nil {
+		t.Fatal("retry enabled with App authentication was accepted", client, err)
+	}
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(" secret-token \n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := githubJobsClient(options{tokenPath: path}, enabled)
+	if err != nil || client == nil || client.Token != "secret-token" {
+		t.Fatal("PAT authentication did not produce a usable client", client, err)
+	}
+}
+func TestGitHubJobsClientNilWhenRetryDisabled(t *testing.T) {
+	client, err := githubJobsClient(options{}, operator.Config{})
+	if err != nil || client != nil {
+		t.Fatal("disabled retry policy still built a client", client, err)
 	}
 }

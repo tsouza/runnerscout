@@ -203,7 +203,13 @@ func TestRealKubernetesCRDSchemasAndConfigurationSnapshot(t *testing.T) {
 	if _, err := classes.Update(ctx, class, metav1.UpdateOptions{FieldValidation: "Strict"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Read(ctx, KubernetesReader{Client: dc}, namespace, "build"); err == nil {
-		t.Fatal("unimplemented retry execution accepted")
+	// The scale set fixture authenticates with a PAT (see the fixture() helper
+	// in compile_test.go), which retry execution now supports.
+	snapshot, _, err := Read(ctx, KubernetesReader{Client: dc}, namespace, "build")
+	if err != nil {
+		t.Fatalf("PAT-authenticated retry execution rejected: %v", err)
+	}
+	if !snapshot.Class.Spec.Retry.Enabled || snapshot.Class.Spec.Retry.MaxRetries != 1 || !snapshot.Class.Spec.Retry.AcknowledgeRepeatedEffects {
+		t.Fatal("retry policy not carried through the real snapshot", snapshot.Class.Spec.Retry)
 	}
 }

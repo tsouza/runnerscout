@@ -9,6 +9,7 @@ import (
 
 	"github.com/actions/scaleset"
 	api "github.com/tsouza/runnerscout/api/v1alpha1"
+	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/operator"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -101,6 +102,11 @@ func (r *Runtime) newWorker(resolved Resolved, credentials Credentials, mode Wor
 	op, cleanup, err := operator.NewWithCredentials(resolved.Config, r.Client, github, credentials.Providers)
 	if err != nil {
 		return nil, nil, err
+	}
+	if resolved.Config.Retry.Enabled {
+		// Compile already refuses Retry.Enabled for App authentication, so
+		// credentials.GitHub here is always a PAT.
+		op.GitHubJobs = &githubjobs.Client{Token: string(credentials.GitHub)}
 	}
 	op.Readiness = ready
 	if mode == CleanupMode {
