@@ -5,9 +5,11 @@ package provider
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
+	"github.com/tsouza/runnerscout/internal/wireguard"
 	"strings"
 	"sync"
 )
@@ -31,6 +33,17 @@ type Command struct {
 	azureOnce sync.Once
 	Config    Config
 	Bootstrap func(context.Context, string) (string, error)
+	// NetworkPeers supplies the current WireGuard peer snapshot for an
+	// allocation intending wireguard-mode networking
+	// (lifecycle.Allocation.NetworkProfile != ""), the same optional,
+	// caller-injected side-effect pattern Bootstrap already uses for the
+	// GitHub JIT token. No caller sets this today: nothing in this codebase's
+	// configuration path can ever produce an allocation with NetworkProfile
+	// set (see lifecycle.Allocation.NetworkProfile), so this field stays nil
+	// everywhere it is constructed. The eventual caller is expected to source
+	// the allocation list this hook needs from internal/state.Kubernetes.List
+	// and filter it through internal/wireguard.Snapshot.
+	NetworkPeers func(context.Context, lifecycle.Allocation) ([]wireguard.Peer, error)
 }
 
 func (p *Command) Validate() error {
@@ -56,6 +69,40 @@ func Bootstrap(jit string) string {
 	b64 := base64.StdEncoding.EncodeToString([]byte(jit))
 	return "#!/bin/bash\nset -eu\numask 077\ninstall -d -m 0700 -o runner -g runner /run/runnerscout\nprintf '%s' '" + b64 + "' | base64 -d > /run/runnerscout/jit\nchown runner:runner /run/runnerscout/jit\ntrap 'rm -f /run/runnerscout/jit; shutdown -h now' EXIT\ncd /opt/actions-runner\nrunuser -u runner -- sh -c 'exec ./run.sh --jitconfig \"$(cat /run/runnerscout/jit)\"'\n"
 }
+
+// bootstrapTrap is the exact literal Bootstrap emits for its cleanup trap.
+// BootstrapWithWireGuard locates it by this constant rather than duplicating
+// Bootstrap's construction, so the two functions cannot silently drift apart.
+const bootstrapTrap = "trap 'rm -f /run/runnerscout/jit;"
+
+// BootstrapWithWireGuard extends Bootstrap's cloud-init script with a second,
+// optional secret file for a wireguard-mode allocation: a base64-encoded JSON
+// blob (wireGuardJSON, an internal/wireguard.CloudInitPayload) written to
+// /run/runnerscout/wireguard.json, cleaned up by the same EXIT trap that
+// already removes the JIT token. wireGuardJSON == "" reproduces Bootstrap(jit)
+// byte for byte - Bootstrap itself is never modified by this function, so
+// that equivalence holds by construction, not merely by testing it - which is
+// the "zero effect until wired" guarantee this task requires for every
+// allocation that does not intend wireguard mode (every allocation this
+// codebase can produce today).
+//
+// The consumer of this file (VM-side WireGuard interface bring-up) is not
+// implemented yet; see internal/wireguard.CloudInitPayload's doc comment and
+// docs/networking-peer-model.md's "What this document does not decide"
+// section for the open wire-format question this payload leaves unresolved.
+func BootstrapWithWireGuard(jit, wireGuardJSON string) (string, error) {
+	script := Bootstrap(jit)
+	if wireGuardJSON == "" {
+		return script, nil
+	}
+	if !strings.Contains(script, bootstrapTrap) {
+		return "", errors.New("wireguard: bootstrap script trap line changed shape; refusing to silently drop the wireguard secret file")
+	}
+	wb64 := base64.StdEncoding.EncodeToString([]byte(wireGuardJSON))
+	install := "printf '%s' '" + wb64 + "' | base64 -d > /run/runnerscout/wireguard.json\nchown runner:runner /run/runnerscout/wireguard.json\n"
+	extendedTrap := "trap 'rm -f /run/runnerscout/jit /run/runnerscout/wireguard.json;"
+	return strings.Replace(script, bootstrapTrap, install+extendedTrap, 1), nil
+}
 func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, error) {
 	receipt, err := p.CreateWithResources(ctx, a)
 	return receipt.ResourceID, err
@@ -78,16 +125,55 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	if err != nil || jit == "" {
 		return lifecycle.Creation{}, lifecycle.ErrNoEffect
 	}
-	script := Bootstrap(jit)
+	// Wireguard-mode embedding only runs when NetworkProfile is set - which,
+	// as of this change, no allocation this codebase produces ever is (see
+	// lifecycle.Allocation.NetworkProfile and NetworkPeers above). Every
+	// existing call path takes the wireGuardJSON == "" branch of
+	// BootstrapWithWireGuard, which reproduces Bootstrap(jit) unchanged.
+	var wireGuardJSON string
+	var wireGuardPublicKey []byte
+	if a.NetworkProfile != "" {
+		if p.NetworkPeers == nil {
+			return lifecycle.Creation{}, lifecycle.ErrNoEffect
+		}
+		keyPair, genErr := wireguard.Generate()
+		if genErr != nil {
+			return lifecycle.Creation{}, genErr
+		}
+		peers, peersErr := p.NetworkPeers(ctx, a)
+		if peersErr != nil {
+			return lifecycle.Creation{}, peersErr
+		}
+		encoded, marshalErr := json.Marshal(wireguard.CloudInitPayload{
+			PrivateKey:     keyPair.Private.Base64(),
+			OverlayAddress: a.WireGuardOverlayAddress,
+			Peers:          peers,
+		})
+		if marshalErr != nil {
+			return lifecycle.Creation{}, marshalErr
+		}
+		wireGuardJSON = string(encoded)
+		wireGuardPublicKey = keyPair.Public.Bytes()
+	}
+	script, err := BootstrapWithWireGuard(jit, wireGuardJSON)
+	if err != nil {
+		return lifecycle.Creation{}, err
+	}
+	var creation lifecycle.Creation
 	switch p.Config.Kind {
 	case "aws":
-		return p.createAWS(ctx, a, script)
+		creation, err = p.createAWS(ctx, a, script)
 	case "azure":
-		return p.createAzure(ctx, a, script)
+		creation, err = p.createAzure(ctx, a, script)
 	default:
-		id, err := p.createGCP(ctx, a, script)
-		return lifecycle.Creation{ResourceID: id}, err
+		var id string
+		id, err = p.createGCP(ctx, a, script)
+		creation = lifecycle.Creation{ResourceID: id}
 	}
+	if len(wireGuardPublicKey) > 0 {
+		creation.WireGuardPublicKey = wireGuardPublicKey
+	}
+	return creation, err
 }
 func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
 	if len(a.Resources) > 0 && p.Config.Kind != "aws" && p.Config.Kind != "azure" {
