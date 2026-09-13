@@ -60,6 +60,7 @@ acknowledgment of repeated workflow effects; composition is tracked in
 [#4](https://github.com/tsouza/runnerscout/issues/4).
 
 Separate provider networks are the default. Optional shared private connectivity
-retains each provider's native network boundary; enabled overlay execution is
-currently rejected. Integration and isolated local qualification are tracked in
-[#16](https://github.com/tsouza/runnerscout/issues/16).
+via a single-mapping WireGuard overlay is also supported, retaining each
+provider's native network boundary; see [operations.md](operations.md) for
+setup. Cross-region/cross-provider overlay peering and VM-boot integration
+remain tracked in [#16](https://github.com/tsouza/runnerscout/issues/16).
