@@ -82,16 +82,31 @@ func TestCompileRejectsBrokenOrCrossNamespaceReferences(t *testing.T) {
 }
 
 func TestCompileDoesNotPretendUnsupportedExecutionExists(t *testing.T) {
+	// Retry execution is supported for PAT authentication (see
+	// TestCompileAcceptsRetryPolicyWithPATAuthentication); App-mode reuse of
+	// its JWT/installation-token exchange is not implemented yet.
 	s := fixture()
+	s.ScaleSet.Spec.GitHub.Auth = api.GitHubAuthentication{Mode: "app", AppClientID: "app-client", AppInstallationID: 1, SecretRef: api.SecretKeyReference{Name: "github", Key: "key"}}
 	s.Class.Spec.Retry = api.RetryPolicy{Enabled: true, MaxRetries: 1, AcknowledgeRepeatedEffects: true}
 	if _, err := Compile(s); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("retry execution claimed: %v", err)
+		t.Fatalf("retry execution claimed for App authentication: %v", err)
 	}
 	s = fixture()
 	s.Class.Spec.NetworkRef = &api.LocalReference{Name: "mesh"}
 	s.Network = &api.NetworkProfile{ObjectMeta: metav1.ObjectMeta{Name: "mesh", Namespace: "test"}, Spec: api.NetworkProfileSpec{Mode: "wireguard"}}
 	if _, err := Compile(s); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("overlay execution claimed: %v", err)
+	}
+}
+func TestCompileAcceptsRetryPolicyWithPATAuthentication(t *testing.T) {
+	s := fixture()
+	s.Class.Spec.Retry = api.RetryPolicy{Enabled: true, MaxRetries: 2, AcknowledgeRepeatedEffects: true}
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Config.Retry.Enabled || r.Config.Retry.MaxRetries != 2 || !r.Config.Retry.AcknowledgeRepeatedEffects {
+		t.Fatal("retry policy not carried into resolved config", r.Config.Retry)
 	}
 }
 

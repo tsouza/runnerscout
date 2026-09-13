@@ -12,6 +12,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/operator"
 	"github.com/tsouza/runnerscout/internal/placement"
 	"github.com/tsouza/runnerscout/internal/provider"
+	"github.com/tsouza/runnerscout/internal/recovery"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -82,10 +83,13 @@ func Compile(s Snapshot) (Resolved, error) {
 	default:
 		return result, errors.New("unsupported GitHub authentication mode")
 	}
-	if s.Class.Spec.Retry.Enabled {
-		return result, fmt.Errorf("%w: retry execution", ErrUnsupported)
+	if s.Class.Spec.Retry.Enabled && auth.Mode != "pat" {
+		// Retry execution needs a bearer token for internal/githubjobs; App
+		// mode would need its own JWT/installation-token exchange, not
+		// implemented yet.
+		return result, fmt.Errorf("%w: retry execution for App authentication", ErrUnsupported)
 	}
-	if s.Class.Spec.Retry.MaxRetries != 0 || s.Class.Spec.Retry.AcknowledgeRepeatedEffects {
+	if !s.Class.Spec.Retry.Enabled && (s.Class.Spec.Retry.MaxRetries != 0 || s.Class.Spec.Retry.AcknowledgeRepeatedEffects) {
 		return result, errors.New("disabled retries cannot contain active retry settings")
 	}
 	providers := make(map[string]provider.Config)
@@ -122,7 +126,8 @@ func Compile(s Snapshot) (Resolved, error) {
 	}
 	r, p, limits := s.Class.Spec.Resources, s.Class.Spec.Placement, s.ScaleSet.Spec
 	cfg := operator.Config{Name: s.ScaleSet.Name, Namespace: ns, GitHubURL: limits.GitHub.URL, ScaleSetID: limits.GitHub.ScaleSetID, MaxRunners: limits.MaxRunners, ProvisioningSeconds: limits.ProvisioningSeconds, MaxLifetimeSeconds: limits.MaxLifetimeSeconds, Providers: providers,
-		Requirements: placement.Requirements{CPU: r.CPU, MemoryMiB: r.MemoryMiB, Architecture: r.Architecture, Vendor: r.Vendor, Capabilities: slices.Clone(r.Capabilities), Providers: names, Regions: slices.Clone(p.Regions), MaxPriceMicros: p.MaxPriceMicros, AllowOnDemand: p.AllowOnDemand, Policy: p.Policy}}
+		Requirements: placement.Requirements{CPU: r.CPU, MemoryMiB: r.MemoryMiB, Architecture: r.Architecture, Vendor: r.Vendor, Capabilities: slices.Clone(r.Capabilities), Providers: names, Regions: slices.Clone(p.Regions), MaxPriceMicros: p.MaxPriceMicros, AllowOnDemand: p.AllowOnDemand, Policy: p.Policy},
+		Retry:        recovery.Policy{Enabled: s.Class.Spec.Retry.Enabled, MaxRetries: s.Class.Spec.Retry.MaxRetries, AcknowledgeRepeatedEffects: s.Class.Spec.Retry.AcknowledgeRepeatedEffects}}
 	cfg.Catalog.Complete = make(map[string]bool)
 	for name, complete := range s.Catalog.Spec.Complete {
 		cfg.Catalog.Complete[name] = complete

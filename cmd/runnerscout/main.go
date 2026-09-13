@@ -17,6 +17,7 @@ import (
 
 	"github.com/actions/scaleset"
 	"github.com/tsouza/runnerscout/internal/configapi"
+	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/health"
 	"github.com/tsouza/runnerscout/internal/operator"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -117,6 +118,24 @@ func githubClient(o options, cfg operator.Config) (*scaleset.Client, error) {
 	return client, nil
 }
 
+// githubJobsClient builds the client internal/recovery's interruption-retry
+// composition needs to look up REST evidence and request reruns. Compile
+// already refuses Retry.Enabled for App authentication, so this only ever
+// needs a PAT; nil is returned when retries are not configured at all.
+func githubJobsClient(o options, cfg operator.Config) (*githubjobs.Client, error) {
+	if !cfg.Retry.Enabled {
+		return nil, nil
+	}
+	if o.tokenPath == "" || o.appID != "" || o.installationID != 0 || o.appKey != "" {
+		return nil, errors.New("retry execution requires PAT authentication")
+	}
+	token, err := os.ReadFile(o.tokenPath)
+	if err != nil || strings.TrimSpace(string(token)) == "" {
+		return nil, errors.New("cannot read GitHub token file")
+	}
+	return &githubjobs.Client{Token: strings.TrimSpace(string(token))}, nil
+}
+
 func withHealth(ctx context.Context, address string, run func(context.Context, *health.Status) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -200,9 +219,16 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		jobsClient, err := githubJobsClient(o, cfg)
+		if err != nil {
+			return err
+		}
 		controller, cleanup, err := operator.NewWithCredentials(cfg, client, github, nil)
 		if err != nil {
 			return err
+		}
+		if jobsClient != nil {
+			controller.GitHubJobs = jobsClient
 		}
 		controller.Readiness = status.SetReady
 		err = controller.Run(ctx)
