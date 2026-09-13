@@ -9,11 +9,23 @@
 # and signing are tracked as follow-up work once a publication path exists —
 # see docs/releases.md and issue #17.
 #
-# Trigger is workflow_dispatch only (never push/pull_request/tag) so this
-# cannot fire automatically or accidentally.
+# Two trigger paths, both intentional:
+#   - workflow_dispatch: ad hoc manual runs against any commit.
+#   - workflow_call: invoked by release.yml as a job, once its own
+#     tools/release_preflight.py gate has passed, so the tag-triggered
+#     pipeline and manual dispatch share this same build logic instead of
+#     duplicating it.
+# Never push/pull_request/tag directly, so this cannot fire automatically
+# or accidentally outside those two explicit paths.
 name: Release build (scaffold)
 on:
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact commit SHA to build artifacts from
+        required: true
+        type: string
+  workflow_call:
     inputs:
       commit_sha:
         description: Exact commit SHA to build artifacts from
