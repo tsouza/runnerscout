@@ -31,6 +31,10 @@ func TestAzureCreationRefusesOccupiedOrUnknownResourceNames(t *testing.T) {
 			vacancies := map[string]bool{}
 			p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				path := strings.ToLower(r.URL.Path)
+				if strings.EqualFold(r.URL.Path, azureFixtureImage) && r.Method == "GET" {
+					writeJSON(w, azureSupportedImage())
+					return
+				}
 				if r.Method != "GET" {
 					mutations++
 				}
