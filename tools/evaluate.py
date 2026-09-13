@@ -12,6 +12,16 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+ ('github.com/tsouza/runnerscout/internal/operator', 'TestOperatorCanceledBeforeLeadershipStopsCleanly'),
+ ('github.com/tsouza/runnerscout/internal/provider', 'TestProviderCredentialScopesSeparateNamedIdentities'),
+ ('github.com/tsouza/runnerscout/internal/provider', 'TestProviderCredentialScopesRejectPartialAndCrossProviderSettings'),
+ ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureNamedCredentialsUseExplicitSDKMechanisms'),
+ ('github.com/tsouza/runnerscout/internal/operator', 'TestOperatorNamedCredentialsStayOutOfDurableState'),
+ ('github.com/tsouza/runnerscout/internal/operator', 'TestOperatorCredentialFailureRollsBackScopes'),
+ ('github.com/tsouza/runnerscout/internal/operator', 'TestOperatorShutdownWaitsForLeaderOperations'),
+ ('github.com/tsouza/runnerscout/internal/configapi', 'TestResolveSecretsUsesNamedLocalKeysAndRedactsMaterial'),
+ ('github.com/tsouza/runnerscout/internal/configapi', 'TestResolveSecretsRejectsRotationRecreationAndNamespaceSpoofing'),
+ ('github.com/tsouza/runnerscout/internal/configapi', 'TestResolveSecretsRejectsMissingKeysAndInvalidEnvironment'),
     ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompileAzureSDKCredentialsExcludeCLICaches'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKPaginatedInventoryAndObservedCleanup'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKAuthenticationAndTransportFailuresStayUnknown'),

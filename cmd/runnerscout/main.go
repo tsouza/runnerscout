@@ -106,10 +106,17 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	controller := operator.New(cfg, k, github)
+	controller, cleanup, e := operator.NewWithCredentials(cfg, k, github, nil)
+	if e != nil {
+		return e
+	}
+	defer cleanup()
 	controller.Readiness = status.SetReady
 	err := controller.Run(ctx)
 	status.SetReady(false)
+	if cleanupErr := cleanup(); cleanupErr != nil {
+		return errors.New("provider credential cache cleanup incomplete")
+	}
 	select {
 	case healthErr := <-healthErrors:
 		return fmt.Errorf("health server: %w", healthErr)
