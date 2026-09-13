@@ -2,12 +2,13 @@
 // computes the peer snapshot a NetworkProfile's allocations embed into their
 // own cloud-init payload, per docs/networking-peer-model.md's "Peer trust"
 // section. It implements only that piece: no handshake, no poll endpoint, no
-// revocation, no data-plane device. Nothing in this repository calls it yet -
-// internal/configapi/compile.go's network() still rejects every
-// NetworkProfileSpec.Mode other than "separate", so no allocation produced by
-// this codebase's own configuration path can ever set
-// lifecycle.Allocation.NetworkProfile, the field that would make any of this
-// reachable.
+// revocation, no data-plane device - those live in internal/health
+// (WireGuardPeersHandler) and internal/wireguard/tunnel respectively.
+// internal/operator.New wires Generate/Snapshot into every provider.Command
+// it constructs (see NetworkPeers there); internal/configapi/compile.go's
+// network() accepts NetworkProfileSpec.Mode == "wireguard", so an allocation
+// produced by this codebase's own configuration path can set
+// lifecycle.Allocation.NetworkProfile, the field that makes this reachable.
 package wireguard
 
 import (

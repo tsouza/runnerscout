@@ -1,10 +1,11 @@
 # Optional private networking: WireGuard control-plane assessment
 
-> **Status: PROPOSED, not yet implemented.** This document names the
-> control-plane approach a future implementation of issue #16's `wireguard`
-> `NetworkProfile` mode should use. No code in this repository implements
-> any of it yet; `internal/configapi/compile.go` still rejects
-> `NetworkProfileSpec.Mode: "wireguard"` unconditionally.
+> **Status: IMPLEMENTED.** This document named the control-plane approach
+> issue #16's `wireguard` `NetworkProfile` mode uses. `internal/configapi/compile.go`'s
+> `network()` accepts `NetworkProfileSpec.Mode: "wireguard"` (restricted to a
+> single `NetworkMapping` - see [networking-peer-model.md](networking-peer-model.md)),
+> and `lifecycle.Allocation.NetworkProfile` reaches a real allocation end to
+> end via `internal/operator`.
 
 ## Recommendation
 

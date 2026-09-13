@@ -1,7 +1,7 @@
 # WireGuard peer model: trust, revocation, secrets and qualification
 
-> **Status: IMPLEMENTED, deliberately inert.** This document answers the
-> four questions [networking-control-plane.md](networking-control-plane.md)
+> **Status: IMPLEMENTED and reachable.** This document answers the four
+> questions [networking-control-plane.md](networking-control-plane.md)
 > explicitly left open for issue #16's `wireguard` `NetworkProfile` mode, and
 > all four are now implemented: "Peer trust" and "Secret shape"
 > (`internal/wireguard`'s keypair/poll-token generation and peer-snapshot
@@ -10,13 +10,21 @@
 > cloud-init embedding), "Revocation"'s poll endpoint
 > (`internal/health.WireGuardPeersHandler`), and the actual WireGuard
 > tunnel/data-plane device bring-up plus its qualification lane
-> (`internal/wireguard/tunnel`). None of it is reachable yet, by design:
-> `internal/configapi/compile.go` (`network()`, `compile.go:162`) still
-> rejects any `NetworkProfileSpec.Mode` other than `"separate"`
-> unconditionally, and no code path in this repository can set
-> `lifecycle.Allocation.NetworkProfile` to anything but its zero value - this
-> is deliberate, not a gap, per this document's own "What this document does
-> not decide" section below.
+> (`internal/wireguard/tunnel`). `internal/configapi/compile.go`'s
+> `network()` accepts `NetworkProfileSpec.Mode: "wireguard"` (restricted to
+> exactly one `NetworkMapping` - see "What this document does not decide"
+> below for why that restriction exists), `internal/operator` threads the
+> compiled NetworkProfile's identity onto every allocation it creates, and
+> `provider.Command.NetworkPeers` is a real implementation
+> (`internal/operator.New`) reached from both `cmd/runnerscout/main.go`'s
+> mounted-config path and `internal/configapi/runtime.go`'s CRD-driven path
+> (both build on `operator.NewWithCredentials`). `health.Status.WireGuardPeers`
+> is likewise a real, always-mounted `*health.WireGuardPeersHandler`,
+> constructed once in `cmd/runnerscout/main.go` (the only place a
+> `health.Status` exists) for whichever entry point `main.go` selects. An
+> operator who never configures a `wireguard` mode `NetworkProfile` sees no
+> behavior change: every code path this document describes remains a
+> complete no-op for an allocation whose `NetworkProfile` is `""`.
 
 ## Recommendation
 
