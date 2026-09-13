@@ -15,6 +15,12 @@ const AWSInstanceID = "i-0123456789abcdef0"
 const AWSVolumeID = "vol-0123456789abcdef0"
 const AWSInterfaceID = "eni-0123456789abcdef0"
 
+// AWSPrivateIP is the fixture instance's private IP, as AWS itself would
+// assign it from the requested subnet's address range and return
+// synchronously in the same RunInstances response the real createAWS
+// already parses.
+const AWSPrivateIP = "10.60.5.42"
+
 type AWS struct {
 	Server                                            *httptest.Server
 	mu                                                sync.Mutex
@@ -200,5 +206,5 @@ func (f *AWS) instanceXML() string {
 	if f.spotInterrupted {
 		stateReason = `<stateReason><code>Server.SpotInstanceTermination</code><message>interrupted</message></stateReason>`
 	}
-	return strings.Join([]string{`<item><instanceId>`, AWSInstanceID, `</instanceId><imageId>`, f.image, `</imageId><instanceType>`, f.machine, `</instanceType><clientToken>`, f.allocation, `</clientToken><subnetId>`, f.subnet, `</subnetId><placement><availabilityZone>`, f.zone, `</availabilityZone></placement><instanceState><code>`, code, `</code><name>`, state, `</name></instanceState>`, stateReason, `<tagSet>`, f.tags("instance"), `</tagSet><rootDeviceName>/dev/sda1</rootDeviceName><blockDeviceMapping><item><deviceName>/dev/sda1</deviceName><ebs><volumeId>`, AWSVolumeID, `</volumeId><deleteOnTermination>true</deleteOnTermination></ebs></item></blockDeviceMapping><networkInterfaceSet><item><networkInterfaceId>`, AWSInterfaceID, `</networkInterfaceId><subnetId>`, f.subnet, `</subnetId></item></networkInterfaceSet></item>`}, "")
+	return strings.Join([]string{`<item><instanceId>`, AWSInstanceID, `</instanceId><imageId>`, f.image, `</imageId><instanceType>`, f.machine, `</instanceType><clientToken>`, f.allocation, `</clientToken><subnetId>`, f.subnet, `</subnetId><placement><availabilityZone>`, f.zone, `</availabilityZone></placement><instanceState><code>`, code, `</code><name>`, state, `</name></instanceState>`, stateReason, `<tagSet>`, f.tags("instance"), `</tagSet><rootDeviceName>/dev/sda1</rootDeviceName><blockDeviceMapping><item><deviceName>/dev/sda1</deviceName><ebs><volumeId>`, AWSVolumeID, `</volumeId><deleteOnTermination>true</deleteOnTermination></ebs></item></blockDeviceMapping><networkInterfaceSet><item><networkInterfaceId>`, AWSInterfaceID, `</networkInterfaceId><subnetId>`, f.subnet, `</subnetId><privateIpAddress>`, AWSPrivateIP, `</privateIpAddress></item></networkInterfaceSet></item>`}, "")
 }

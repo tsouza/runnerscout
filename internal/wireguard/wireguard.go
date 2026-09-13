@@ -162,6 +162,16 @@ func HashPollToken(token string) ([sha256.Size]byte, error) {
 	return sha256.Sum256(raw), nil
 }
 
+// DefaultListenPort is the fixed outer UDP port every allocation's WireGuard
+// device binds to (a VM-side agent must pass this as
+// internal/wireguard/tunnel.Config.ListenPort, never zero/ephemeral) so that
+// Peer.Endpoint below - built from a peer's already-cloud-assigned private
+// IP - is actually the address the peer is listening on. It is WireGuard's
+// own conventional/IANA-assigned UDP port, chosen for exactly the reason
+// `wg-quick` and most real deployments use it: no other coordination is
+// needed between this codebase's allocations to agree on a listen port.
+const DefaultListenPort uint16 = 51820
+
 // Peer is one entry in the peer list an allocation's cloud-init needs:
 // another allocation's already-checkpointed public identity on the same
 // NetworkProfile's overlay.
@@ -169,6 +179,16 @@ type Peer struct {
 	AllocationID   string `json:"allocationID"`
 	PublicKey      string `json:"publicKey"`
 	OverlayAddress string `json:"overlayAddress"`
+	// Endpoint is this peer's outer, dialable "host:port" address for its
+	// WireGuard UDP socket - see lifecycle.Allocation.WireGuardEndpoint's
+	// doc comment for exactly what it is, how it is captured, and the
+	// multi-NetworkMapping limitation it does not resolve. It is empty
+	// (never synthesized) for a peer whose provider has not captured one
+	// yet; a VM-side agent configuring this peer without an Endpoint gets
+	// WireGuard's own unset-endpoint "roaming" behavior (this side can
+	// still become reachable to that peer once it receives a valid
+	// handshake from it), not an error.
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 // Snapshot computes the deterministic peer list allocation `forID` needs for
@@ -208,6 +228,7 @@ func Snapshot(forID, networkProfile string, allocations []lifecycle.Allocation) 
 			AllocationID:   a.ID,
 			PublicKey:      base64.StdEncoding.EncodeToString(a.WireGuardPublicKey),
 			OverlayAddress: a.WireGuardOverlayAddress,
+			Endpoint:       a.WireGuardEndpoint,
 		})
 	}
 	sort.Slice(peers, func(i, j int) bool { return peers[i].AllocationID < peers[j].AllocationID })
@@ -227,6 +248,27 @@ func Snapshot(forID, networkProfile string, allocations []lifecycle.Allocation) 
 // code to validate it against.
 type CloudInitPayload struct {
 	PrivateKey string `json:"privateKey"` // base64, KeySize raw bytes
+	// AllocationID is this allocation's own ID (lifecycle.Allocation.ID) -
+	// the path segment a VM-side agent's poll loop needs for
+	// "GET /v1/wireguard/peers/{id}" (internal/health.WireGuardPeersHandler).
+	// It is not derived from the VM's own hostname/instance name at poll
+	// time (Azure's osProfile.computerName and GCP's instance Name are both
+	// set to it, but AWS's cloud-init here never configures the guest OS
+	// hostname, so relying on it would be provider-specific and fragile);
+	// the controller already knows it unconditionally at the same point it
+	// knows everything else in this payload, so it is embedded directly.
+	AllocationID string `json:"allocationID"`
+	// ControllerURL is the controller's own externally-reachable base URL
+	// (scheme://host[:port], no trailing slash) for a VM-side agent's poll
+	// loop to resolve the poll endpoint against
+	// (ControllerURL+"/v1/wireguard/peers/"+AllocationID). This is not data
+	// the controller observes about itself anywhere in this codebase today
+	// - it is operator-supplied configuration (provider.Config.
+	// WireGuardControllerURL), the same way Subnet/SecurityGroup/
+	// SSHPublicKey already are, because nothing about "which address is
+	// this specific controller deployment reachable at" is discoverable
+	// from inside the controller process itself.
+	ControllerURL string `json:"controllerURL"`
 	// PollToken is the raw, hex-encoded bearer credential
 	// (GeneratePollToken) this allocation's VM presents to the controller's
 	// WireGuard peer-poll endpoint. Delivered in the clear, exactly like

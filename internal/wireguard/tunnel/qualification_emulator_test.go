@@ -219,3 +219,88 @@ func TestTwoTunnelsExchangeThenDropAfterRevocation(t *testing.T) {
 		// lane calls for observing.
 	}
 }
+
+// TestAddPeerEstablishesRealConnectivity is AddPeer's own qualification
+// proof, the addition-side counterpart to
+// TestTwoTunnelsExchangeThenDropAfterRevocation's revocation proof: a peer
+// configured incrementally via AddPeer (the exact call a VM-side agent's
+// poll loop makes when it observes a newly appeared peer, rather than one
+// present in BringUp's initial Peers list) can complete a real Noise
+// handshake and deliver a real payload, exactly as if it had been part of
+// the initial configuration. Tunnel A starts with zero peers; B starts
+// already knowing A (so at least one side can dial first - see
+// tunnel.Peer's own doc comment on WireGuard's roaming behavior). A only
+// learns of B via AddPeer, mirroring how a poll loop adds a peer that has no
+// reason to have initiated toward this side first.
+func TestAddPeerEstablishesRealConnectivity(t *testing.T) {
+	a, err := wireguard.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := wireguard.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	overlayA := netip.MustParseAddr("10.61.0.1")
+	overlayB := netip.MustParseAddr("10.61.0.2")
+	portA, portB := freeUDPPort(t), freeUDPPort(t)
+	loopback := netip.MustParseAddr("127.0.0.1")
+
+	tunA, err := BringUp(Config{PrivateKey: a.Private, OverlayAddress: overlayA, ListenPort: uint16(portA)})
+	if err != nil {
+		t.Fatalf("BringUp(A) failed: %v", err)
+	}
+	defer tunA.Close()
+
+	tunB, err := BringUp(Config{
+		PrivateKey:     b.Private,
+		OverlayAddress: overlayB,
+		ListenPort:     uint16(portB),
+		Peers: []Peer{
+			{PublicKey: a.Public, OverlayAddress: overlayA, Endpoint: netip.AddrPortFrom(loopback, uint16(portA))},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BringUp(B) failed: %v", err)
+	}
+	defer tunB.Close()
+
+	if err := tunA.AddPeer(Peer{PublicKey: b.Public, OverlayAddress: overlayB, Endpoint: netip.AddrPortFrom(loopback, uint16(portB))}); err != nil {
+		t.Fatalf("AddPeer(B) on A failed: %v", err)
+	}
+
+	listenAddr := &net.UDPAddr{IP: net.ParseIP("10.61.0.2"), Port: 9000}
+	listener, err := tunB.Net().ListenUDP(listenAddr)
+	if err != nil {
+		t.Fatalf("listen on B's overlay address: %v", err)
+	}
+	defer listener.Close()
+
+	received := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 1500)
+		n, _, err := listener.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+		received <- string(buf[:n])
+	}()
+
+	conn, err := tunA.Net().DialUDP(nil, &net.UDPAddr{IP: net.ParseIP("10.61.0.2"), Port: 9000})
+	if err != nil {
+		t.Fatalf("dial from A to B's overlay address: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("hello-via-addpeer")); err != nil {
+		t.Fatalf("write from A: %v", err)
+	}
+	select {
+	case payload := <-received:
+		if payload != "hello-via-addpeer" {
+			t.Fatalf("B received wrong payload: %q", payload)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("B never received A's packet through an AddPeer-configured peer")
+	}
+}

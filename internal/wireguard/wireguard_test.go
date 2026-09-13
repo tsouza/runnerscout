@@ -120,6 +120,31 @@ func TestSnapshotOrdersFiltersAndExcludesSelf(t *testing.T) {
 	}
 }
 
+// TestSnapshotCarriesCheckpointedEndpoint proves the outer-endpoint gap
+// resolution (lifecycle.Allocation.WireGuardEndpoint) flows through into the
+// peer snapshot's Endpoint field exactly like PublicKey/OverlayAddress
+// already do.
+func TestSnapshotCarriesCheckpointedEndpoint(t *testing.T) {
+	a := running("rs-a", "profile-a", "pub-a", "10.60.0.1")
+	a.WireGuardEndpoint = "10.0.5.9:51820"
+	peers := Snapshot("rs-self", "profile-a", []lifecycle.Allocation{a})
+	if len(peers) != 1 || peers[0].Endpoint != "10.0.5.9:51820" {
+		t.Fatalf("checkpointed endpoint not carried into peer snapshot: %+v", peers)
+	}
+}
+
+// TestSnapshotToleratesMissingEndpoint proves a peer that has checkpointed
+// its public key/overlay address but not yet its endpoint (see
+// Creation.WireGuardEndpoint's doc comment: not every provider sets it yet)
+// is still included, with an empty Endpoint - never excluded, and never
+// synthesized.
+func TestSnapshotToleratesMissingEndpoint(t *testing.T) {
+	peers := Snapshot("rs-self", "profile-a", []lifecycle.Allocation{running("rs-a", "profile-a", "pub-a", "10.60.0.1")})
+	if len(peers) != 1 || peers[0].Endpoint != "" {
+		t.Fatalf("expected one peer with an empty endpoint, got: %+v", peers)
+	}
+}
+
 func TestSnapshotEmptyNetworkProfileYieldsNoPeers(t *testing.T) {
 	allocations := []lifecycle.Allocation{running("rs-a", "", "pub-a", "10.60.0.1")}
 	if peers := Snapshot("rs-b", "", allocations); len(peers) != 0 {

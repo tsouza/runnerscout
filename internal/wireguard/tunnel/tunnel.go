@@ -160,13 +160,22 @@ func uapiConfig(cfg Config) string {
 		fmt.Fprintf(&b, "listen_port=%d\n", cfg.ListenPort)
 	}
 	for _, p := range cfg.Peers {
-		fmt.Fprintf(&b, "public_key=%s\n", hex.EncodeToString(p.PublicKey[:]))
-		if p.Endpoint.IsValid() {
-			fmt.Fprintf(&b, "endpoint=%s\n", p.Endpoint.String())
-		}
-		fmt.Fprintf(&b, "allowed_ip=%s\n", singleHostPrefix(p.OverlayAddress))
+		writePeerBlock(&b, p)
 	}
 	return b.String()
+}
+
+// writePeerBlock appends one peer's UAPI configuration-protocol lines to b:
+// its public key, an optional endpoint, and its single-host AllowedIPs
+// entry. Shared by uapiConfig (the full initial-peer-list block BringUp
+// sends) and AddPeer (a single-peer block sent on its own) so the two never
+// drift on how a peer is rendered.
+func writePeerBlock(b *strings.Builder, p Peer) {
+	fmt.Fprintf(b, "public_key=%s\n", hex.EncodeToString(p.PublicKey[:]))
+	if p.Endpoint.IsValid() {
+		fmt.Fprintf(b, "endpoint=%s\n", p.Endpoint.String())
+	}
+	fmt.Fprintf(b, "allowed_ip=%s\n", singleHostPrefix(p.OverlayAddress))
 }
 
 // singleHostPrefix returns addr as a /32 (IPv4) or /128 (IPv6) prefix - a
@@ -194,6 +203,37 @@ func singleHostPrefix(addr netip.Addr) netip.Prefix {
 // through the tunnel needs.
 func (t *Tunnel) Net() *netstack.Net {
 	return t.tnet
+}
+
+// AddPeer configures a single new peer on this tunnel's already-running
+// device, without disturbing any peer already configured (by BringUp's
+// initial Peers list or a previous AddPeer call): it sends device.Device.
+// IpcSet exactly one peer's UAPI configuration block (writePeerBlock, the
+// same rendering uapiConfig uses for BringUp's initial list), with no
+// "private_key"/"listen_port" device-level line and no "replace_peers=true"
+// line. Per the UAPI configuration protocol IpcSet implements
+// (device/uapi.go's IpcSetOperation/handleDeviceLine -
+// https://www.wireguard.com/xplatform/#configuration-protocol),
+// "replace_peers=true" is the only thing that ever clears the existing peer
+// set, and a peer is looked up/created by its own public_key line
+// independently of any other peer already configured - so this call can
+// only add (or, for an already-configured public key, update) the one peer
+// it describes.
+//
+// This is the data-plane action a VM-side agent's poll loop uses when it
+// observes a new peer added to its authoritative list (see RemovePeer below
+// for the removal counterpart docs/networking-peer-model.md's "Revocation"
+// section already covers).
+func (t *Tunnel) AddPeer(p Peer) error {
+	if !p.OverlayAddress.IsValid() {
+		return fmt.Errorf("wireguard/tunnel: peer with public key %s has no overlay address", p.PublicKey)
+	}
+	var b strings.Builder
+	writePeerBlock(&b, p)
+	if err := t.dev.IpcSet(b.String()); err != nil {
+		return fmt.Errorf("wireguard/tunnel: add peer %s: %w", p.PublicKey, err)
+	}
+	return nil
 }
 
 // RemovePeer removes a peer from this tunnel's device entirely: its

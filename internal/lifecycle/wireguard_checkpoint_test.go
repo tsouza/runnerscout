@@ -94,3 +94,47 @@ func TestCreationWithoutWireGuardIntentNeverCheckpointsAPollTokenHash(t *testing
 		t.Fatalf("wireguard poll token hash checkpointed with no provider-supplied hash: %q", durable.a.WireGuardPollTokenHash)
 	}
 }
+
+// wireGuardEndpointCloud is a ResourceCreator that returns a WireGuard outer
+// endpoint alongside its cloud resource identity - the same checkpoint path
+// wireGuardCloud/wireGuardPollTokenCloud above exercise for the public
+// key/poll token hash, for the peer dial address a VM-side agent's poll loop
+// needs (internal/wireguard.Peer.Endpoint).
+type wireGuardEndpointCloud struct {
+	*cloud
+	endpoint string
+}
+
+func (p *wireGuardEndpointCloud) CreateWithResources(context.Context, l.Allocation) (l.Creation, error) {
+	p.created++
+	return l.Creation{ResourceID: "vm-1", WireGuardEndpoint: p.endpoint}, nil
+}
+
+func TestCreationChecksPointsWireGuardEndpointLikePublicKey(t *testing.T) {
+	controller, durable, base, _ := setup()
+	provider := &wireGuardEndpointCloud{cloud: base, endpoint: "10.60.0.9:51820"}
+	controller.Providers = map[string]l.Provider{"a": provider}
+	if err := controller.Step(context.Background(), durable.a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if durable.a.WireGuardEndpoint != "10.60.0.9:51820" {
+		t.Fatalf("wireguard endpoint was not checkpointed: %q", durable.a.WireGuardEndpoint)
+	}
+}
+
+// TestCreationWithoutWireGuardIntentNeverCheckpointsAnEndpoint mirrors
+// TestCreationWithoutWireGuardIntentNeverCheckpointsAKey for the new field: a
+// provider that never sets Creation.WireGuardEndpoint (every provider in
+// this codebase today, until wired) must never cause
+// Allocation.WireGuardEndpoint to become non-empty.
+func TestCreationWithoutWireGuardIntentNeverCheckpointsAnEndpoint(t *testing.T) {
+	controller, durable, base, _ := setup()
+	provider := &receiptCloud{cloud: base}
+	controller.Providers = map[string]l.Provider{"a": provider}
+	if err := controller.Step(context.Background(), durable.a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if durable.a.WireGuardEndpoint != "" {
+		t.Fatalf("wireguard endpoint checkpointed with no provider-supplied endpoint: %q", durable.a.WireGuardEndpoint)
+	}
+}

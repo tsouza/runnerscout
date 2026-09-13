@@ -8,11 +8,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tsouza/runnerscout/internal/lifecycle"
-	"github.com/tsouza/runnerscout/internal/wireguard"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/tsouza/runnerscout/internal/lifecycle"
+	"github.com/tsouza/runnerscout/internal/wireguard"
 )
+
+// wireGuardEndpoint renders a VM's already-cloud-assigned private IP as the
+// "host:port" outer WireGuard dial address lifecycle.Allocation.
+// WireGuardEndpoint/wireguard.Peer.Endpoint carry - see
+// lifecycle.Allocation.WireGuardEndpoint's doc comment for the reasoning and
+// its known multi-NetworkMapping limitation. privateIP == "" (a provider
+// that has not captured one - see Creation.WireGuardEndpoint's doc comment
+// for which ones do today) returns "", never a synthesized/partial address.
+func wireGuardEndpoint(privateIP string) string {
+	if privateIP == "" {
+		return ""
+	}
+	return net.JoinHostPort(privateIP, strconv.Itoa(int(wireguard.DefaultListenPort)))
+}
 
 type Config struct {
 	AccountID     string `json:"accountID,omitempty"`
@@ -25,6 +42,16 @@ type Config struct {
 	Subnet        string `json:"subnet"`
 	SecurityGroup string `json:"securityGroup,omitempty"`
 	Owner         string `json:"owner"`
+	// WireGuardControllerURL is this controller deployment's own externally-
+	// reachable base URL, embedded into a wireguard-mode allocation's
+	// cloud-init as wireguard.CloudInitPayload.ControllerURL so a VM-side
+	// agent's poll loop knows where to send
+	// "GET /v1/wireguard/peers/{id}". Operator-supplied: nothing in this
+	// codebase observes its own reachable address, the same reason
+	// Subnet/SecurityGroup/SSHPublicKey above are all operator-supplied
+	// rather than discovered. Empty for every deployment that never opts
+	// into wireguard mode.
+	WireGuardControllerURL string `json:"wireGuardControllerURL,omitempty"`
 }
 type Command struct {
 	AWS       *AWSSDK
@@ -170,6 +197,8 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 		}
 		encoded, marshalErr := json.Marshal(wireguard.CloudInitPayload{
 			PrivateKey:     keyPair.Private.Base64(),
+			AllocationID:   a.ID,
+			ControllerURL:  p.Config.WireGuardControllerURL,
 			PollToken:      pollToken,
 			OverlayAddress: a.WireGuardOverlayAddress,
 			Peers:          peers,
@@ -201,6 +230,16 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	}
 	if len(wireGuardPollTokenHash) > 0 {
 		creation.WireGuardPollTokenHash = wireGuardPollTokenHash
+	}
+	// Unlike the two fields above (only ever computed above when
+	// a.NetworkProfile != ""), a create* helper captures WireGuardEndpoint
+	// unconditionally from its own cloud response - it costs no extra API
+	// call regardless of wireguard intent. Clearing it here for every other
+	// allocation preserves this task's "zero effect until wired" guarantee
+	// (TestCreateWithResourcesZeroEffectWithoutNetworkProfile): no allocation
+	// without wireguard intent should gain a new persisted checkpoint field.
+	if a.NetworkProfile == "" {
+		creation.WireGuardEndpoint = ""
 	}
 	return creation, err
 }
