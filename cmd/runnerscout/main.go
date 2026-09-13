@@ -20,6 +20,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/health"
 	"github.com/tsouza/runnerscout/internal/operator"
+	"github.com/tsouza/runnerscout/internal/provider"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -136,6 +137,23 @@ func githubJobsClient(o options, cfg operator.Config) (*githubjobs.Client, error
 	return &githubjobs.Client{Token: strings.TrimSpace(string(token))}, nil
 }
 
+// awsPricesObserver builds a live EC2 spot price observer from the already
+// credentialed "aws" provider entry, mirroring githubJobsClient: nil unless
+// the operator explicitly opts in via cfg.AWSPriceRefresh, since this makes
+// live AWS API calls on every admission cycle. It reuses the AWS credential
+// scope controller already resolved for provisioning rather than deriving
+// its own, so provisioning and price observation always share one identity.
+func awsPricesObserver(controller *operator.Operator, cfg operator.Config) (*provider.AWSSpotPrices, error) {
+	if !cfg.AWSPriceRefresh {
+		return nil, nil
+	}
+	command, ok := controller.Controller.Providers["aws"].(*provider.Command)
+	if !ok || command.AWS == nil {
+		return nil, errors.New(`AWS price refresh requires a configured "aws" provider`)
+	}
+	return command.AWS.SpotPrices(), nil
+}
+
 func withHealth(ctx context.Context, address string, run func(context.Context, *health.Status) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -229,6 +247,13 @@ func run(args []string) error {
 		}
 		if jobsClient != nil {
 			controller.GitHubJobs = jobsClient
+		}
+		awsPrices, err := awsPricesObserver(controller, cfg)
+		if err != nil {
+			return err
+		}
+		if awsPrices != nil {
+			controller.AWSPrices = awsPrices
 		}
 		controller.Readiness = status.SetReady
 		err = controller.Run(ctx)

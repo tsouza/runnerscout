@@ -21,7 +21,11 @@ type AWSSDK struct {
 func (*AWSSDK) String() string   { return "AWS SDK (credentials redacted)" }
 func (*AWSSDK) GoString() string { return "AWS SDK (credentials redacted)" }
 
-func (s *AWSSDK) session(ctx context.Context, config Config, region string) (*ec2.Client, error) {
+// resolvedScope returns this SDK's credential scope with per-call test
+// injection (HTTPClient/Endpoint) applied, so every caller - provisioning
+// and price observation alike - resolves credentials through the exact same
+// explicit-only source.
+func (s *AWSSDK) resolvedScope(region string) (*awsCredentialScope, error) {
 	if s == nil || s.scope == nil || region == "" {
 		return nil, errors.New("AWS SDK configuration unavailable")
 	}
@@ -31,6 +35,14 @@ func (s *AWSSDK) session(ctx context.Context, config Config, region string) (*ec
 	}
 	if s.Endpoint != "" {
 		scope.endpoint = s.Endpoint
+	}
+	return &scope, nil
+}
+
+func (s *AWSSDK) session(ctx context.Context, config Config, region string) (*ec2.Client, error) {
+	scope, err := s.resolvedScope(region)
+	if err != nil {
+		return nil, err
 	}
 	value, err := scope.retrieve(ctx, region)
 	if err != nil {
