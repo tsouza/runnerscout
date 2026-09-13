@@ -303,6 +303,11 @@ func (o *Operator) HandleJobStarted(ctx context.Context, j *scaleset.JobStarted)
 		return e
 	}
 	a.Ready = true
+	// Each allocation runs exactly one job; capture its identity once and
+	// never let a later, unrelated start event overwrite it.
+	if a.RunID == 0 {
+		a.RunID, a.Owner, a.Repo, a.ScaleSetJobID = j.WorkflowRunID, j.OwnerName, j.RepositoryName, j.JobID
+	}
 	_, e = o.Store.Save(ctx, a, a.Revision)
 	return e
 }

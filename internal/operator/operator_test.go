@@ -2,9 +2,11 @@ package operator
 
 import (
 	"context"
+	"github.com/actions/scaleset"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"github.com/tsouza/runnerscout/internal/placement"
 	"github.com/tsouza/runnerscout/internal/state"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"testing"
 	"time"
@@ -82,5 +84,51 @@ func TestLimitUpgradeMigratesLegacyBindingButPreservesIdentity(t *testing.T) {
 	o.Config.ScaleSetID = 99
 	if _, _, e = o.loadFleet(ctx); e == nil {
 		t.Fatal("identity drift accepted")
+	}
+}
+
+// bumpResourceVersion works around the fake clientset never assigning a
+// resourceVersion on its own, which Kubernetes.Save's CAS otherwise relies on
+// to distinguish a create from an update (kubernetes_test.go uses the same
+// idiom for the same reason).
+func bumpResourceVersion(t *testing.T, ctx context.Context, s *state.Kubernetes, id, version string) {
+	t.Helper()
+	cm, e := s.Maps.Get(ctx, id, metav1.GetOptions{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	cm.ResourceVersion = version
+	if _, e := s.Maps.Update(ctx, cm, metav1.UpdateOptions{}); e != nil {
+		t.Fatal(e)
+	}
+}
+func TestJobStartCapturesRunIdentityOnce(t *testing.T) {
+	ctx := context.Background()
+	k := fake.NewClientset()
+	s := &state.Kubernetes{Maps: k.CoreV1().ConfigMaps("test"), Owner: "test"}
+	o := &Operator{Config: Config{Name: "test", Namespace: "test"}, Client: k, Store: s}
+	seed := lifecycle.Allocation{ID: "rs-test", Phase: lifecycle.Creating, Deadline: time.Now().Add(time.Minute), MaxAttempts: 3}
+	if _, e := s.Save(ctx, seed, ""); e != nil {
+		t.Fatal(e)
+	}
+	bumpResourceVersion(t, ctx, s, "rs-test", "1")
+	first := &scaleset.JobStarted{RunnerName: "rs-test", JobMessageBase: scaleset.JobMessageBase{WorkflowRunID: 99, OwnerName: "acme", RepositoryName: "widgets", JobID: "opaque-guid"}}
+	if e := o.HandleJobStarted(ctx, first); e != nil {
+		t.Fatal(e)
+	}
+	got, e := s.Load(ctx, "rs-test")
+	if e != nil || !got.Ready || got.RunID != 99 || got.Owner != "acme" || got.Repo != "widgets" || got.ScaleSetJobID != "opaque-guid" {
+		t.Fatal("run identity not captured", got, e)
+	}
+	bumpResourceVersion(t, ctx, s, "rs-test", "2")
+	// A second job-started message for the same runner must never overwrite an
+	// already-captured identity - each allocation runs exactly one job.
+	second := &scaleset.JobStarted{RunnerName: "rs-test", JobMessageBase: scaleset.JobMessageBase{WorkflowRunID: 12345, OwnerName: "other", RepositoryName: "other-repo", JobID: "different"}}
+	if e := o.HandleJobStarted(ctx, second); e != nil {
+		t.Fatal(e)
+	}
+	got, e = s.Load(ctx, "rs-test")
+	if e != nil || got.RunID != 99 || got.Owner != "acme" || got.Repo != "widgets" || got.ScaleSetJobID != "opaque-guid" {
+		t.Fatal("run identity was overwritten by a later message", got, e)
 	}
 }
