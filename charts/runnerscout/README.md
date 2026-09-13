@@ -31,7 +31,7 @@ Provider credentials may be mounted from `credentialSecrets` under
 `/etc/runnerscout/providers/<Secret name>`. Configure the relevant SDK/CLI file
 paths through `env` or use workload identity through service-account annotations.
 For example use `AWS_SHARED_CREDENTIALS_FILE`, `GOOGLE_APPLICATION_CREDENTIALS`
-and a writable `AZURE_CONFIG_DIR` appropriate to the configured identity.
+and Azure workload identity, environment credentials or managed identity.
 
 `catalog.existingConfigMap` mounts `catalog.json` without subPath so projected
 updates can reach the controller. Update complete fresh catalogs atomically.

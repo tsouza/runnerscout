@@ -18,10 +18,3 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  - package-ecosystem: pip
-    directory: /docker
-    groups:
-      azure-cli-runtime:
-        patterns: ["*"]
-    schedule:
-      interval: weekly

@@ -33,7 +33,7 @@ def main():
                 "identity": ["python3", "-c", "import os; assert os.getuid()==10001; assert not os.access('/usr/local',os.W_OK); print('non-root; read-only root')"],
                 "controller_config": ["/usr/local/bin/runnerscout", "-config=/config.json", "-validate"],
                 "aws_cli": ["aws", "--version"],
-                "azure_cli": ["az", "version", "--output", "json"],
+                "azure_python_dependency_absence": ["python", "-c", "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('azure', 'msal', 'cryptography')); print('Azure uses native Go SDK')"],
                 "gcp_cli": ["gcloud", "version", "--format=json"],
             }
             for name, command in commands.items():

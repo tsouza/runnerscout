@@ -12,6 +12,11 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompileAzureSDKCredentialsExcludeCLICaches'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKPaginatedInventoryAndObservedCleanup'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKAuthenticationAndTransportFailuresStayUnknown'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKCreateTimeoutRetainsUnknownCommitment'),
+
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSAccountDriftCannotConfirmAbsence'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSCreateUsesDurableTokenAndPrivateBootstrap'),
     ('github.com/tsouza/runnerscout/internal/admission', 'TestAdmissionLimits'),

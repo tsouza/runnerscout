@@ -143,3 +143,23 @@ func TestCompileNetworkMappingsRequireIsolationAndCoverage(t *testing.T) {
 		})
 	}
 }
+
+func TestCompileAzureSDKCredentialsExcludeCLICaches(t *testing.T) {
+	s := fixture()
+	azure := s.Providers["azure"]
+	azure.Spec.CredentialEnvironment = map[string]api.SecretKeyReference{
+		"AZURE_CLIENT_ID":            {Name: "azure-auth", Key: "client-id"},
+		"AZURE_TENANT_ID":            {Name: "azure-auth", Key: "tenant-id"},
+		"AZURE_FEDERATED_TOKEN_FILE": {Name: "azure-auth", Key: "token-path"},
+	}
+	s.Providers["azure"] = azure
+	compiled, err := Compile(s)
+	if err != nil || len(compiled.Credentials["azure"]) != 3 {
+		t.Fatal(compiled, err)
+	}
+	azure.Spec.CredentialEnvironment["AZURE_CONFIG_DIR"] = api.SecretKeyReference{Name: "azure-auth", Key: "legacy-cache"}
+	s.Providers["azure"] = azure
+	if _, err = Compile(s); err == nil {
+		t.Fatal("legacy CLI cache accepted by native SDK configuration")
+	}
+}

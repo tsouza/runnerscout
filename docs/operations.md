@@ -42,3 +42,11 @@ AWS configurations require `accountID` as well as their named credential profile
 or workload identity. STS caller identity must match before EC2 observations or
 effects. A profile rebound to another account produces an explicit error and
 retains cleanup obligations.
+
+Azure authentication uses the native Go SDK. Set `AZURE_CLIENT_ID`,
+`AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` for federated workload identity,
+or the supported Azure environment credential variables for a service principal.
+Otherwise the SDK uses managed identity, optionally selected by `AZURE_CLIENT_ID`.
+A failed configured credential does not fall back to developer CLI credentials.
+Mount credential files through Secrets or workload-identity admission; never place
+secret values in the public configuration. Existing `az login` caches are not used.

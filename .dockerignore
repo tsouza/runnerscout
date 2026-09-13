@@ -6,7 +6,5 @@
 !cmd/**
 !internal/
 !internal/**
-!docker/
-!docker/azure-cli-requirements.txt
 !api/
 !api/**
