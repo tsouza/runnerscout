@@ -58,10 +58,14 @@ var ErrNoEffect = errors.New("create preparation failed without cloud effects")
 type Observation struct {
 	// Resources contains independently proven identities, including partial
 	// evidence that must survive an uncertain creation-recovery outcome.
-	Resources  []ResourceReference
-	Exists     bool
-	Known      bool
-	ResourceID string
+	Resources []ResourceReference
+	Exists    bool
+	Known     bool
+	// Interrupted is set only when the provider definitively confirms the
+	// resource's absence was a spot interruption, never inferred from a bare
+	// disappearance. It carries no meaning when Exists is true.
+	Interrupted bool
+	ResourceID  string
 }
 
 // Creation retains identities returned by the create operation itself, before a
@@ -250,6 +254,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		if !ob.Exists {
 			a.Phase = Deleted
 			a.Condition = "ResourceAbsentInterruptionUnproven"
+			if ob.Interrupted {
+				a.Condition = "ResourceAbsentConfirmedInterruption"
+			}
 			return save()
 		}
 		return nil

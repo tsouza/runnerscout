@@ -137,3 +137,57 @@ func TestAWSSDKDefinitiveCapacityRejectionHasNoReceipt(t *testing.T) {
 		t.Fatal("definitive capacity rejection misclassified", receipt, err)
 	}
 }
+
+func TestAWSObservationConfirmsSpotInterruption(t *testing.T) {
+	p, f, a := nativeAWSFixture(t)
+	a.Offering.Spot = true
+	ctx := context.Background()
+	receipt, err := p.CreateWithResources(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.ResourceID, a.Resources = receipt.ResourceID, receipt.Resources
+	f.SpotInterrupt()
+	observed, err := p.Observe(ctx, a)
+	if err != nil || !observed.Known || observed.Exists || !observed.Interrupted {
+		t.Fatal("confirmed spot interruption not observed", observed, err)
+	}
+}
+func TestAWSObservationOrdinaryTerminationIsNotInterruption(t *testing.T) {
+	p, _, a := nativeAWSFixture(t)
+	a.Offering.Spot = true
+	ctx := context.Background()
+	receipt, err := p.CreateWithResources(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.ResourceID, a.Resources = receipt.ResourceID, receipt.Resources
+	var observed lifecycle.Observation
+	for step := 0; step < 3; step++ {
+		if err := p.Delete(ctx, a); err != nil {
+			t.Fatal("ordered cleanup failed", step, err)
+		}
+		observed, err = p.Observe(ctx, a)
+		if err != nil || !observed.Known {
+			t.Fatal("cleanup observation unknown", step, err)
+		}
+	}
+	if observed.Exists || observed.Interrupted {
+		t.Fatal("controller-initiated termination misclassified as interruption", observed)
+	}
+}
+func TestAWSObservationRequiresSpotOfferingForInterruption(t *testing.T) {
+	p, f, a := nativeAWSFixture(t)
+	a.Offering.Spot = false
+	ctx := context.Background()
+	receipt, err := p.CreateWithResources(ctx, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.ResourceID, a.Resources = receipt.ResourceID, receipt.Resources
+	f.SpotInterrupt()
+	observed, err := p.Observe(ctx, a)
+	if err != nil || !observed.Known || observed.Exists || observed.Interrupted {
+		t.Fatal("on-demand offering misclassified as spot interruption", observed, err)
+	}
+}

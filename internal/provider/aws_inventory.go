@@ -247,7 +247,11 @@ func (inventory awsInventory) observation(a lifecycle.Allocation) (lifecycle.Obs
 	if err != nil {
 		return lifecycle.Observation{}, err
 	}
-	return lifecycle.Observation{Known: true, Exists: exists, ResourceID: id, Resources: references}, nil
+	// Server.SpotInstanceTermination is AWS's own definitive code for a spot
+	// interruption; only offerings requested as spot can ever receive it.
+	interrupted := !exists && a.Offering.Spot && inventory.instance != nil && inventory.instance.State.Name == types.InstanceStateNameTerminated &&
+		inventory.instance.StateReason != nil && aws.ToString(inventory.instance.StateReason.Code) == "Server.SpotInstanceTermination"
+	return lifecycle.Observation{Known: true, Exists: exists, Interrupted: interrupted, ResourceID: id, Resources: references}, nil
 }
 
 func awsMissing(err error, code string) bool {
