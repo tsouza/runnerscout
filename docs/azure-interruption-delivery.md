@@ -1,16 +1,15 @@
 # Azure spot interruption delivery: provisioning, consumption and correlation
 
-> **Status: PROPOSED, not yet implemented.** This document names the
-> delivery transport, provisioning owner and correlation mechanism a future
-> implementation of issue #4's Azure interruption support should use.
-> `internal/azureevents` (merged) already parses a
-> `Microsoft.ResourceNotifications.HealthResources.ResourceAnnotated`
-> CloudEvents payload into a resource ID and a confirmed-preemption verdict,
-> but by its own header comment "never creates or subscribes to any Event
-> Grid or Storage Queue resource... wiring a delivery transport and
-> correlating the resource ID against a RunnerScout allocation remain
-> separate, later decisions." `internal/provider/azure.go`'s `observeAzure`
-> still never sets `Observation.Interrupted` for Azure.
+> **Status: IMPLEMENTED**, except step 1 (provisioning), which remains a
+> human/install-doc responsibility by design - see the Recommendation below.
+> `internal/azureevents` parses the Event Grid payload;
+> `internal/azurequeue.Client` polls the Storage Queue; `observeAzure`
+> (`internal/provider/azure.go`) sets `Observation.Interrupted` for Azure
+> from that poll's result via `Operator.Tick`'s `pollAzureInterruptions`/
+> `applyAzureInterruptions`, gated behind the opt-in
+> `Config.AzureInterruptionQueueURL` (default `""`, disabled). AWS, Azure and
+> GCP interruption retries all work end-to-end as of this implementation
+> (issue #4, closed).
 
 ## Recommendation
 
@@ -54,14 +53,21 @@
    Running-phase absence handling (`internal/lifecycle/lifecycle.go:265-271`)
    with **no change needed there**.
 
-This session implements step 3's building block only:
-`internal/azurequeue.Client` (poll a Storage Queue, classify each message
-via `azureevents.ParsePreemptionEvent`, delete what it can definitively
-classify) and `internal/operator.Operator.AzureInterruptions`, a new
-nil-is-inert field with no constructor and no reader anywhere yet -
-mirroring `Operator.AWSPrices`/`Operator.AzurePrices`
-(`internal/operator/prices.go:39-41`). It does not touch
-`internal/provider/azure.go` or `internal/lifecycle/lifecycle.go`.
+All of steps 2-4 are implemented: `internal/azurequeue.Client` (poll a
+Storage Queue, classify each message via `azureevents.ParsePreemptionEvent`,
+delete what it can definitively classify); `Operator.Tick` polls it once per
+cycle and threads the result into every azure-kind `provider.Command`
+(`internal/operator/azure_interruptions.go`'s `pollAzureInterruptions`/
+`applyAzureInterruptions`); `observeAzure` correlates by exact ARM resource
+ID (`azureConfirmedPreemption` in `internal/provider/azure.go`) and sets
+`Observation.Interrupted`, consumed by `internal/lifecycle/lifecycle.go`'s
+existing, provider-agnostic Running-phase absence handling with no change
+needed there, exactly as originally planned. `Operator.AzureInterruptions`
+and `Config.AzureInterruptionQueueURL` default to nil/`""` (disabled) -
+existing deployments never start making live Azure Storage Queue calls
+without an explicit choice to do so. Step 1 (provisioning the Event Grid
+system topic, subscription and Storage Queue itself) remains the one piece
+still deferred to a human, by design - see the Recommendation above.
 
 ## Why
 
