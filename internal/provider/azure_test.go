@@ -69,8 +69,17 @@ func ownedResource(kind, name, owner string) map[string]any {
 
 func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 	var requests []string
+	disk := azureCreationDisk()
 	p, token := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == "GET" {
+			if strings.HasSuffix(strings.ToLower(r.URL.Path), "/disks/rs-test-os") {
+				writeJSON(w, disk)
+			} else {
+				writeJSON(w, azureCreationVM())
+			}
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
@@ -97,6 +106,10 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 			if vm["storageProfile"].(map[string]any)["osDisk"].(map[string]any)["deleteOption"] != "Delete" {
 				t.Error("disk cleanup missing")
 			}
+			nics := vm["networkProfile"].(map[string]any)["networkInterfaces"].([]any)
+			if len(nics) != 1 || nics[0].(map[string]any)["properties"].(map[string]any)["deleteOption"] != "Delete" {
+				t.Error("interface cleanup missing")
+			}
 			writeJSON(w, map[string]any{"properties": map[string]string{"provisioningState": "Succeeded"}})
 		} else {
 			if r.Method != "PATCH" || !strings.HasSuffix(r.URL.Path, "/disks/rs-test-os") {
@@ -105,13 +118,14 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 			if body["tags"].(map[string]any)["runnerscout-owner"] != "test" {
 				t.Error("disk owner missing")
 			}
-			writeJSON(w, body)
+			disk["tags"] = body["tags"]
+			writeJSON(w, disk)
 		}
 	})
 	a := allocation()
 	a.Offering.Image = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/test"
 	id, err := p.Create(context.Background(), a)
-	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || len(requests) != 2 || token.calls.Load() == 0 {
+	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || len(requests) != 6 || token.calls.Load() == 0 {
 		t.Fatalf("create: id=%q err=%v requests=%v", id, err, requests)
 	}
 }

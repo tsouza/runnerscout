@@ -70,6 +70,12 @@ type ResourceCreator interface {
 	CreateWithResources(context.Context, Allocation) (Creation, error)
 }
 
+// CreationReconciler may finish an already committed creation operation, but
+// must never allocate a replacement. The controller fences it with a state CAS.
+type CreationReconciler interface {
+	ReconcileCreation(context.Context, Allocation) (Observation, error)
+}
+
 type Provider interface {
 	Create(context.Context, Allocation) (string, error)
 	Observe(context.Context, Allocation) (Observation, error)
@@ -190,7 +196,17 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		return errors.New("provider configuration unavailable; cleanup retained")
 	}
 	if a.Phase == Creating {
-		ob, e := p.Observe(ctx, a)
+		var ob Observation
+		var e error
+		if recovery, ok := p.(CreationReconciler); ok {
+			a, err = c.Store.Save(ctx, a, a.Revision)
+			if err != nil {
+				return err
+			}
+			ob, e = recovery.ReconcileCreation(ctx, a)
+		} else {
+			ob, e = p.Observe(ctx, a)
+		}
 		if e != nil || !ob.Known {
 			return errors.New("create reconciliation unknown")
 		}

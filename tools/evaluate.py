@@ -12,6 +12,10 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCreationCannotRetagForeignDisk'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureDiskTaggingRequiresOwnedCreationGraph'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureLostTaggingRecoversWithoutRedeployment'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCreationRecoveryRequiresCheckpointAndNeverCreatesReplacement'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSEnvelopeRequiresCompleteInventory'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSRecordedVolumeSurvivesDiscoveryLoss'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSSDKBindsAccountAndEC2ToOneIdentity'),

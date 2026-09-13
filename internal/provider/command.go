@@ -109,6 +109,25 @@ func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycl
 		return p.observeGCP(ctx, a)
 	}
 }
+
+func (p *Command) ReconcileCreation(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
+	if a.Phase != lifecycle.Creating {
+		return lifecycle.Observation{}, errors.New("creation reconciliation requires committed intent")
+	}
+	if p.Config.Kind != "azure" {
+		return p.Observe(ctx, a)
+	}
+	if err := ValidateName(a.ID); err != nil {
+		return lifecycle.Observation{}, err
+	}
+	if err := p.Validate(); err != nil {
+		return lifecycle.Observation{}, err
+	}
+	if len(a.Resources) > 0 {
+		return lifecycle.Observation{}, errors.New("provider cannot reconcile recorded cloud dependencies")
+	}
+	return p.reconcileAzureCreation(ctx, a)
+}
 func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
 	if err := ValidateName(a.ID); err != nil {
 		return err

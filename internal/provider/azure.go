@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"strings"
+	"time"
 )
 
 func (p *Command) azureClient() *AzureSDK {
@@ -31,6 +32,10 @@ type azureResource struct {
 }
 
 func (p *Command) azureResources(ctx context.Context, a lifecycle.Allocation) ([]azureResource, error) {
+	return p.azureInventory(ctx, a, false)
+}
+
+func (p *Command) azureInventory(ctx context.Context, a lifecycle.Allocation, allowUntaggedDisk bool) ([]azureResource, error) {
 	resources, e := p.azureClient().list(ctx, p.Config, a.ID)
 	if e != nil {
 		return nil, errors.New("Azure resource inventory unavailable")
@@ -38,14 +43,22 @@ func (p *Command) azureResources(ctx context.Context, a lifecycle.Allocation) ([
 	expected := map[string]string{a.ID: "Microsoft.Compute/virtualMachines", a.ID + "-nic": "Microsoft.Network/networkInterfaces", a.ID + "-os": "Microsoft.Compute/disks"}
 	seen := map[string]bool{}
 	for _, resource := range resources {
-		kind, ok := expected[resource.Name]
-		if !ok || seen[resource.Name] || !strings.EqualFold(resource.Type, kind) || !strings.EqualFold(resource.ID, p.azureID(kind, resource.Name)) {
+		name := strings.ToLower(resource.Name)
+		kind, ok := expected[name]
+		if !ok || seen[name] || !strings.EqualFold(resource.Type, kind) || !strings.EqualFold(resource.ID, p.azureID(kind, name)) {
 			return nil, errors.New("Azure resource identity mismatch")
 		}
 		if resource.Tags["runnerscout-owner"] != p.Config.Owner || resource.Tags["runnerscout-operation"] != a.ID {
-			return nil, errors.New("Azure resource ownership unconfirmed; cleanup retained")
+			if !allowUntaggedDisk || !strings.EqualFold(kind, "Microsoft.Compute/disks") {
+				return nil, errors.New("Azure resource ownership unconfirmed; cleanup retained")
+			}
+			for key, want := range map[string]string{"runnerscout-owner": p.Config.Owner, "runnerscout-operation": a.ID} {
+				if value, exists := resource.Tags[key]; exists && value != want {
+					return nil, errors.New("Azure disk has conflicting ownership")
+				}
+			}
 		}
-		seen[resource.Name] = true
+		seen[name] = true
 	}
 	return resources, nil
 }
@@ -57,6 +70,8 @@ func (p *Command) azureTerminal(ctx context.Context, a lifecycle.Allocation) (bo
 	return terminal, nil
 }
 func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, script string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	if !strings.HasPrefix(strings.ToLower(a.Offering.Image), "/subscriptions/") {
 		return "", errors.New("Azure requires a pinned managed-image resource ID")
 	}
@@ -81,14 +96,36 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 	if err := p.azureClient().deploy(ctx, p.Config, a.ID, template, bootstrap); err != nil {
 		return "", errors.New("Azure deployment commitment unknown")
 	}
-	// A failure before disk tagging retains the existing uncertain-ownership
-	// cleanup obligation. Never infer ownership from a matching name alone.
-	if err := p.azureClient().tagDisk(ctx, p.Config, a.ID); err != nil {
-		return "", errors.New("Azure disk ownership tagging incomplete")
-	}
-	return p.azureID("Microsoft.Compute/virtualMachines", a.ID), nil
+	return p.finishAzureDiskOwnership(ctx, a)
 }
+
+func (p *Command) finishAzureDiskOwnership(ctx context.Context, a lifecycle.Allocation) (string, error) {
+	// A completed deployment gives a deterministic VM receipt even if later
+	// ownership confirmation fails. Lifecycle retains it with unknown commitment.
+	vmID := p.azureID("Microsoft.Compute/virtualMachines", a.ID)
+	binding, err := p.azureDiskBinding(ctx, a)
+	if err != nil {
+		return vmID, err
+	}
+	if azureValue(binding.tags["runnerscout-owner"]) == p.Config.Owner && azureValue(binding.tags["runnerscout-operation"]) == a.ID {
+		return vmID, nil
+	}
+	binding.tags["runnerscout-owner"] = &p.Config.Owner
+	binding.tags["runnerscout-operation"] = &a.ID
+	if err := p.azureClient().tagDisk(ctx, p.Config, a.ID, binding.tags); err != nil {
+		return vmID, errors.New("Azure disk ownership tagging incomplete")
+	}
+	observed, err := p.azureDiskBinding(ctx, a)
+	if err != nil || observed.vmUID != binding.vmUID || observed.diskUID != binding.diskUID || azureValue(observed.tags["runnerscout-owner"]) != p.Config.Owner || azureValue(observed.tags["runnerscout-operation"]) != a.ID {
+		return vmID, errors.New("Azure disk ownership update unconfirmed")
+	}
+	return vmID, nil
+}
+
 func (p *Command) observeAzure(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
+	if a.ResourceID != "" && !strings.EqualFold(a.ResourceID, p.azureID("Microsoft.Compute/virtualMachines", a.ID)) {
+		return lifecycle.Observation{}, errors.New("Azure allocation VM identity differs")
+	}
 	terminal, e := p.azureTerminal(ctx, a)
 	if e != nil || !terminal {
 		return lifecycle.Observation{}, errors.New("Azure deployment commitment still unknown")
@@ -98,6 +135,31 @@ func (p *Command) observeAzure(ctx context.Context, a lifecycle.Allocation) (lif
 		return lifecycle.Observation{}, e
 	}
 	return lifecycle.Observation{Known: true, Exists: len(resources) > 0, ResourceID: p.azureID("Microsoft.Compute/virtualMachines", a.ID)}, nil
+}
+
+func (p *Command) reconcileAzureCreation(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if a.ResourceID != "" && !strings.EqualFold(a.ResourceID, p.azureID("Microsoft.Compute/virtualMachines", a.ID)) {
+		return lifecycle.Observation{}, errors.New("Azure allocation VM identity differs")
+	}
+	terminal, err := p.azureTerminal(ctx, a)
+	if err != nil || !terminal {
+		return lifecycle.Observation{}, errors.New("Azure deployment commitment still unknown")
+	}
+	resources, err := p.azureInventory(ctx, a, true)
+	if err != nil {
+		return lifecycle.Observation{}, err
+	}
+	for _, resource := range resources {
+		if strings.EqualFold(resource.Type, "Microsoft.Compute/virtualMachines") || strings.EqualFold(resource.Type, "Microsoft.Compute/disks") && (resource.Tags["runnerscout-owner"] != p.Config.Owner || resource.Tags["runnerscout-operation"] != a.ID) {
+			if _, err := p.finishAzureDiskOwnership(ctx, a); err != nil {
+				return lifecycle.Observation{}, err
+			}
+			break
+		}
+	}
+	return p.observeAzure(ctx, a)
 }
 func (p *Command) deleteAzure(ctx context.Context, a lifecycle.Allocation) error {
 	terminal, e := p.azureTerminal(ctx, a)
