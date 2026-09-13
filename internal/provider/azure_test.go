@@ -60,6 +60,24 @@ func sdkFixture(t *testing.T, handler http.HandlerFunc) (*Command, *testAzureTok
 	return &Command{Config: azureConfig(), Azure: &AzureSDK{Credential: token, Options: options}, Bootstrap: func(context.Context, string) (string, error) { return "jit-secret", nil }}, token
 }
 func writeJSON(w http.ResponseWriter, value any) { _ = json.NewEncoder(w).Encode(value) }
+
+// Model an empty resource group until this test submits its deployment. Recovery
+// tests use sdkFixture directly because their resources are already committed.
+func azureCreationFixture(t *testing.T, handler http.HandlerFunc) (*Command, *testAzureToken) {
+	t.Helper()
+	deployed := false
+	return sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if !deployed && r.Method == "GET" {
+			w.WriteHeader(404)
+			writeJSON(w, map[string]any{"error": map[string]string{"code": "ResourceNotFound"}})
+			return
+		}
+		if deploymentPath(r) && r.Method == "PUT" {
+			deployed = true
+		}
+		handler(w, r)
+	})
+}
 func deploymentPath(r *http.Request) bool {
 	return strings.Contains(strings.ToLower(r.URL.Path), "/microsoft.resources/deployments/")
 }
@@ -69,8 +87,17 @@ func ownedResource(kind, name, owner string) map[string]any {
 
 func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 	var requests []string
-	p, token := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+	disk := azureCreationDisk()
+	p, token := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
+		if r.Method == "GET" {
+			if strings.HasSuffix(strings.ToLower(r.URL.Path), "/disks/rs-test-os") {
+				writeJSON(w, disk)
+			} else {
+				writeJSON(w, azureCreationVM())
+			}
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
@@ -97,6 +124,10 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 			if vm["storageProfile"].(map[string]any)["osDisk"].(map[string]any)["deleteOption"] != "Delete" {
 				t.Error("disk cleanup missing")
 			}
+			nics := vm["networkProfile"].(map[string]any)["networkInterfaces"].([]any)
+			if len(nics) != 1 || nics[0].(map[string]any)["properties"].(map[string]any)["deleteOption"] != "Delete" {
+				t.Error("interface cleanup missing")
+			}
 			writeJSON(w, map[string]any{"properties": map[string]string{"provisioningState": "Succeeded"}})
 		} else {
 			if r.Method != "PATCH" || !strings.HasSuffix(r.URL.Path, "/disks/rs-test-os") {
@@ -105,13 +136,14 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 			if body["tags"].(map[string]any)["runnerscout-owner"] != "test" {
 				t.Error("disk owner missing")
 			}
-			writeJSON(w, body)
+			disk["tags"] = body["tags"]
+			writeJSON(w, disk)
 		}
 	})
 	a := allocation()
 	a.Offering.Image = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/test"
 	id, err := p.Create(context.Background(), a)
-	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || len(requests) != 2 || token.calls.Load() == 0 {
+	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || len(requests) != 6 || token.calls.Load() == 0 {
 		t.Fatalf("create: id=%q err=%v requests=%v", id, err, requests)
 	}
 }
@@ -225,7 +257,7 @@ func TestAzureSDKAuthenticationAndTransportFailuresStayUnknown(t *testing.T) {
 	}
 }
 func TestAzureSDKCreateTimeoutRetainsUnknownCommitment(t *testing.T) {
-	p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+	p, _ := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if !deploymentPath(r) {
 			t.Error("tagging before deployment completion")
 		}

@@ -56,6 +56,17 @@ A failed configured credential does not fall back to developer CLI credentials.
 Mount credential files through Secrets or workload-identity admission; never place
 secret values in the public configuration. Existing `az login` caches are not used.
 
+Azure creation requires confirmed absence of the deployment, VM, NIC and disk
+names before submitting an ARM template. An occupied name or unknown inventory
+stops creation. Creation recovery can finish interrupted OS-disk ownership tagging after a
+terminal deployment. It requires matching VM ownership, image and disk attachment
+evidence, and verifies service-generated VM/disk identities around the update.
+Normal observation remains read-only. Missing evidence or conflicting ownership
+retains the allocation for investigation; recovery never redeploys the VM. These
+checks do not provide atomic tagging or persist immutable Azure identities across
+restarts. Preflight and deployment are separate requests: keep the resource group
+dedicated to RunnerScout, exclude competing resource writers and preserve its state.
+
 Each named provider uses its own credential scope. AWS profiles require an
 explicit mounted `AWS_CONFIG_FILE` or `AWS_SHARED_CREDENTIALS_FILE`; implicit
 home-directory profiles are not used. AWS uses the native Go SDK and rereads

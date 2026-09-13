@@ -67,6 +67,35 @@ func missingAzureResource(err error) bool {
 	var response *azcore.ResponseError
 	return errors.As(err, &response) && response.StatusCode == 404
 }
+
+// ARM deployment submission is create-or-update, so occupied names must not be
+// used as a retry mechanism. This preflight does not make submission atomic;
+// the dedicated resource group must still exclude competing resource writers.
+func (a *AzureSDK) requireVacantCreation(ctx context.Context, c Config, id string) error {
+	missing := func(err error, deployment bool) bool {
+		var response *azcore.ResponseError
+		return errors.As(err, &response) && response.StatusCode == 404 &&
+			(response.ErrorCode == "ResourceNotFound" || deployment && response.ErrorCode == "DeploymentNotFound")
+	}
+	client, err := a.deployments(c)
+	if err != nil {
+		return errors.New("Azure creation inventory unavailable")
+	}
+	if _, err := client.Get(ctx, c.ResourceGroup, id, nil); !missing(err, true) {
+		return errors.New("Azure deployment name occupied or absence unconfirmed")
+	}
+	for _, resource := range []struct{ kind, name, version string }{
+		{"Microsoft.Compute/virtualMachines", id, "2024-07-01"},
+		{"Microsoft.Network/networkInterfaces", id + "-nic", "2024-05-01"},
+		{"Microsoft.Compute/disks", id + "-os", "2024-03-02"},
+	} {
+		path := "/subscriptions/" + c.Subscription + "/resourceGroups/" + c.ResourceGroup + "/providers/" + resource.kind + "/" + resource.name
+		if _, err := a.get(ctx, c, path, resource.version); !missing(err, false) {
+			return errors.New("Azure resource name occupied or absence unconfirmed")
+		}
+	}
+	return nil
+}
 func (a *AzureSDK) list(ctx context.Context, c Config, id string) ([]azureResource, error) {
 	client, err := a.resources(c)
 	if err != nil {
@@ -86,17 +115,19 @@ func (a *AzureSDK) list(ctx context.Context, c Config, id string) ([]azureResour
 			if entry == nil || entry.Name == nil {
 				return nil, errors.New("invalid Azure inventory entry")
 			}
-			if *entry.Name != id && *entry.Name != id+"-nic" && *entry.Name != id+"-os" {
+			if !strings.EqualFold(*entry.Name, id) && !strings.EqualFold(*entry.Name, id+"-nic") && !strings.EqualFold(*entry.Name, id+"-os") {
 				continue
 			}
 			if entry.ID == nil || entry.Type == nil {
 				return nil, errors.New("invalid Azure resource identity")
 			}
 			resource := azureResource{ID: *entry.ID, Name: *entry.Name, Type: *entry.Type, Tags: map[string]string{}}
-			for key, value := range entry.Tags {
-				if value != nil {
-					resource.Tags[key] = *value
-				}
+			tags, err := azureTagSnapshot(entry.Tags)
+			if err != nil {
+				return nil, err
+			}
+			for key, value := range tags {
+				resource.Tags[key] = *value
 			}
 			result = append(result, resource)
 		}
@@ -138,19 +169,29 @@ func (a *AzureSDK) deploy(ctx context.Context, c Config, id string, template map
 	_, err = poller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{Frequency: time.Second})
 	return err
 }
-func (a *AzureSDK) tagDisk(ctx context.Context, c Config, id string) error {
+func (a *AzureSDK) get(ctx context.Context, c Config, id, version string) (armresources.GenericResource, error) {
+	client, err := a.resources(c)
+	if err != nil {
+		return armresources.GenericResource{}, err
+	}
+	result, err := client.GetByID(ctx, id, version, nil)
+	return result.GenericResource, err
+}
+
+func (a *AzureSDK) tagDisk(ctx context.Context, c Config, id string, tags map[string]*string) error {
 	client, err := a.resources(c)
 	if err != nil {
 		return err
 	}
 	resourceID := "/subscriptions/" + c.Subscription + "/resourceGroups/" + c.ResourceGroup + "/providers/Microsoft.Compute/disks/" + id + "-os"
-	poller, err := client.BeginUpdateByID(ctx, resourceID, "2024-03-02", armresources.GenericResource{Tags: map[string]*string{"runnerscout-owner": &c.Owner, "runnerscout-operation": &id}}, nil)
+	poller, err := client.BeginUpdateByID(ctx, resourceID, "2024-03-02", armresources.GenericResource{Tags: tags}, nil)
 	if err != nil {
 		return err
 	}
 	_, err = poller.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{Frequency: time.Second})
 	return err
 }
+
 func (a *AzureSDK) delete(ctx context.Context, c Config, resource azureResource) error {
 	client, err := a.resources(c)
 	if err != nil {
