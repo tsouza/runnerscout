@@ -107,3 +107,34 @@ func TestShutdownExitPreservesCleanupFailures(t *testing.T) {
 		t.Fatal("cancellation concealed a real cleanup failure")
 	}
 }
+
+func TestCRDChecksRequireOneExplicitMode(t *testing.T) {
+	for _, args := range [][]string{
+		{"-check-crd"}, {"-config=config.json", "-check-uninstall"},
+		{"-scale-set=build", "-namespace=test", "-check-crd", "-check-uninstall"},
+		{"-scale-set=build", "-namespace=test", "-check-crd", "-validate"},
+	} {
+		if _, err := parseOptions(args); err == nil {
+			t.Fatalf("accepted mixed check mode: %v", args)
+		}
+	}
+	for _, mode := range []string{"-check-crd", "-check-uninstall"} {
+		if _, err := parseOptions([]string{"-scale-set=build", "-namespace=test", mode}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestInterruptedSafetyCheckCannotReportSuccessfulExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, result := range []error{context.Canceled, nil} {
+		err := runCheck(ctx, func(context.Context) error { return result })
+		if benignShutdown(err) {
+			t.Fatal("interrupted safety check became a successful process exit")
+		}
+	}
+	if err := runCheck(context.Background(), func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+}

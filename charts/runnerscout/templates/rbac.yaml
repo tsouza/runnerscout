@@ -22,6 +22,20 @@ rules:
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [get, create, update]
+  {{- if .Values.crd.scaleSetName }}
+  - apiGroups: [runnerscout.io]
+    resources: [runnerscalesets, runnerscalesets/status]
+    resourceNames: [{{ .Values.crd.scaleSetName | quote }}]
+    verbs: [get, update]
+  - apiGroups: [runnerscout.io]
+    resources: [providerconfigs, runnerclasses, capacitycatalogs, networkprofiles]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      {{- toYaml .Values.crd.secretNames | nindent 6 }}
+    verbs: [get]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

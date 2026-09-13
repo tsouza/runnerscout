@@ -1,6 +1,10 @@
+{{- include "runnerscout.validateOwnership" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    runnerscout.io/configuration-mode: {{ include "runnerscout.mode" . | quote }}
+    runnerscout.io/state-name: {{ include "runnerscout.stateName" . | quote }}
   name: {{ include "runnerscout.fullname" . }}
   labels:
     {{- include "runnerscout.labels" . | nindent 4 }}
@@ -16,11 +20,17 @@ spec:
     metadata:
       labels:
         {{- include "runnerscout.selector" . | nindent 8 }}
+        {{- include "runnerscout.podPolicySelector" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- if not .Values.crd.scaleSetName }}
         checksum/config: {{ include "runnerscout.config" . | sha256sum }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "runnerscout.sa" . }}
       automountServiceAccountToken: true
@@ -42,6 +52,10 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/runnerscout"]
           args:
+            {{- if .Values.crd.scaleSetName }}
+            - {{ printf "-scale-set=%s" .Values.crd.scaleSetName | quote }}
+            - {{ printf "-namespace=%s" .Release.Namespace | quote }}
+            {{- else }}
             - -config=/etc/runnerscout/config/config.json
             {{- if eq .Values.github.mode "app" }}
             - {{ printf "-github-app-client-id=%s" (required "github.appClientID required for app authentication" .Values.github.appClientID) | quote }}
@@ -49,6 +63,7 @@ spec:
             - -github-app-key-file=/etc/runnerscout/github/privateKey
             {{- else }}
             - -github-token-file=/etc/runnerscout/github/token
+            {{- end }}
             {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -85,12 +100,14 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
+            {{- if not .Values.crd.scaleSetName }}
             - name: config
               mountPath: /etc/runnerscout/config
               readOnly: true
             - name: github
               mountPath: /etc/runnerscout/github
               readOnly: true
+            {{- end }}
             - name: tmp
               mountPath: /tmp
             {{- if .Values.catalog.existingConfigMap }}
@@ -104,6 +121,7 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        {{- if not .Values.crd.scaleSetName }}
         - name: config
           configMap:
             name: {{ include "runnerscout.fullname" . }}-config
@@ -119,6 +137,7 @@ spec:
               - key: {{ .Values.github.tokenKey }}
                 path: token
               {{- end }}
+        {{- end }}
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi

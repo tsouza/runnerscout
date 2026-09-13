@@ -1,0 +1,55 @@
+apiVersion: runnerscout.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aws
+  namespace: runnerscout
+spec:
+  connection:
+    kind: aws
+    accountID: "000000000000"
+    profile: runnerscout
+    subnet: subnet-00000000000000000
+    securityGroup: sg-00000000000000000
+  credentialEnvironment:
+    AWS_SHARED_CREDENTIALS_FILE:
+      name: aws-credentials
+      key: path
+---
+apiVersion: runnerscout.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: azure
+  namespace: runnerscout
+spec:
+  connection:
+    kind: azure
+    subscription: "00000000-0000-0000-0000-000000000000"
+    resourceGroup: runnerscout
+    subnet: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/runnerscout/providers/Microsoft.Network/virtualNetworks/runners/subnets/runners
+    securityGroup: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/runnerscout/providers/Microsoft.Network/networkSecurityGroups/runners
+    sshPublicKey: ssh-ed25519 REPLACE_WITH_PUBLIC_KEY
+  credentialEnvironment:
+    AZURE_CLIENT_ID:
+      name: azure-identity
+      key: client-id
+    AZURE_TENANT_ID:
+      name: azure-identity
+      key: tenant-id
+    AZURE_FEDERATED_TOKEN_FILE:
+      name: azure-identity
+      key: token-file
+---
+apiVersion: runnerscout.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: gcp
+  namespace: runnerscout
+spec:
+  connection:
+    kind: gcp
+    project: replace-with-project
+    subnet: projects/replace-with-project/regions/us-central1/subnetworks/runners
+  credentialEnvironment:
+    GOOGLE_APPLICATION_CREDENTIALS:
+      name: gcp-credentials
+      key: path

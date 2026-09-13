@@ -12,6 +12,13 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestInterruptedSafetyCheckCannotReportSuccessfulExit'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCompleteMulticloudExampleCompilesWithoutEnablingAdmissions'),
+    ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestCRDChecksRequireOneExplicitMode'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestCRDCheckValidatesSecretsWithoutStartingWorkers'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestUninstallCheckRequiresRootAbsenceAndIsReadOnly'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestUninstallCheckRefusesMissingCheckpointOrLifetimeRecords'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestUninstallCheckDetectsConcurrentRootRecreation'),
     ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestShutdownExitPreservesCleanupFailures'),
     ('github.com/tsouza/runnerscout/internal/configapi', 'TestRuntimeBindingChangeRecoversOriginalFleetAfterRestart'),
     ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestCRDCommandRejectsMixedConfigurationAndAuthentication'),

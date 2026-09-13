@@ -64,7 +64,8 @@ Run the CRD controller inside the cluster with
 under `config/crd/bases/` and create the referenced namespaced resources first.
 This mode reads GitHub and provider credentials from their named Secret
 references; mounted configuration and GitHub authentication flags are mutually
-exclusive with it. The current Helm chart still configures mounted JSON.
+exclusive with it. The Helm chart selects this mode with `crd.scaleSetName` and restricts Secret
+reads to the names in `crd.secretNames`.
 
 Inspect the RunnerScaleSet `Ready` condition when configuration cannot be loaded.
 Suspension or invalid references stop new admissions while existing allocations
@@ -74,3 +75,8 @@ Delete the RunnerScaleSet and wait for its cleanup finalizer before stopping its
 controller. Preserve its configuration checkpoint and allocation records while
 cleanup is unresolved. A missing/corrupt checkpoint or replacement object UID
 blocks adoption; it is not permission to recreate or erase ownership records.
+
+Use `-check-crd` with the namespace and scale-set flags for read-only Kubernetes
+configuration validation. `-check-uninstall` requires root absence and completed
+durable cleanup without reading Secrets or contacting cloud providers. Helm runs
+these checks in its CRD test and pre-delete hooks, respectively.
