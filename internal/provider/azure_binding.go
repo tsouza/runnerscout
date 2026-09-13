@@ -22,6 +22,7 @@ type azureVMProperties struct {
 	VMID              string `json:"vmId"`
 	ProvisioningState string `json:"provisioningState"`
 	StorageProfile    struct {
+		DataDisks      []any `json:"dataDisks"`
 		ImageReference struct {
 			ID string `json:"id"`
 		} `json:"imageReference"`
@@ -33,6 +34,11 @@ type azureVMProperties struct {
 			} `json:"managedDisk"`
 		} `json:"osDisk"`
 	} `json:"storageProfile"`
+	NetworkProfile struct {
+		NetworkInterfaces []struct {
+			ID string `json:"id"`
+		} `json:"networkInterfaces"`
+	} `json:"networkProfile"`
 }
 type azureDiskProperties struct {
 	UniqueID          string `json:"uniqueId"`
@@ -89,6 +95,10 @@ func azureTagSnapshot(tags map[string]*string) (map[string]*string, error) {
 	return result, nil
 }
 func (p *Command) azureDiskBinding(ctx context.Context, a lifecycle.Allocation) (azureDiskBinding, error) {
+	references, err := p.azureReferences(a)
+	if err != nil {
+		return azureDiskBinding{}, err
+	}
 	diskID := p.azureID("Microsoft.Compute/disks", a.ID+"-os")
 	vmID := p.azureID("Microsoft.Compute/virtualMachines", a.ID)
 	disk, err := p.azureClient().get(ctx, p.Config, diskID, "2024-03-02")
@@ -127,5 +137,11 @@ func (p *Command) azureDiskBinding(ctx context.Context, a lifecycle.Allocation) 
 	if !strings.EqualFold(storage.ImageReference.ID, a.Offering.Image) || !strings.EqualFold(storage.OSDisk.Name, a.ID+"-os") || !strings.EqualFold(storage.OSDisk.CreateOption, "FromImage") || !strings.EqualFold(storage.OSDisk.ManagedDisk.ID, diskID) {
 		return azureDiskBinding{}, errors.New("Azure VM and disk creation graph differs")
 	}
-	return azureDiskBinding{vmUID: strings.ToLower(vmProperties.VMID), diskUID: strings.ToLower(diskProperties.UniqueID), tags: diskTags}, nil
+	binding := azureDiskBinding{vmUID: strings.ToLower(vmProperties.VMID), diskUID: strings.ToLower(diskProperties.UniqueID), tags: diskTags}
+	for kind, uid := range map[string]string{"azure-vm": binding.vmUID, "azure-disk": binding.diskUID} {
+		if previous, exists := references[kind]; exists && previous.UID != uid {
+			return azureDiskBinding{}, errors.New("Azure recorded creation generation changed")
+		}
+	}
+	return binding, nil
 }

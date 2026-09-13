@@ -72,7 +72,8 @@ func TestRealKubernetesPersistenceAndCAS(t *testing.T) {
 		t.Fatal(b, e)
 	}
 	a.Phase = lifecycle.Creating
-	a.Resources = []lifecycle.ResourceReference{{Kind: "aws-volume", ID: "vol-fixture"}}
+	expectedResource := lifecycle.ResourceReference{Kind: "azure-disk", ID: "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/disks/rs-test-os", UID: "11111111-1111-4111-8111-111111111111"}
+	a.Resources = []lifecycle.ResourceReference{expectedResource}
 	a, e = s.Save(ctx, a, a.Revision)
 	if e != nil {
 		t.Fatal(e)
@@ -82,7 +83,7 @@ func TestRealKubernetesPersistenceAndCAS(t *testing.T) {
 		t.Fatalf("stale revision was not rejected: %v", e)
 	}
 	got, e := s2.Load(ctx, a.ID)
-	if e != nil || got.Phase != lifecycle.Creating || len(got.Resources) != 1 || got.Resources[0].ID != "vol-fixture" {
+	if e != nil || got.Phase != lifecycle.Creating || len(got.Resources) != 1 || got.Resources[0] != expectedResource {
 		t.Fatal(got, e)
 	}
 	cm, e := s2.Maps.Get(ctx, a.ID, metav1.GetOptions{})
@@ -92,6 +93,14 @@ func TestRealKubernetesPersistenceAndCAS(t *testing.T) {
 	all, e := s2.List(ctx)
 	if e != nil || len(all) != 1 || len(all[0].Resources) != 1 {
 		t.Fatal("real list lost dependency", e)
+	}
+	for _, uid := range []string{"", "22222222-2222-4222-8222-222222222222"} {
+		changed := got
+		changed.Resources = append([]lifecycle.ResourceReference{}, got.Resources...)
+		changed.Resources[0].UID = uid
+		if _, err := s2.Save(ctx, changed, changed.Revision); err == nil {
+			t.Fatal("server-backed state accepted generation change", uid)
+		}
 	}
 	got.Resources = nil
 	if _, e = s2.Save(ctx, got, got.Revision); e == nil {

@@ -24,6 +24,8 @@ const (
 type ResourceReference struct {
 	Kind string `json:"kind"`
 	ID   string `json:"id"`
+	// UID distinguishes resource generations when a provider reuses resource IDs.
+	UID string `json:"uid,omitempty"`
 }
 
 type Allocation struct {
@@ -54,6 +56,8 @@ var ErrCapacity = errors.New("definitive capacity rejection")
 var ErrNoEffect = errors.New("create preparation failed without cloud effects")
 
 type Observation struct {
+	// Resources contains independently proven identities, including partial
+	// evidence that must survive an uncertain creation-recovery outcome.
 	Resources  []ResourceReference
 	Exists     bool
 	Known      bool
@@ -207,11 +211,13 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		} else {
 			ob, e = p.Observe(ctx, a)
 		}
-		if e != nil || !ob.Known {
-			return errors.New("create reconciliation unknown")
-		}
+		// Recovery can return proven identities even when a later operation is
+		// uncertain. Persist those obligations before reporting the uncertainty.
 		if err := c.rememberResources(ctx, &a, ob.Resources); err != nil {
 			return err
+		}
+		if e != nil || !ob.Known {
+			return errors.New("create reconciliation unknown")
 		}
 		if !ob.Exists {
 			a.Condition = "CreateAbsenceNotCommitmentProof"
