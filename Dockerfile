@@ -11,7 +11,8 @@ COPY api/ api/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/runnerscout ./cmd/runnerscout
 
 FROM public.ecr.aws/aws-cli/aws-cli@sha256:e8467f2c319f9bc9a1471808a69949a76915e9c95eaf4a09ece9f9e85fd32747 AS aws
-FROM gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:147cb346b1bdc3256085fc2c1ee98c6f3628bd5d99eba3fb3ac8287fa088a8d9 AS gcloud
+# Compute needs the core CLI; avoid unrelated emulators and bundled cluster tools.
+FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:slim@sha256:9bf51bc7c410ab15cd5c7412a8b5f120489056679d3c4db7a7f029f72d5a433a AS gcloud
 FROM python:3.14-slim-trixie@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS runtime
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 COPY --from=aws /usr/local/aws-cli /usr/local/aws-cli
