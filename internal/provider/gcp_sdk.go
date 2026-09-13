@@ -50,6 +50,21 @@ func missingGCP(err error) bool {
 	var response *googleapi.Error
 	return errors.As(err, &response) && response.Code == http.StatusNotFound
 }
+
+// gcpCapacityFailure reports whether a terminal operation's error definitively
+// identifies zonal capacity exhaustion, never a quota, permission or transient
+// failure that a different pool could not resolve.
+func gcpCapacityFailure(op *compute.Operation) bool {
+	if op == nil || op.Error == nil {
+		return false
+	}
+	for _, e := range op.Error.Errors {
+		if e != nil && (e.Code == "ZONE_RESOURCE_POOL_EXHAUSTED" || e.Code == "ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS") {
+			return true
+		}
+	}
+	return false
+}
 func (p *Command) gcpLabels(a lifecycle.Allocation) map[string]string {
 	return map[string]string{"runnerscout-owner": p.Config.Owner, "runnerscout-operation": a.ID}
 }
@@ -142,6 +157,11 @@ func (p *Command) waitGCPOperation(ctx context.Context, a lifecycle.Allocation, 
 		switch op.Status {
 		case "DONE":
 			if op.Error != nil || op.HttpErrorStatusCode != 0 {
+				if action == "create" && gcpCapacityFailure(op) {
+					if inventory, ierr := p.gcpInventory(ctx, a); ierr == nil && inventory.vm == nil && inventory.disk == nil {
+						return lifecycle.ErrCapacity
+					}
+				}
 				return errors.New("GCP operation failed; reconcile ownership")
 			}
 			return nil
