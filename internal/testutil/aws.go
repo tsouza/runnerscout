@@ -20,7 +20,7 @@ type AWS struct {
 	mu                                                sync.Mutex
 	requests                                          []url.Values
 	instance, terminated, volume, network             bool
-	loseCreate, capacity                              bool
+	loseCreate, capacity, spotInterrupted             bool
 	account, allocation, zone, subnet, machine, image string
 	owners                                            map[string]string
 }
@@ -32,8 +32,18 @@ func NewAWS(t *testing.T) *AWS {
 	t.Cleanup(fixture.Server.Close)
 	return fixture
 }
-func (f *AWS) LoseNextCreate()           { f.mu.Lock(); defer f.mu.Unlock(); f.loseCreate = true }
-func (f *AWS) RejectCapacity()           { f.mu.Lock(); defer f.mu.Unlock(); f.capacity = true }
+func (f *AWS) LoseNextCreate() { f.mu.Lock(); defer f.mu.Unlock(); f.loseCreate = true }
+func (f *AWS) RejectCapacity() { f.mu.Lock(); defer f.mu.Unlock(); f.capacity = true }
+
+// SpotInterrupt models the settled state some time after AWS itself (not any
+// TerminateInstances call the controller made) terminates the instance with
+// the definitive spot interruption reason code; its delete-on-termination
+// volume and network interface have since been removed by AWS as well.
+func (f *AWS) SpotInterrupt() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.terminated, f.spotInterrupted, f.volume, f.network = true, true, false, false
+}
 func (f *AWS) SetAccount(account string) { f.mu.Lock(); defer f.mu.Unlock(); f.account = account }
 func (f *AWS) Requests() []url.Values {
 	f.mu.Lock()
@@ -186,5 +196,9 @@ func (f *AWS) instanceXML() string {
 	if f.terminated {
 		state, code = "terminated", "48"
 	}
-	return strings.Join([]string{`<item><instanceId>`, AWSInstanceID, `</instanceId><imageId>`, f.image, `</imageId><instanceType>`, f.machine, `</instanceType><clientToken>`, f.allocation, `</clientToken><subnetId>`, f.subnet, `</subnetId><placement><availabilityZone>`, f.zone, `</availabilityZone></placement><instanceState><code>`, code, `</code><name>`, state, `</name></instanceState><tagSet>`, f.tags("instance"), `</tagSet><rootDeviceName>/dev/sda1</rootDeviceName><blockDeviceMapping><item><deviceName>/dev/sda1</deviceName><ebs><volumeId>`, AWSVolumeID, `</volumeId><deleteOnTermination>true</deleteOnTermination></ebs></item></blockDeviceMapping><networkInterfaceSet><item><networkInterfaceId>`, AWSInterfaceID, `</networkInterfaceId><subnetId>`, f.subnet, `</subnetId></item></networkInterfaceSet></item>`}, "")
+	stateReason := ""
+	if f.spotInterrupted {
+		stateReason = `<stateReason><code>Server.SpotInstanceTermination</code><message>interrupted</message></stateReason>`
+	}
+	return strings.Join([]string{`<item><instanceId>`, AWSInstanceID, `</instanceId><imageId>`, f.image, `</imageId><instanceType>`, f.machine, `</instanceType><clientToken>`, f.allocation, `</clientToken><subnetId>`, f.subnet, `</subnetId><placement><availabilityZone>`, f.zone, `</availabilityZone></placement><instanceState><code>`, code, `</code><name>`, state, `</name></instanceState>`, stateReason, `<tagSet>`, f.tags("instance"), `</tagSet><rootDeviceName>/dev/sda1</rootDeviceName><blockDeviceMapping><item><deviceName>/dev/sda1</deviceName><ebs><volumeId>`, AWSVolumeID, `</volumeId><deleteOnTermination>true</deleteOnTermination></ebs></item></blockDeviceMapping><networkInterfaceSet><item><networkInterfaceId>`, AWSInterfaceID, `</networkInterfaceId><subnetId>`, f.subnet, `</subnetId></item></networkInterfaceSet></item>`}, "")
 }

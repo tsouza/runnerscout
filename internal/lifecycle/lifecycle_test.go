@@ -28,8 +28,8 @@ func (s *store) Save(_ context.Context, a l.Allocation, version string) (l.Alloc
 }
 
 type cloud struct {
-	created, deleted                        int
-	exists, unknown, loseResponse, capacity bool
+	created, deleted                                     int
+	exists, unknown, loseResponse, capacity, interrupted bool
 }
 
 func (c *cloud) Create(context.Context, l.Allocation) (string, error) {
@@ -44,7 +44,7 @@ func (c *cloud) Create(context.Context, l.Allocation) (string, error) {
 	return "vm-1", nil
 }
 func (c *cloud) Observe(context.Context, l.Allocation) (l.Observation, error) {
-	return l.Observation{Known: !c.unknown, Exists: c.exists, ResourceID: "vm-1"}, nil
+	return l.Observation{Known: !c.unknown, Exists: c.exists, Interrupted: c.interrupted, ResourceID: "vm-1"}, nil
 }
 func (c *cloud) Delete(context.Context, l.Allocation) error { c.deleted++; return nil }
 func setup() (*l.Controller, *store, *cloud, *time.Time) {
@@ -155,6 +155,29 @@ func TestUnreadyVMExpiresButStartedJobDoesNot(t *testing.T) {
 		}
 		if (!ready && s.a.Phase != l.Deleting) || (ready && s.a.Phase != l.Running) {
 			t.Fatal(ready, s.a)
+		}
+	}
+}
+
+func TestConfirmedInterruptionDistinguishesFromUnprovenAbsence(t *testing.T) {
+	for _, interrupted := range []bool{false, true} {
+		c, s, cloud, _ := setup()
+		if e := c.Step(context.Background(), "rs-test"); e != nil {
+			t.Fatal(e)
+		}
+		if s.a.Phase != l.Running {
+			t.Fatal("expected running before absence", s.a)
+		}
+		cloud.exists, cloud.interrupted = false, interrupted
+		if e := c.Step(context.Background(), "rs-test"); e != nil {
+			t.Fatal(e)
+		}
+		want := "ResourceAbsentInterruptionUnproven"
+		if interrupted {
+			want = "ResourceAbsentConfirmedInterruption"
+		}
+		if s.a.Phase != l.Deleted || s.a.Condition != want {
+			t.Fatal(interrupted, s.a)
 		}
 	}
 }
