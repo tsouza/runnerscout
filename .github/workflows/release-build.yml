@@ -1,23 +1,34 @@
-# SCAFFOLD — artifact build only, no publication.
+# Two jobs, two very different trust levels.
 #
-# This workflow builds and packages release-candidate artifacts (multi-arch
-# container image, Helm chart package, SBOM, checksums) for manual review. It
-# never pushes an image to a registry, never creates a git tag or GitHub
-# Release, and never signs anything (no cosign / provenance attestation is
-# produced here). Per AGENTS.md, release publication requires separate,
-# explicit human authorization outside this workflow. Provenance generation
-# and signing are tracked as follow-up work once a publication path exists —
-# see docs/releases.md and issue #17.
+# `build` packages release-candidate artifacts (multi-arch container image,
+# Helm chart package, SBOM, checksums) for manual review. It never pushes an
+# image to a registry and never signs anything. It runs on both trigger
+# paths below.
+#
+# `publish` pushes the image built above to ghcr.io/tsouza/runnerscout and
+# signs it keylessly with cosign (Sigstore Fulcio/Rekor - no stored private
+# key). It runs ONLY when this workflow is invoked via workflow_call:
+# `github.event_name` is set to the literal string "workflow_call" by
+# GitHub itself whenever a workflow is invoked that way, and to
+# "workflow_dispatch" for a direct manual run - this is not a value either
+# trigger's `inputs:` can spoof. See
+# https://docs.github.com/en/actions/learn-github-actions/contexts#github-context.
+# Today the only caller that reaches workflow_call is release.yml's `build`
+# job, itself gated on tools/release_preflight.py passing - so `publish`
+# transitively only ever runs after that gate. It still never creates a git
+# tag or a GitHub Release; per AGENTS.md and docs/releases.md that remains a
+# separate, explicit decision outside this workflow.
 #
 # Two trigger paths, both intentional:
-#   - workflow_dispatch: ad hoc manual runs against any commit.
+#   - workflow_dispatch: ad hoc manual runs against any commit. Builds
+#     review artifacts only - `publish` cannot run from this path.
 #   - workflow_call: invoked by release.yml as a job, once its own
 #     tools/release_preflight.py gate has passed, so the tag-triggered
 #     pipeline and manual dispatch share this same build logic instead of
-#     duplicating it.
+#     duplicating it. Only this path also publishes.
 # Never push/pull_request/tag directly, so this cannot fire automatically
 # or accidentally outside those two explicit paths.
-name: Release build (scaffold)
+name: Release build
 on:
   workflow_dispatch:
     inputs:
@@ -25,10 +36,21 @@ on:
         description: Exact commit SHA to build artifacts from
         required: true
         type: string
+      release_tag:
+        description: >-
+          Unused for manual dispatch (the publish job never runs on this
+          path); accepted only for input-shape parity with workflow_call.
+        required: false
+        type: string
+        default: ''
   workflow_call:
     inputs:
       commit_sha:
         description: Exact commit SHA to build artifacts from
+        required: true
+        type: string
+      release_tag:
+        description: Release tag (vMAJOR.MINOR.PATCH) to push and sign the image as, alongside commit_sha
         required: true
         type: string
 permissions:
@@ -73,7 +95,9 @@ jobs:
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       # Multi-arch image, saved locally as an OCI archive artifact. Never
-      # pushed: push is hardcoded false and no registry/tag is configured.
+      # pushed from this job: push is hardcoded false and no registry/tag is
+      # configured. (The `publish` job below independently rebuilds and
+      # pushes this same content - see its own comment for why.)
       - name: Build multi-arch runtime image (not pushed)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -130,3 +154,98 @@ jobs:
           path: release-artifacts/
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    name: publish
+    needs: build
+    # See this file's header: github.event_name is "workflow_call" only for
+    # runs GitHub itself invoked via workflow_call (release.yml, after its
+    # preflight gate) and is always "workflow_dispatch" for a direct manual
+    # run, regardless of any input passed. This condition is what keeps
+    # `publish` from ever firing on an ad hoc workflow_dispatch build.
+    if: github.event_name == 'workflow_call'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - name: Confirm checked-out commit matches the requested input
+        run: |
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "${{ inputs.commit_sha }}" ]; then
+            echo "checked out $actual, expected ${{ inputs.commit_sha }}" >&2
+            exit 1
+          fi
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Rebuilds the exact same context/commit/Dockerfile as the `build`
+      # job above, reading (not writing) that job's `runnerscout-release-build`
+      # GHA cache scope. Because nothing about the inputs differs, this is a
+      # full cache hit that repackages the layers `build` already produced
+      # into a registry-push export, not an independent second build of
+      # different content. A single build step producing both the local OCI
+      # archive artifact and a registry push in one invocation was
+      # considered (buildx supports multiple simultaneous --output
+      # destinations) but rejected here: making that combination conditional
+      # on the workflow_call/workflow_dispatch gate inside one step's inputs
+      # is harder to verify by manual trace than gating a whole separate job,
+      # and the cache-hit cost of a second export is negligible.
+      - name: Build and push multi-arch runtime image
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/tsouza/runnerscout:${{ inputs.commit_sha }}
+            ghcr.io/tsouza/runnerscout:${{ inputs.release_tag }}
+          cache-from: type=gha,scope=runnerscout-release-build
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      # Keyless signing: no private key is stored anywhere. cosign uses this
+      # job's own GitHub Actions OIDC identity token (granted by the
+      # id-token: write permission above) to obtain a short-lived signing
+      # certificate from Sigstore's public Fulcio CA, then publishes the
+      # signature and that certificate to Sigstore's public Rekor
+      # transparency log. Signs the resolved digest, not the mutable tags
+      # above, so the signature is bound to the exact content just pushed.
+      # See https://docs.sigstore.dev/quickstart/quickstart-ci/.
+      - name: Sign the image keylessly
+        run: cosign sign --yes "ghcr.io/tsouza/runnerscout@${{ steps.push.outputs.digest }}"
+
+      - name: Download the SBOM produced by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-build-${{ inputs.commit_sha }}-${{ github.run_id }}
+          path: release-artifacts
+
+      # cosign attest (not cosign sign) is the correct primitive for an
+      # SBOM: it wraps the SPDX document in a signed in-toto attestation
+      # (predicate type "spdxjson") bound to the image digest, rather than
+      # treating the SBOM as a bare signature payload the way an image
+      # signature works.
+      - name: Attest the SBOM keylessly
+        run: |
+          cosign attest --yes \
+            --predicate release-artifacts/runnerscout-sbom.spdx.json \
+            --type spdxjson \
+            "ghcr.io/tsouza/runnerscout@${{ steps.push.outputs.digest }}"
