@@ -1,0 +1,120 @@
+# SCAFFOLD — artifact build only, no publication.
+#
+# This workflow builds and packages release-candidate artifacts (multi-arch
+# container image, Helm chart package, SBOM, checksums) for manual review. It
+# never pushes an image to a registry, never creates a git tag or GitHub
+# Release, and never signs anything (no cosign / provenance attestation is
+# produced here). Per AGENTS.md, release publication requires separate,
+# explicit human authorization outside this workflow. Provenance generation
+# and signing are tracked as follow-up work once a publication path exists —
+# see docs/releases.md and issue #17.
+#
+# Trigger is workflow_dispatch only (never push/pull_request/tag) so this
+# cannot fire automatically or accidentally.
+name: Release build (scaffold)
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact commit SHA to build artifacts from
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-build-${{ inputs.commit_sha }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - name: Confirm checked-out commit matches the requested input
+        run: |
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "${{ inputs.commit_sha }}" ]; then
+            echo "checked out $actual, expected ${{ inputs.commit_sha }}" >&2
+            exit 1
+          fi
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Install pinned Helm
+        run: |
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
+          echo "1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/linux-amd64" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/chart-venv"
+          "$RUNNER_TEMP/chart-venv/bin/pip" install PyYAML==6.0.3
+          echo "$RUNNER_TEMP/chart-venv/bin" >> "$GITHUB_PATH"
+      - name: Make output directory
+        run: mkdir -p release-artifacts
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Multi-arch image, saved locally as an OCI archive artifact. Never
+      # pushed: push is hardcoded false and no registry/tag is configured.
+      - name: Build multi-arch runtime image (not pushed)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: runnerscout:release-build
+          cache-from: type=gha,scope=runnerscout-release-build
+          cache-to: type=gha,scope=runnerscout-release-build,mode=max
+          outputs: type=oci,dest=release-artifacts/runnerscout-image-multiarch.oci.tar
+
+      # A single-arch (linux/amd64) copy loaded into the local Docker daemon
+      # so an SBOM can be generated against a runnable image reference. It
+      # reuses the layer cache from the multi-arch build above, so this is a
+      # cache hit, not an independent rebuild. This image is never pushed.
+      - name: Load linux/amd64 image for SBOM generation (not pushed)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: runnerscout:release-build-amd64
+          cache-from: type=gha,scope=runnerscout-release-build
+
+      - name: Generate SBOM for the built image (linux/amd64)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: runnerscout:release-build-amd64
+          format: spdx-json
+          output-file: release-artifacts/runnerscout-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+
+      # Same packaging step ci.yml's chart job verifies (helm lint against
+      # the same pinned Helm/kube-version), plus the actual `helm package`
+      # that job stops short of. docs/releases.md lists a Helm package as a
+      # required release artifact.
+      - name: Lint Helm chart
+        run: helm lint charts/runnerscout --strict --kube-version 1.37.0 -f charts/runnerscout/tests/values.json
+      - name: Package Helm chart
+        run: helm package charts/runnerscout --destination release-artifacts
+
+      - name: Generate SHA256 checksums for every artifact
+        working-directory: release-artifacts
+        run: |
+          sha256sum -- * > checksums.txt
+          cat checksums.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-build-${{ inputs.commit_sha }}-${{ github.run_id }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 14
