@@ -156,6 +156,7 @@ func TestRealKubernetesCRDSchemasAndConfigurationSnapshot(t *testing.T) {
 	}
 	verifyRealSecretResolution(t, ctx, kc, dc, namespace)
 	verifyRealRuntimeLifecycle(t, ctx, kc, dc, namespace)
+	verifyRealExamples(t, ctx, kc, dc, namespace+"-examples")
 	scaleSets := dc.Resource(schema.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: "runnerscalesets"}).Namespace(namespace)
 	invalid := fixture.objects["runnerscalesets/build"].DeepCopy()
 	invalid.SetName("invalid")

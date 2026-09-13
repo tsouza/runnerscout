@@ -1,0 +1,16 @@
+{
+  "image": {
+    "repository": "runnerscout",
+    "tag": "development",
+    "pullPolicy": "IfNotPresent"
+  },
+  "crd": {
+    "scaleSetName": "build",
+    "secretNames": [
+      "github",
+      "aws-auth",
+      "azure-auth",
+      "gcp-auth"
+    ]
+  }
+}

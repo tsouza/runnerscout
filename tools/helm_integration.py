@@ -12,6 +12,7 @@ import tempfile
 import time
 import uuid
 import yaml
+import helm_crd_cases
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,6 +26,8 @@ def main():
     evidence = ROOT / "evidence" / identity
     evidence.mkdir(parents=True)
     manifest = {"scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM", "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "checks": {}, "cleanup_errors": [], "verdict": "fail"}
+    manifest["harness_sha256"] = hashlib.sha256(b"\0".join((ROOT / "tools" / name).read_bytes() for name in ("helm_integration.py", "helm_crd_cases.py"))).hexdigest()
+    manifest["example_sha256"] = hashlib.sha256(b"\0".join((ROOT / "examples/multicloud" / name).read_bytes() for name in ("providers.yaml", "class.yaml", "catalog.yaml", "network.yaml", "values.yaml"))).hexdigest()
     deadline = time.monotonic() + 1500
     sequence = 0
     diagnostic_kubeconfig = None
@@ -39,6 +42,8 @@ def main():
         if diagnostic_kubeconfig and diagnostic_kubeconfig.exists():
             base = ["kubectl", "--kubeconfig", str(diagnostic_kubeconfig), "-n", "runnerscout-test"]
             commands += [base + ["get", "pods", "-o", "wide"], base + ["get", "events", "--sort-by=.lastTimestamp"], base + ["logs", "deployment/runnerscout", "--all-containers", "--tail=100"], base + ["logs", "pod/github-fixture", "--tail=100"]]
+            crd_base = ["kubectl", "--kubeconfig", str(diagnostic_kubeconfig), "-n", "runnerscout-test-crd"]
+            commands += [crd_base + ["get", "pods", "-o", "wide"], crd_base + ["get", "events", "--sort-by=.lastTimestamp"], crd_base + ["get", "runnerscalesets", "-o", "yaml"], crd_base + ["logs", "deployment/runnerscout", "--all-containers", "--tail=100"], crd_base + ["logs", "job/runnerscout-uninstall", "--tail=100"]]
         for index, command in enumerate(commands):
             try:
                 result = subprocess.run(command, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
@@ -144,6 +149,8 @@ def main():
             values = json.loads((ROOT / "charts/runnerscout/tests/values.json").read_text())
             values["image"] = {"repository": "runnerscout", "tag": args.image_tag, "pullPolicy": "Never"}
             values["fullnameOverride"] = "runnerscout"
+            # Exercise NetworkPolicy resources; this fixture does not claim CNI enforcement.
+            values["networkPolicy"] = {"enabled": True, "egress": [{}]}
             values_path = temp / "values.json"
             values_path.write_text(json.dumps(values))
             run("package-chart", ["helm", "package", str(ROOT / "charts/runnerscout"), "--destination", str(temp)])
@@ -212,9 +219,11 @@ def main():
             if fleet["metadata"]["uid"] != fleet_uid:
                 raise RuntimeError("durable fleet state replaced or lost")
             manifest["checks"]["uninstall_retains_state"] = "pass"
+            helm_crd_cases.qualify(ROOT, temp, kubeconfig, archives[0], postrenderer, args.image_tag, manifest, run)
             run("delete-namespace", kubectl + ["delete", "namespace", ns, "--wait=true", "--timeout=90s"])
             manifest["checks"]["namespace_cleanup"] = "pass"
             required = {"packaged_chart_install", "app_authentication", "internal_network", "install_ready", "helm_test", "effective_rbac", "upgrade_ready", "retained_test_logs", "rollback_ready", "idle_scaleset_protocol", "uninstall_retains_state", "namespace_cleanup"}
+            required |= helm_crd_cases.REQUIRED
             if any(manifest["checks"].get(check) != "pass" for check in required):
                 raise RuntimeError("required lifecycle evidence missing")
             manifest["verdict"] = "pass"

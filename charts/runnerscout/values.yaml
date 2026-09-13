@@ -13,6 +13,11 @@ serviceAccount:
   annotations: {}
 rbac:
   create: true
+# Empty scaleSetName selects mounted JSON mode. CRD mode reads only the named
+# same-namespace Secrets listed here; include GitHub and provider references.
+crd:
+  scaleSetName: ""
+  secretNames: []
 github:
   existingSecret: ""
   mode: app
@@ -40,6 +45,7 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 podAnnotations: {}
+podLabels: {}
 networkPolicy:
   enabled: false
   egress: []

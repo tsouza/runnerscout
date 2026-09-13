@@ -1,56 +1,79 @@
 # RunnerScout Helm chart
 
-Development chart version `0.1.0-dev.1`; no released runtime image is implied.
-The current development target is Kubernetes 1.37 and maintained Helm 3.22. Supply an explicitly built image
-containing `/usr/local/bin/runnerscout` and the AWS, Azure and GCP CLIs.
-Build the local development image with `make image`; validate it with `make image-test`.
-Runtime vulnerability acceptance and arm64 execution remain pending.
+Development chart `0.1.0-dev.1`; supply an explicitly built runtime image. The
+current target is Kubernetes 1.37 and Helm 3.22. The runtime includes the AWS/GCP
+CLIs and native Azure SDK. Live GitHub-to-VM and release qualification remain open.
 
-Use `tests/values.json` as a structural example only: its dummy accounts and empty
-catalog cannot provision runners. Supply your controller configuration, image and
-an existing GitHub Secret. App mode requires `appClientID`, `appInstallationID` and
-the Secret key named by `privateKeyKey`. PAT mode uses `tokenKey`. Secret values
-are never included in Helm values. The chart does not create a GitHub scale set;
-`config.scaleSetID` must identify the dedicated scale set owned by this controller.
+## Configuration
+
+Choose one mode per release:
+
+| Mode | Values | Authentication |
+| --- | --- | --- |
+| Mounted JSON | `config`, `github` | Existing mounted GitHub Secret and provider identities/files |
+| Named CRDs | `crd.scaleSetName`, `crd.secretNames` | Same-namespace Secret references in the CRDs |
+
+The [multicloud example](../../examples/multicloud/README.md) covers all five CRDs,
+AWS/Azure/GCP, private subnets and an ordinary multistage workflow. For mounted
+mode, `tests/values.json` is a structural fixture with dummy accounts and no capacity.
+The chart does not create a GitHub scale set; use a dedicated existing one.
+
+CRD mode packages schemas under `crds/`. Helm installs missing schemas and retains
+them on uninstall; Helm does not upgrade them. Apply the reviewed schema files
+before upgrading a CRD installation. Mounted-only installations can use
+`--skip-crds` if cluster-scoped schema installation is not needed.
 
 ```sh
-make chart
 helm upgrade --install runnerscout charts/runnerscout --namespace runnerscout \
   --create-namespace --values my-values.yaml --wait --timeout 5m
 helm test runnerscout --namespace runnerscout --timeout 2m
 ```
 
-`helm test` checks configuration with the actual runtime parser. It does not
-contact GitHub, Kubernetes or a cloud provider. End-to-end job qualification is a
-separate required release gate. `make helm-integration` passed install/test/upgrade/rollback/uninstall against
-a real isolated Kubernetes 1.37 cluster and idle HTTPS GitHub fixture. The packaged-chart run also passed PAT-to-App upgrade and rollback, including the installation-token exchange path. The fixture does not validate the App JWT cryptographically and does not establish live authentication. All 12 lifecycle checks and cleanup passed with Helm 3.22 and the refreshed runtime.
+Create referenced CRDs and Secrets first. A suspended CRD intentionally reports
+unready; omit `--wait` for its initial installation as shown in the example.
+`helm test` uses the actual runtime parser: mounted mode validates offline, while
+CRD mode reads its configuration/Secret snapshot through Kubernetes. Neither
+checks live cloud authentication or provisions a VM.
 
-The chart uses one replica and Recreate replacement, namespace-scoped RBAC,
-non-root execution, a read-only root filesystem and bounded temporary storage.
-Provider credentials may be mounted from `credentialSecrets` under
-`/etc/runnerscout/providers/<Secret name>`. Configure the relevant SDK/CLI file
-paths through `env` or use workload identity through service-account annotations.
-For example use `AWS_SHARED_CREDENTIALS_FILE`, `GOOGLE_APPLICATION_CREDENTIALS`
-and Azure workload identity, environment credentials or managed identity.
+## Credentials and isolation
 
-`catalog.existingConfigMap` mounts `catalog.json` without subPath so projected
-updates can reach the controller. Update complete fresh catalogs atomically.
-The configuration checksum rolls the deployment when Helm configuration changes.
-External Secret rotation does not trigger a rollout; restart the deployment after
-rotating credentials that the client reads only at startup.
+Secret values do not belong in Helm values. `credentialSecrets` mounts provider
+files at `/etc/runnerscout/providers/<Secret name>/`. File-valued CRD references
+contain those paths, not credential contents. Workload identity can use
+`serviceAccount.annotations`, `podLabels` and `env`; the Azure workload-identity
+pod label is supported without allowing replacement of controller selector labels.
 
-Optional NetworkPolicy defaults to deny all ingress and egress when enabled.
-Supply egress rules for cluster DNS, Kubernetes API, GitHub and provider endpoints
-according to your CNI. A broad HTTPS rule is not a hostname allowlist.
+CRD Secret access is restricted to `get` on `crd.secretNames`; list/watch and
+unreferenced Secrets are excluded. Use a dedicated namespace for each isolation
+boundary. The controller runs as non-root with a read-only root filesystem,
+bounded temporary storage, one replica and Recreate replacement. `/healthz` is
+liveness; `/readyz` reflects leader/session/reconciliation readiness.
 
-Before uninstall, stop admission and reconcile every owned VM, disk and NIC.
-Helm does not delete runtime-created durable state ConfigMaps or cloud resources.
-Retain state until independent inventory confirms cleanup. Do not reuse the
-same class/scale set concurrently from another release. Restoring a changed
-provider/class binding is necessary for cleanup; deleting state is not recovery.
+Optional NetworkPolicy denies traffic until suitable rules are supplied. Allow
+cluster DNS, Kubernetes API, GitHub and provider endpoints for your CNI. Broad
+HTTPS egress is not a hostname allowlist. Controller and hook policies are
+separate so existing controller Pods keep their policy during an upgrade. CRD credentials/configuration reload
+without a pod rollout; mounted GitHub credentials require a restart after rotation.
 
-The deployment probes `/healthz` for liveness and `/readyz` for leader/session/reconciliation readiness. Cloud failures make the pod unready without causing liveness restart loops. See [runtime qualification](../../docs/runtime-image.md).
+## Upgrade, rollback and removal
 
-`config.maxRunners` can be raised or lowered during upgrades and rollback. Lower limits stop additional admission while existing allocations drain normally. Provider identity, requirements and provisioning/lifetime settings remain bound to durable state; restore their original values if a change is rejected.
+Keep the controller name/selector, configuration mode and scale-set state name
+stable across upgrades. The chart rejects changes that would strand the old
+controller's ownership. CRDs are externally managed: rolling back the chart does
+not rewind their settings or replace durable allocation state.
 
-Successful Helm test pods are deleted by default. For `helm test --logs`, first set `tests.retainPod: true`; the next test replaces the retained pod. Restore the default for automatic cleanup, or remove the retained test pod explicitly when finished debugging.
+For CRD mode, delete the RunnerScaleSet and wait for its cleanup finalizer while
+the controller and cloud credentials remain available. Then uninstall Helm. A
+read-only pre-delete hook blocks uninstall while the root or unresolved durable
+allocations remain. It does not delete CRDs, credentials or cloud resources.
+Mounted mode still requires the operator to stop admissions and verify VM/disk/NIC
+cleanup before uninstall. Durable state ConfigMaps are retained in both modes.
+
+When managing RBAC/ServiceAccounts externally, also provide `<fullname>-guard`
+with read-only access to the named RunnerScaleSet and namespaced ConfigMaps.
+Successful Helm test pods are removed; set `tests.retainPod: true` temporarily for
+`helm test --logs`. The next test replaces the retained pod.
+
+`make chart` checks both modes, strict values, RBAC and packaged schema parity.
+`make helm-integration` exercises the packaged chart against isolated Kubernetes
+and an idle HTTPS GitHub fixture. Fixtures do not qualify live runner execution.

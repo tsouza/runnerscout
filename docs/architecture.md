@@ -48,8 +48,9 @@ cloud operations, the supervisor persists a configuration checkpoint containing
 Secret references and installs a cleanup finalizer. Invalid configuration pauses
 new admissions while accepted work retains its original deadlines. Recovery can
 reconcile cloud resources without GitHub credentials. Deletion drains allocations
-and removes the finalizer only after confirmed cleanup. Chart support and complete
-examples remain tracked in [#15](https://github.com/tsouza/runnerscout/issues/15).
+and removes the finalizer only after confirmed cleanup. Helm supports both configuration modes with a read-only CRD uninstall guard;
+[worked examples](../examples/multicloud/README.md) cover the full resource graph.
+Remaining lifecycle acceptance is tracked in [#15](https://github.com/tsouza/runnerscout/issues/15).
 
 Spot retries default to disabled. Execution requires confirmed interruption,
 unambiguous runner/run/attempt correlation, bounded fresh retries and explicit

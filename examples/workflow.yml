@@ -1,11 +1,53 @@
-# Requires an independently qualified dedicated RunnerScout scale set.
-name: RunnerScout example
-on: workflow_dispatch
+name: RunnerScout multistage CI
+on:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: runnerscout-example-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  smoke:
-    runs-on: runnerscout-example
-    timeout-minutes: 5
+  verify:
+    runs-on: build
+    timeout-minutes: 20
     steps:
-      - run: uname -sm
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+  build:
+    needs: verify
+    runs-on: build
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - run: go build -trimpath -o bin/runnerscout ./cmd/runnerscout
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runnerscout-linux-amd64
+          path: bin/runnerscout
+          if-no-files-found: error
+          retention-days: 7
+  container:
+    needs: verify
+    runs-on: build
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build --tag runnerscout:ci .
+      - run: docker run --rm runnerscout:ci -h

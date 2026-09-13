@@ -3,12 +3,20 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: {{ include "runnerscout.fullname" . }}-config-test
+  labels:
+    {{- include "runnerscout.podPolicySelector" . | nindent 4 }}
+    app.kubernetes.io/component: configuration-check
   annotations:
     helm.sh/hook: test
     helm.sh/hook-delete-policy: before-hook-creation{{ if not .Values.tests.retainPod }},hook-succeeded{{ end }}
 spec:
   restartPolicy: Never
+  {{- if .Values.crd.scaleSetName }}
+  serviceAccountName: {{ include "runnerscout.sa" . }}
+  automountServiceAccountToken: true
+  {{- else }}
   automountServiceAccountToken: false
+  {{- end }}
   securityContext:
     runAsNonRoot: true
     runAsUser: 10001
@@ -24,7 +32,11 @@ spec:
       image: {{ include "runnerscout.image" . | quote }}
       imagePullPolicy: {{ .Values.image.pullPolicy }}
       command: ["/usr/local/bin/runnerscout"]
+      {{- if .Values.crd.scaleSetName }}
+      args: [{{ printf "-scale-set=%s" .Values.crd.scaleSetName | quote }}, {{ printf "-namespace=%s" .Release.Namespace | quote }}, "-check-crd"]
+      {{- else }}
       args: ["-config=/etc/runnerscout/config/config.json", "-validate"]
+      {{- end }}
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
@@ -32,6 +44,7 @@ spec:
           drop: [ALL]
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
+      {{- if not .Values.crd.scaleSetName }}
       volumeMounts:
         - name: config
           mountPath: /etc/runnerscout/config
@@ -40,4 +53,5 @@ spec:
     - name: config
       configMap:
         name: {{ include "runnerscout.fullname" . }}-config
+      {{- end }}
 {{- end }}

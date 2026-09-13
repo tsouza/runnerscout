@@ -1,0 +1,51 @@
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerClass
+metadata:
+  name: linux-amd64
+  namespace: runnerscout
+spec:
+  resources:
+    cpu: 2
+    memoryMiB: 4096
+    architecture: amd64
+    capabilities: [docker]
+  placement:
+    policy: lowest-price
+    regions: [us-east-1, eastus, us-central1]
+    maxPriceMicros: 100000
+    allowOnDemand: false
+  providers:
+    - name: aws
+    - name: azure
+    - name: gcp
+  catalogRef:
+    name: multicloud
+  networkRef:
+    name: private
+  retry:
+    enabled: false
+    maxRetries: 0
+    acknowledgeRepeatedEffects: false
+---
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerScaleSet
+metadata:
+  name: build
+  namespace: runnerscout
+spec:
+  runnerClassRef:
+    name: linux-amd64
+  github:
+    url: https://github.com/REPLACE_WITH_OWNER
+    scaleSetID: 1
+    auth:
+      mode: app
+      appClientID: Iv1.REPLACE_WITH_CLIENT_ID
+      appInstallationID: 1
+      secretRef:
+        name: github
+        key: privateKey
+  maxRunners: 2
+  provisioningSeconds: 300
+  maxLifetimeSeconds: 1800
+  suspend: true

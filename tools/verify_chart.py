@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 import unittest
 import yaml
 
@@ -37,6 +38,112 @@ def resource(docs, kind):
 
 
 class ChartContracts(unittest.TestCase):
+    def test_controller_network_policy_keeps_legacy_selector_during_upgrade(self):
+        values = copy.deepcopy(FIXTURE)
+        values["networkPolicy"] = {"enabled": True, "egress": []}
+        docs = render(values)
+        deployment = resource(docs, "Deployment")
+        policy = next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == deployment["metadata"]["name"])
+        self.assertEqual(policy["spec"]["podSelector"]["matchLabels"], deployment["spec"]["selector"]["matchLabels"], "existing Pods can lose policy coverage before rollout")
+
+    def test_hook_pods_share_network_policy_without_matching_deployment_selector(self):
+        for fixture in [FIXTURE, json.loads((CHART / "tests/crd-values.json").read_text())]:
+            values = copy.deepcopy(fixture)
+            values["networkPolicy"] = {"enabled": True, "egress": []}
+            docs = render(values)
+            deployment = resource(docs, "Deployment")
+            selector = deployment["spec"]["selector"]["matchLabels"]
+            policies = {doc["metadata"]["name"]: doc["spec"]["podSelector"] for doc in docs if doc["kind"] == "NetworkPolicy"}
+            controller_policy = policies[deployment["metadata"]["name"]]["matchLabels"]
+            hook_policy = policies[deployment["metadata"]["name"] + "-checks"]
+            self.assertEqual(hook_policy["matchExpressions"], [{"key": "app.kubernetes.io/component", "operator": "In", "values": ["configuration-check", "cleanup-check"]}])
+            for doc in docs:
+                if doc["kind"] not in {"Pod", "Job", "Deployment"}:
+                    continue
+                pod = doc if doc["kind"] == "Pod" else doc["spec"]["template"]
+                labels = pod["metadata"].get("labels", {})
+                if doc["kind"] != "Deployment":
+                    self.assertFalse(all(labels.get(key) == value for key, value in selector.items()), "hook Pod can match the controller ReplicaSet")
+                    self.assertIn(labels["app.kubernetes.io/component"], hook_policy["matchExpressions"][0]["values"])
+                policy = controller_policy if doc["kind"] == "Deployment" else hook_policy["matchLabels"]
+                self.assertTrue(all(labels.get(key) == value for key, value in policy.items()), "chart Pod escaped its NetworkPolicy")
+
+    def test_workload_identity_labels_cannot_override_controller_ownership(self):
+        values = json.loads((CHART / "tests/crd-values.json").read_text())
+        values["podLabels"] = {"azure.workload.identity/use": "true"}
+        values["serviceAccount"] = {"annotations": {"azure.workload.identity/client-id": "fixture-client"}}
+        docs = render(values)
+        template = resource(docs, "Deployment")["spec"]["template"]
+        self.assertEqual(template["metadata"]["labels"]["azure.workload.identity/use"], "true")
+        for key in ["app.kubernetes.io/name", "app.kubernetes.io/instance", "runnerscout.io/instance"]:
+            values["podLabels"] = {key: "another-controller"}
+            render(values, success=False)
+
+    def test_crd_mode_uses_named_api_configuration_and_secret_allowlist(self):
+        values = json.loads((CHART / "tests/crd-values.json").read_text())
+        docs = render(values)
+        pod = resource(docs, "Deployment")["spec"]["template"]["spec"]
+        self.assertEqual(pod["containers"][0]["args"], ["-scale-set=build", "-namespace=runnerscout-test"])
+        self.assertEqual([v["name"] for v in pod["volumes"]], ["tmp"])
+        self.assertFalse(any(d["kind"] == "ConfigMap" for d in docs))
+        rules = [rule for doc in docs if doc["kind"] == "Role" for rule in doc["rules"]]
+        secrets = [rule for rule in rules if "secrets" in rule["resources"]]
+        self.assertEqual(len(secrets), 1)
+        self.assertEqual(secrets[0]["verbs"], ["get"])
+        self.assertEqual(secrets[0]["resourceNames"], values["crd"]["secretNames"])
+        root = [rule for rule in rules if "runnerscalesets/status" in rule["resources"]]
+        self.assertEqual(root[0]["resourceNames"], ["build"])
+        hook = resource(docs, "Pod")["spec"]
+        self.assertTrue(hook["automountServiceAccountToken"])
+        self.assertIn("-check-crd", hook["containers"][0]["args"])
+
+    def test_crd_uninstall_guard_has_only_read_access(self):
+        values = json.loads((CHART / "tests/crd-values.json").read_text())
+        values["fullnameOverride"] = "r" * 63
+        docs = render(values)
+        job = resource(docs, "Job")
+        self.assertLessEqual(len(job["metadata"]["name"]), 63)
+        self.assertEqual(job["metadata"]["annotations"]["helm.sh/hook"], "pre-delete")
+        self.assertEqual(job["spec"]["backoffLimit"], 0)
+        pod = job["spec"]["template"]["spec"]
+        self.assertIn("-check-uninstall", pod["containers"][0]["args"])
+        guard = next(d for d in docs if d["kind"] == "Role" and d["metadata"]["name"] == pod["serviceAccountName"])
+        for rule in guard["rules"]:
+            self.assertLessEqual(set(rule["verbs"]), {"get", "list"})
+            self.assertLessEqual(set(rule["resources"]), {"configmaps", "runnerscalesets"})
+        self.assertTrue(pod["containers"][0]["securityContext"]["readOnlyRootFilesystem"])
+        values["rbac"] = {"create": False}
+        values["serviceAccount"] = {"create": False, "name": "existing"}
+        external = render(values)
+        self.assertFalse(any(d["kind"] in {"Role", "RoleBinding", "ServiceAccount"} for d in external))
+
+    def test_crd_values_reject_mixed_modes_and_unbounded_secret_access(self):
+        fixture = json.loads((CHART / "tests/crd-values.json").read_text())
+        for change in [
+            {"crd": {"scaleSetName": "../other"}}, {"crd": {"secretNames": []}},
+            {"crd": {"secretNames": ["github", "github"]}},
+            {"crd": {"secretNames": ["../other"]}}, {"crd": {"scaleSetName": ""}},
+            {"config": {"name": "mixed"}}, {"github": {"existingSecret": "mixed"}},
+            {"github": {"appClientID": "mixed"}}, {"catalog": {"existingConfigMap": "mixed"}},
+        ]:
+            with self.subTest(change=change):
+                values = copy.deepcopy(fixture)
+                for key, value in change.items():
+                    values.setdefault(key, {}).update(value)
+                render(values, success=False)
+
+    def test_packaged_crds_match_generated_schemas(self):
+        schemas = sorted((ROOT / "config/crd/bases").glob("*.yaml"))
+        self.assertEqual(len(schemas), 5)
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["helm", "package", str(CHART), "--destination", tmp], check=True, capture_output=True)
+            with tarfile.open(next(Path(tmp).glob("*.tgz"))) as package:
+                members = [name for name in package.getnames() if "/crds/" in name and name.endswith(".yaml")]
+                self.assertEqual(len(members), 5)
+                for schema in schemas:
+                    self.assertEqual((CHART / "crds" / schema.name).read_bytes(), schema.read_bytes())
+                    self.assertEqual(package.extractfile("runnerscout/crds/" + schema.name).read(), schema.read_bytes())
+
     def test_rendered_multicloud_config_accepted_by_controller(self):
         docs = render(FIXTURE)
         config = json.loads(resource(docs, "ConfigMap")["data"]["config.json"])
@@ -122,10 +229,11 @@ class ChartContracts(unittest.TestCase):
         values["networkPolicy"] = {"enabled": True, "egress": []}
         values["image"]["digest"] = "sha256:" + "a" * 64
         docs = render(values)
-        policy = resource(docs, "NetworkPolicy")["spec"]
+        deployment = resource(docs, "Deployment")
+        policy = next(d["spec"] for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == deployment["metadata"]["name"])
         self.assertEqual(policy["ingress"], [])
         self.assertEqual(policy["egress"], [])
-        self.assertEqual(policy["podSelector"]["matchLabels"], resource(docs, "Deployment")["spec"]["selector"]["matchLabels"])
+        self.assertEqual(policy["podSelector"]["matchLabels"], deployment["spec"]["selector"]["matchLabels"])
         self.assertIn("@sha256:", resource(docs, "Deployment")["spec"]["template"]["spec"]["containers"][0]["image"])
 
     def test_invalid_values_fail_closed(self):
