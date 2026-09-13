@@ -57,6 +57,45 @@ func TestAWSPricesObserverBuildsFromConfiguredAWSProvider(t *testing.T) {
 	}
 }
 
+func azurePriceRefreshConfig(enabled bool, providers map[string]provider.Config, requirementProviders []string) operator.Config {
+	return operator.Config{Name: "test", Namespace: "test", GitHubURL: "https://github.com/tsouza/runnerscout", ScaleSetID: 1, MaxRunners: 2, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Requirements:      placement.Requirements{CPU: 1, MemoryMiB: 1, Architecture: "amd64", MaxPriceMicros: 100, Providers: requirementProviders, Regions: []string{"r"}, Policy: "lowest-price"},
+		Providers:         providers,
+		AzurePriceRefresh: enabled,
+	}
+}
+
+func TestAzurePricesObserverNilWhenDisabled(t *testing.T) {
+	cfg := azurePriceRefreshConfig(false, map[string]provider.Config{"azure": {Kind: "azure", Owner: "test", Subnet: "private", Subscription: "sub", ResourceGroup: "rg", SecurityGroup: "sg", SSHPublicKey: "ssh-ed25519 AAAA"}}, []string{"azure"})
+	controller := operator.New(cfg, fake.NewClientset(), nil)
+	observer, err := azurePricesObserver(controller, cfg)
+	if err != nil || observer != nil {
+		t.Fatal("disabled price refresh still built an observer", observer, err)
+	}
+}
+
+func TestAzurePricesObserverRequiresConfiguredAzureProvider(t *testing.T) {
+	cfg := azurePriceRefreshConfig(true, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	controller := operator.New(cfg, fake.NewClientset(), nil)
+	if observer, err := azurePricesObserver(controller, cfg); err == nil || observer != nil {
+		t.Fatal("expected an error without a configured \"azure\" provider", observer, err)
+	}
+}
+
+func TestAzurePricesObserverBuildsFromConfiguredAzureProvider(t *testing.T) {
+	cfg := azurePriceRefreshConfig(true, map[string]provider.Config{"azure": {Kind: "azure", Owner: "test", Subnet: "private", Subscription: "sub", ResourceGroup: "rg", SecurityGroup: "sg", SSHPublicKey: "ssh-ed25519 AAAA"}}, []string{"azure"})
+	credentials := map[string]map[string]string{"azure": {"AZURE_CLIENT_ID": "fixture-client"}}
+	controller, cleanup, err := operator.NewWithCredentials(cfg, fake.NewClientset(), nil, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	observer, err := azurePricesObserver(controller, cfg)
+	if err != nil || observer == nil {
+		t.Fatal("expected a configured observer", observer, err)
+	}
+}
+
 func TestCRDCommandRejectsMixedConfigurationAndAuthentication(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"-namespace=test"}, {"-scale-set=build"}, {"-scale-set=../build", "-namespace=test"},
