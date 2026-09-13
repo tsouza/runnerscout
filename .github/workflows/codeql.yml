@@ -28,12 +28,12 @@ jobs:
               - '!**/*.md'
   analyze:
     needs: changes
-    # needs.changes.result != 'success' defaults to running this job
-    # whenever the changes job itself did not cleanly resolve (see ci.yml's
-    # identical reasoning). A scheduled run's purpose is a periodic full
-    # scan regardless of what its nominal "last commit" diff contains, so
-    # it always runs too.
-    if: github.event_name == 'schedule' || needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
+    # No longer a required merge gate (see ci.yml and
+    # docs/qualification.md): runs on push to main (post-merge) and on the
+    # weekly schedule, never on pull_request. needs.changes.result !=
+    # 'success' still defaults to running whenever the changes job itself
+    # did not cleanly resolve, mirroring ci.yml's identical reasoning.
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

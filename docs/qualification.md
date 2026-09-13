@@ -15,16 +15,31 @@ own test suite.
 
 Editable local tooling is not evidence on its own; enforcement that a
 candidate cannot bypass is. `main` is protected by a GitHub Ruleset
-(`main: pull requests and verified checks`, verified 2026-09-13) requiring
-every one of the seven CI checks to pass and forbidding force-push and
+(`main: pull requests and verified checks`, verified 2026-09-13, its
+check suite split 2026-09-13 — see below) forbidding force-push and
 deletion, with `current_user_can_bypass: never` — including for the
-repository owner's own account. That non-bypassable CI run, not any local
-`make verify` invocation, is this project's evaluator authority: CQ-01
-through CQ-12 are qualified by adding an adversarial test for each to the
-required CI suite (see the Provenance table below for the tests that
-already cover most of them), so passing them is enforced the same way for
-every change regardless of who authored it, and cannot be waived by
-editing a local script.
+repository owner's own account.
+
+That Ruleset's `required_status_checks` gate a merge on two fast checks
+only, `verify` and `vulnerability` (each well under two minutes): every
+PR gets fast feedback regardless of size, and a small or docs-only change
+is never charged the cost of a full cloud-adjacent suite just to land.
+The other five checks — `kubernetes-integration`, `analyze` (CodeQL),
+`cloud-emulators`, `chart`, `runtime-image` — are not a merge gate; they
+run automatically on every push to `main`, immediately after a merge, so
+`main` stays continuously and non-bypassably validated. Nobody can skip
+these running on `main`, but a merge is no longer blocked on them first:
+a regression they catch is fixed forward on `main` within roughly the run
+time that check used to add to every PR, rather than never having landed.
+This is a deliberate trade against the previous all-seven-before-merge
+model — see
+[qualification.background.md](qualification.background.md) for why.
+
+CQ-01 through CQ-12 are qualified by an adversarial test for each,
+covered by this checked suite (see the Provenance table below for the
+tests that already cover most of them) — non-bypassable in the sense that
+running them on `main` cannot be skipped or waived by editing a local
+script, not in the sense of blocking every PR's merge on them.
 
 ## Challenges
 

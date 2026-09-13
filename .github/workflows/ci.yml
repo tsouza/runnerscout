@@ -27,13 +27,11 @@ jobs:
           # pattern, never an allow-list of "safe" paths, so anything this
           # filter has not seen before (a renamed file, a new file type, a
           # workflow edit, a chart/Dockerfile change) defaults to code:
-          # true and the full required-check suite still runs. A required
-          # GitHub Actions check that is skipped (rather than run and
-          # green) still satisfies a Ruleset's required-status-check rule,
-          # so this filter being wrong in the unsafe direction would
-          # silently weaken this repo's evaluator authority
-          # (docs/qualification.md) - it must only ever skip when the diff
-          # provably cannot contain anything the skipped jobs check.
+          # true and the full post-merge suite still runs. This only
+          # affects the push-to-main run below (see each gated job's own
+          # `if:`), not merge eligibility - see docs/qualification.md's
+          # Evaluator authority section for what is and isn't a PR merge
+          # gate now.
           filters: |
             code:
               - '!**/*.md'
@@ -88,12 +86,17 @@ jobs:
   kubernetes-integration:
     name: kubernetes-integration
     needs: changes
-    # needs.changes.result != 'success' defaults to running this job
-    # whenever the changes job itself did not cleanly resolve (failed,
-    # cancelled) - a custom `if:` replaces the default success() gate, so
-    # without this, a failed changes job would leave outputs.code unset
-    # and silently skip this required check instead of safely running it.
-    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
+    # This job is no longer a required merge gate (see the Ruleset and
+    # docs/qualification.md): it runs only on push to main, immediately
+    # after a merge, never blocking a PR's own merge. github.event_name ==
+    # 'push' is checked first specifically so a pull_request run never
+    # reaches needs.changes.outputs.code at all. needs.changes.result !=
+    # 'success' still defaults to running this job whenever the changes job
+    # itself did not cleanly resolve (failed, cancelled) on a push run - a
+    # custom `if:` replaces the default success() gate, so without this a
+    # failed changes job would leave outputs.code unset and silently skip
+    # this check instead of safely running it.
+    if: github.event_name == 'push' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -128,12 +131,17 @@ jobs:
   cloud-emulators:
     name: cloud-emulators
     needs: changes
-    # needs.changes.result != 'success' defaults to running this job
-    # whenever the changes job itself did not cleanly resolve (failed,
-    # cancelled) - a custom `if:` replaces the default success() gate, so
-    # without this, a failed changes job would leave outputs.code unset
-    # and silently skip this required check instead of safely running it.
-    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
+    # This job is no longer a required merge gate (see the Ruleset and
+    # docs/qualification.md): it runs only on push to main, immediately
+    # after a merge, never blocking a PR's own merge. github.event_name ==
+    # 'push' is checked first specifically so a pull_request run never
+    # reaches needs.changes.outputs.code at all. needs.changes.result !=
+    # 'success' still defaults to running this job whenever the changes job
+    # itself did not cleanly resolve (failed, cancelled) on a push run - a
+    # custom `if:` replaces the default success() gate, so without this a
+    # failed changes job would leave outputs.code unset and silently skip
+    # this check instead of safely running it.
+    if: github.event_name == 'push' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -162,12 +170,17 @@ jobs:
   chart:
     name: chart
     needs: changes
-    # needs.changes.result != 'success' defaults to running this job
-    # whenever the changes job itself did not cleanly resolve (failed,
-    # cancelled) - a custom `if:` replaces the default success() gate, so
-    # without this, a failed changes job would leave outputs.code unset
-    # and silently skip this required check instead of safely running it.
-    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
+    # This job is no longer a required merge gate (see the Ruleset and
+    # docs/qualification.md): it runs only on push to main, immediately
+    # after a merge, never blocking a PR's own merge. github.event_name ==
+    # 'push' is checked first specifically so a pull_request run never
+    # reaches needs.changes.outputs.code at all. needs.changes.result !=
+    # 'success' still defaults to running this job whenever the changes job
+    # itself did not cleanly resolve (failed, cancelled) on a push run - a
+    # custom `if:` replaces the default success() gate, so without this a
+    # failed changes job would leave outputs.code unset and silently skip
+    # this check instead of safely running it.
+    if: github.event_name == 'push' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -198,12 +211,17 @@ jobs:
   runtime-image:
     name: runtime-image
     needs: changes
-    # needs.changes.result != 'success' defaults to running this job
-    # whenever the changes job itself did not cleanly resolve (failed,
-    # cancelled) - a custom `if:` replaces the default success() gate, so
-    # without this, a failed changes job would leave outputs.code unset
-    # and silently skip this required check instead of safely running it.
-    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
+    # This job is no longer a required merge gate (see the Ruleset and
+    # docs/qualification.md): it runs only on push to main, immediately
+    # after a merge, never blocking a PR's own merge. github.event_name ==
+    # 'push' is checked first specifically so a pull_request run never
+    # reaches needs.changes.outputs.code at all. needs.changes.result !=
+    # 'success' still defaults to running this job whenever the changes job
+    # itself did not cleanly resolve (failed, cancelled) on a push run - a
+    # custom `if:` replaces the default success() gate, so without this a
+    # failed changes job would leave outputs.code unset and silently skip
+    # this check instead of safely running it.
+    if: github.event_name == 'push' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
