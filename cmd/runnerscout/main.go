@@ -6,12 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/actions/scaleset"
-	"github.com/tsouza/runnerscout/internal/health"
-	"github.com/tsouza/runnerscout/internal/operator"
 	"io"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"net"
 	"net/http"
 	"os"
@@ -19,117 +14,188 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/actions/scaleset"
+	"github.com/tsouza/runnerscout/internal/configapi"
+	"github.com/tsouza/runnerscout/internal/health"
+	"github.com/tsouza/runnerscout/internal/operator"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
-func run() error {
-	healthAddress := flag.String("health-address", ":8080", "HTTP liveness/readiness listen address")
-	configPath := flag.String("config", "", "JSON configuration file")
-	validate := flag.Bool("validate", false, "validate configuration without contacting cloud or GitHub")
-	tokenPath := flag.String("github-token-file", "", "mounted GitHub token file (never passed as a token argument)")
-	appID := flag.String("github-app-client-id", "", "GitHub App client ID")
-	installationID := flag.Int64("github-app-installation-id", 0, "GitHub App installation ID")
-	appKey := flag.String("github-app-key-file", "", "mounted GitHub App private-key file")
-	flag.Parse()
-	if *configPath == "" {
-		return errors.New("-config required")
+type options struct {
+	healthAddress, configPath, namespace, scaleSet string
+	tokenPath, appID, appKey                       string
+	installationID                                 int64
+	validate                                       bool
+}
+
+func parseOptions(args []string) (options, error) {
+	var o options
+	flags := flag.NewFlagSet("runnerscout", flag.ContinueOnError)
+	flags.StringVar(&o.healthAddress, "health-address", ":8080", "HTTP liveness/readiness listen address")
+	flags.StringVar(&o.configPath, "config", "", "mounted JSON configuration file")
+	flags.StringVar(&o.namespace, "namespace", "", "namespace of the RunnerScaleSet CRD")
+	flags.StringVar(&o.scaleSet, "scale-set", "", "name of the RunnerScaleSet CRD to reconcile")
+	flags.BoolVar(&o.validate, "validate", false, "validate mounted configuration without external operations")
+	flags.StringVar(&o.tokenPath, "github-token-file", "", "mounted GitHub token file")
+	flags.StringVar(&o.appID, "github-app-client-id", "", "GitHub App client ID")
+	flags.Int64Var(&o.installationID, "github-app-installation-id", 0, "GitHub App installation ID")
+	flags.StringVar(&o.appKey, "github-app-key-file", "", "mounted GitHub App private-key file")
+	if err := flags.Parse(args); err != nil {
+		return o, err
 	}
-	f, e := os.Open(*configPath)
-	if e != nil {
-		return e
+	if flags.NArg() != 0 {
+		return o, errors.New("unexpected positional arguments")
 	}
-	defer f.Close()
-	d := json.NewDecoder(io.LimitReader(f, 4<<20))
-	d.DisallowUnknownFields()
+	if o.scaleSet != "" {
+		if o.configPath != "" || o.tokenPath != "" || o.appID != "" || o.installationID != 0 || o.appKey != "" || o.validate {
+			return o, errors.New("-scale-set uses CRD configuration and Secret references; mounted configuration/authentication flags and -validate are incompatible")
+		}
+		if len(validation.IsDNS1123Label(o.scaleSet)) != 0 || len(validation.IsDNS1123Label(o.namespace)) != 0 {
+			return o, errors.New("-scale-set and -namespace must be valid Kubernetes names")
+		}
+	} else if o.configPath == "" || o.namespace != "" {
+		return o, errors.New("provide either -config or both -scale-set and -namespace")
+	}
+	return o, nil
+}
+
+func readConfig(path string) (operator.Config, error) {
 	var cfg operator.Config
-	if e = d.Decode(&cfg); e != nil {
-		return e
+	file, err := os.Open(path)
+	if err != nil {
+		return cfg, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 4<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cfg); err != nil {
+		return cfg, err
 	}
 	var extra any
-	if e = d.Decode(&extra); e != io.EOF {
-		return errors.New("configuration must contain one JSON object")
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return cfg, errors.New("configuration must contain one JSON object")
 	}
-	if e = cfg.Validate(); e != nil {
-		return e
-	}
-	if *validate {
-		fmt.Println("configuration valid; no external operations performed")
-		return nil
-	}
+	return cfg, cfg.Validate()
+}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+func githubClient(o options, cfg operator.Config) (*scaleset.Client, error) {
+	system := scaleset.SystemInfo{System: "runnerscout", Version: "development"}
+	var client *scaleset.Client
+	var err error
+	if o.appID != "" || o.installationID != 0 || o.appKey != "" {
+		if o.appID == "" || o.installationID <= 0 || o.appKey == "" || o.tokenPath != "" {
+			return nil, errors.New("complete GitHub App settings required; cannot combine App and PAT")
+		}
+		key, readErr := os.ReadFile(o.appKey)
+		if readErr != nil || len(key) == 0 {
+			return nil, errors.New("cannot read GitHub App private-key file")
+		}
+		client, err = scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{GitHubConfigURL: cfg.GitHubURL, GitHubAppAuth: scaleset.GitHubAppAuth{ClientID: o.appID, InstallationID: o.installationID, PrivateKey: string(key)}, SystemInfo: system})
+	} else {
+		if o.tokenPath == "" {
+			return nil, errors.New("mounted GitHub App credentials or token file required")
+		}
+		token, readErr := os.ReadFile(o.tokenPath)
+		if readErr != nil || strings.TrimSpace(string(token)) == "" {
+			return nil, errors.New("cannot read GitHub token file")
+		}
+		client, err = scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: cfg.GitHubURL, PersonalAccessToken: strings.TrimSpace(string(token)), SystemInfo: system})
+	}
+	if err != nil {
+		return nil, errors.New("GitHub client initialization failed")
+	}
+	return client, nil
+}
+
+func withHealth(ctx context.Context, address string, run func(context.Context, *health.Status) error) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var status health.Status
-	listener, e := net.Listen("tcp", *healthAddress)
-	if e != nil {
-		return fmt.Errorf("health listener: %w", e)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("health listener: %w", err)
 	}
 	server := &http.Server{Handler: status.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
-	defer server.Close()
 	healthErrors := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			healthErrors <- err
 			cancel()
 		}
 	}()
-	var github *scaleset.Client
-	system := scaleset.SystemInfo{System: "runnerscout", Version: "development"}
-	if *appID != "" || *installationID != 0 || *appKey != "" {
-		if *tokenPath != "" || *appID == "" || *installationID <= 0 || *appKey == "" {
-			return errors.New("provide all GitHub App settings, without a PAT")
-		}
-		key, readErr := os.ReadFile(*appKey)
-		if readErr != nil || len(key) == 0 {
-			return errors.New("cannot read GitHub App key file")
-		}
-		github, e = scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{GitHubConfigURL: cfg.GitHubURL, GitHubAppAuth: scaleset.GitHubAppAuth{ClientID: *appID, InstallationID: *installationID, PrivateKey: string(key)}, SystemInfo: system})
-	} else {
-		if *tokenPath == "" {
-			return errors.New("mounted GitHub App credentials or token file required")
-		}
-		token, readErr := os.ReadFile(*tokenPath)
-		if readErr != nil || strings.TrimSpace(string(token)) == "" {
-			return errors.New("cannot read GitHub token file")
-		}
-		github, e = scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: cfg.GitHubURL, PersonalAccessToken: strings.TrimSpace(string(token)), SystemInfo: system})
-	}
-	if e != nil {
-		return errors.New("GitHub client initialization failed")
-	}
-
-	kc, e := rest.InClusterConfig()
-	if e != nil {
-		return errors.New("in-cluster Kubernetes configuration required")
-	}
-	kc.Timeout = 30_000_000_000
-	k, e := kubernetes.NewForConfig(kc)
-	if e != nil {
-		return e
-	}
-	controller, cleanup, e := operator.NewWithCredentials(cfg, k, github, nil)
-	if e != nil {
-		return e
-	}
-	defer cleanup()
-	controller.Readiness = status.SetReady
-	err := controller.Run(ctx)
+	defer func() { _ = server.Close(); <-done }()
+	err = run(ctx, &status)
 	status.SetReady(false)
-	if cleanupErr := cleanup(); cleanupErr != nil {
-		return errors.New("provider credential cache cleanup incomplete")
-	}
 	select {
 	case healthErr := <-healthErrors:
-		return fmt.Errorf("health server: %w", healthErr)
+		return errors.Join(err, fmt.Errorf("health server: %w", healthErr))
 	default:
-	}
-	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
-		return nil
 	}
 	return err
 }
+
+func run(args []string) error {
+	o, err := parseOptions(args)
+	if err != nil {
+		return err
+	}
+	var cfg operator.Config
+	if o.configPath != "" {
+		cfg, err = readConfig(o.configPath)
+		if err != nil {
+			return err
+		}
+		if o.validate {
+			fmt.Println("configuration valid; no external operations performed")
+			return nil
+		}
+	}
+	kc, err := rest.InClusterConfig()
+	if err != nil {
+		return errors.New("in-cluster Kubernetes configuration required")
+	}
+	kc.Timeout = 30 * time.Second
+	client, err := kubernetes.NewForConfig(kc)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return withHealth(ctx, o.healthAddress, func(ctx context.Context, status *health.Status) error {
+		if o.scaleSet != "" {
+			dynamicClient, err := dynamic.NewForConfig(kc)
+			if err != nil {
+				return err
+			}
+			controller := &configapi.Runtime{Namespace: o.namespace, Name: o.scaleSet, Client: client, Dynamic: dynamicClient, Readiness: status.SetReady}
+			return controller.Run(ctx)
+		}
+		github, err := githubClient(o, cfg)
+		if err != nil {
+			return err
+		}
+		controller, cleanup, err := operator.NewWithCredentials(cfg, client, github, nil)
+		if err != nil {
+			return err
+		}
+		controller.Readiness = status.SetReady
+		err = controller.Run(ctx)
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			return errors.Join(err, errors.New("provider credential cache cleanup incomplete"))
+		}
+		return err
+	})
+}
+
 func main() {
-	if e := run(); e != nil {
-		fmt.Fprintln(os.Stderr, e)
+	if err := run(os.Args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) && err != context.Canceled {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }

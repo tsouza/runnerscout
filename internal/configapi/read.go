@@ -93,17 +93,26 @@ func Read(ctx context.Context, reader Reader, namespace, name string) (Snapshot,
 			return s, nil, err
 		}
 	}
-	for _, rev := range revisions {
-		u, err := reader.Get(ctx, rev.Resource, namespace, rev.Name)
-		if err != nil {
-			return s, nil, errors.New("cannot verify configuration snapshot")
-		}
-		if string(u.GetUID()) != rev.UID || u.GetResourceVersion() != rev.ResourceVersion || u.GetNamespace() != namespace || u.GetName() != rev.Name {
-			return s, nil, ErrChanged
-		}
+	if err := Recheck(ctx, reader, namespace, revisions); err != nil {
+		return s, nil, err
 	}
 	if _, err := Compile(s); err != nil {
 		return s, nil, err
 	}
 	return s, revisions, nil
+}
+
+// Recheck also lets the runtime verify configuration after collecting Secrets.
+// This establishes an overlapping stable interval across both dependency sets.
+func Recheck(ctx context.Context, reader Reader, namespace string, revisions []Revision) error {
+	for _, rev := range revisions {
+		u, err := reader.Get(ctx, rev.Resource, namespace, rev.Name)
+		if err != nil {
+			return errors.New("cannot verify configuration snapshot")
+		}
+		if string(u.GetUID()) != rev.UID || u.GetResourceVersion() != rev.ResourceVersion || u.GetNamespace() != namespace || u.GetName() != rev.Name {
+			return ErrChanged
+		}
+	}
+	return nil
 }

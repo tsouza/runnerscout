@@ -38,12 +38,18 @@ be absent. Lowering maxRunners drains naturally without discarding allocations.
 
 ## Configuration surface
 
-The runtime uses mounted configuration and an atomically refreshed catalog file.
-The experimental `runnerscout.io/v1alpha1` schemas define ProviderConfig,
-RunnerClass, RunnerScaleSet, CapacityCatalog and NetworkProfile. References stay
-in one namespace; the reader checks stable UID/resourceVersion snapshots.
-CRD-driven runtime reconciliation and chart installation are not yet implemented
-([#15](https://github.com/tsouza/runnerscout/issues/15)).
+The controller accepts mounted JSON or one named RunnerScaleSet CRD. The
+`runnerscout.io/v1alpha1` API defines ProviderConfig, RunnerClass, RunnerScaleSet,
+CapacityCatalog and NetworkProfile. References stay in one namespace; the reader
+rechecks object and Secret identities before accepting a configuration snapshot.
+
+One Lease covers the CRD supervisor, session workers and finalization. Before
+cloud operations, the supervisor persists a configuration checkpoint containing
+Secret references and installs a cleanup finalizer. Invalid configuration pauses
+new admissions while accepted work retains its original deadlines. Recovery can
+reconcile cloud resources without GitHub credentials. Deletion drains allocations
+and removes the finalizer only after confirmed cleanup. Chart support and complete
+examples remain tracked in [#15](https://github.com/tsouza/runnerscout/issues/15).
 
 Spot retries default to disabled. Execution requires confirmed interruption,
 unambiguous runner/run/attempt correlation, bounded fresh retries and explicit

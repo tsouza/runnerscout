@@ -3,6 +3,7 @@ package configapi
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	api "github.com/tsouza/runnerscout/api/v1alpha1"
@@ -16,6 +17,13 @@ import (
 type Credentials struct {
 	GitHub    []byte                       `json:"-"`
 	Providers map[string]map[string]string `json:"-"`
+	Revisions []SecretRevision             `json:"-"`
+}
+
+type SecretRevision struct {
+	Name            string
+	UID             string
+	ResourceVersion string
 }
 
 func (Credentials) String() string   { return "credentials (redacted)" }
@@ -26,6 +34,16 @@ func (Credentials) GoString() string { return "credentials (redacted)" }
 // File-valued environment variables reference operator-mounted paths; their
 // Secret values are not interpreted as file contents or executable commands.
 func ResolveSecrets(ctx context.Context, client typed.SecretInterface, resolved Resolved) (Credentials, error) {
+	return resolveSecrets(ctx, client, resolved, true)
+}
+
+// ResolveCleanupSecrets reads cloud credentials without requiring GitHub access.
+// It is only for a worker already in monotonic drain mode.
+func ResolveCleanupSecrets(ctx context.Context, client typed.SecretInterface, resolved Resolved) (Credentials, error) {
+	return resolveSecrets(ctx, client, resolved, false)
+}
+
+func resolveSecrets(ctx context.Context, client typed.SecretInterface, resolved Resolved, github bool) (Credentials, error) {
 	result := Credentials{Providers: map[string]map[string]string{}}
 	objects := map[string]*corev1.Secret{}
 	read := func(ref api.SecretKeyReference) ([]byte, error) {
@@ -50,15 +68,17 @@ func ResolveSecrets(ctx context.Context, client typed.SecretInterface, resolved 
 		}
 		return append([]byte(nil), value...), nil
 	}
-	var err error
-	result.GitHub, err = read(resolved.Auth.SecretRef)
-	if err != nil {
-		return Credentials{}, err
-	}
-	if resolved.Auth.Mode == "pat" {
-		result.GitHub = []byte(strings.TrimSpace(string(result.GitHub)))
-		if len(result.GitHub) == 0 || strings.ContainsAny(string(result.GitHub), "\x00\r\n") {
-			return Credentials{}, errors.New("invalid GitHub token")
+	if github {
+		var err error
+		result.GitHub, err = read(resolved.Auth.SecretRef)
+		if err != nil {
+			return Credentials{}, err
+		}
+		if resolved.Auth.Mode == "pat" {
+			result.GitHub = []byte(strings.TrimSpace(string(result.GitHub)))
+			if len(result.GitHub) == 0 || strings.ContainsAny(string(result.GitHub), "\x00\r\n") {
+				return Credentials{}, errors.New("invalid GitHub token")
+			}
 		}
 	}
 	for name, refs := range resolved.Credentials {
@@ -89,6 +109,8 @@ func ResolveSecrets(ctx context.Context, client typed.SecretInterface, resolved 
 		if current.Namespace != old.Namespace || current.Name != old.Name || current.UID != old.UID || current.ResourceVersion != old.ResourceVersion || current.DeletionTimestamp != nil {
 			return Credentials{}, ErrChanged
 		}
+		result.Revisions = append(result.Revisions, SecretRevision{Name: name, UID: string(current.UID), ResourceVersion: current.ResourceVersion})
 	}
+	slices.SortFunc(result.Revisions, func(a, b SecretRevision) int { return strings.Compare(a.Name, b.Name) })
 	return result, nil
 }
