@@ -18,10 +18,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
+          save: 'true'
       - run: make verify-generated
       - run: make verify
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -40,10 +46,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   kubernetes-integration:
@@ -55,10 +66,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
       - name: Create isolated Kubernetes
         run: go run sigs.k8s.io/kind@v0.33.0 create cluster --name runnerscout-ci --image kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5 --kubeconfig "$RUNNER_TEMP/kubeconfig" --wait 120s
       - name: Verify persistence, CAS and CRDs
@@ -83,10 +99,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
       - run: make emulators
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -105,10 +126,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
       - name: Install pinned chart tools
         run: |
           curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
@@ -129,10 +155,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
       - name: Install pinned Helm and kubectl
         run: |
           curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.22.0-linux-amd64.tar.gz --output "$RUNNER_TEMP/helm.tar.gz"
