@@ -149,6 +149,8 @@ def main():
             values = json.loads((ROOT / "charts/runnerscout/tests/values.json").read_text())
             values["image"] = {"repository": "runnerscout", "tag": args.image_tag, "pullPolicy": "Never"}
             values["fullnameOverride"] = "runnerscout"
+            # Exercise NetworkPolicy resources; this fixture does not claim CNI enforcement.
+            values["networkPolicy"] = {"enabled": True, "egress": [{}]}
             values_path = temp / "values.json"
             values_path.write_text(json.dumps(values))
             run("package-chart", ["helm", "package", str(ROOT / "charts/runnerscout"), "--destination", str(temp)])

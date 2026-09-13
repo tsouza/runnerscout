@@ -62,8 +62,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- $oldName = default "" $oldConfig.name -}}
 {{- end -}}
 {{- end -}}
-{{- if or (ne $oldMode (include "runnerscout.mode" $)) (ne $oldName (include "runnerscout.stateName" $)) -}}
-{{- fail "configuration mode and scale-set state name cannot change during upgrade; finish existing cleanup before reinstalling" -}}
+{{- if or (ne $existing.metadata.name (include "runnerscout.fullname" $)) (ne (index $existing.spec.selector.matchLabels "app.kubernetes.io/name") (include "runnerscout.name" $)) (ne $oldMode (include "runnerscout.mode" $)) (ne $oldName (include "runnerscout.stateName" $)) -}}
+{{- fail "controller identity, configuration mode and scale-set state name cannot change during upgrade; finish existing cleanup before reinstalling" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

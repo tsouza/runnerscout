@@ -51,13 +51,14 @@ liveness; `/readyz` reflects leader/session/reconciliation readiness.
 
 Optional NetworkPolicy denies traffic until suitable rules are supplied. Allow
 cluster DNS, Kubernetes API, GitHub and provider endpoints for your CNI. Broad
-HTTPS egress is not a hostname allowlist. CRD credentials/configuration reload
+HTTPS egress is not a hostname allowlist. Controller and hook policies are
+separate so existing controller Pods keep their policy during an upgrade. CRD credentials/configuration reload
 without a pod rollout; mounted GitHub credentials require a restart after rotation.
 
 ## Upgrade, rollback and removal
 
-Keep configuration mode and scale-set state name stable across upgrades, even
-when renaming the Deployment. The chart rejects changes that would strand the old
+Keep the controller name/selector, configuration mode and scale-set state name
+stable across upgrades. The chart rejects changes that would strand the old
 controller's ownership. CRDs are externally managed: rolling back the chart does
 not rewind their settings or replace durable allocation state.
 
