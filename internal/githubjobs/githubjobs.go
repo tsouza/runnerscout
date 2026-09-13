@@ -58,6 +58,15 @@ type attemptJobsResponse struct {
 	Jobs []attemptJob `json:"jobs"`
 }
 
+// ErrAttemptNotFound reports GitHub's own HTTP 404 for the attempt-jobs
+// endpoint: this specific run attempt does not exist. It is the only REST
+// signal that distinguishes "this attempt was never created" from any other
+// transport or server failure, which stays genuinely ambiguous - callers
+// reconciling an uncertain rerun rely on that distinction (see
+// internal/operator's reconcilePendingRerun) rather than treating every
+// non-200 response the same way.
+var ErrAttemptNotFound = errors.New("GitHub reports no such workflow run attempt")
+
 // AttemptJobs fetches the jobs recorded for one attempt of one workflow run.
 func (c *Client) AttemptJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]recovery.RESTJob, error) {
 	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs", owner, repo, runID, attempt)
@@ -66,6 +75,9 @@ func (c *Client) AttemptJobs(ctx context.Context, owner, repo string, runID int6
 		return nil, err
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, ErrAttemptNotFound
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub attempt jobs request failed with status %d", response.StatusCode)
 	}
