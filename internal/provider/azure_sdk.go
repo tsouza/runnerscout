@@ -156,6 +156,48 @@ func (a *AzureSDK) terminal(ctx context.Context, c Config, id string) (bool, err
 		return false, nil
 	}
 }
+
+// azureCapacityErrorCodes are ARM allocation-failure codes that definitively
+// mean no compute capacity was available, never a quota, permission or
+// transient failure a different pool could not resolve.
+var azureCapacityErrorCodes = map[string]bool{
+	"OverconstrainedAllocationRequest":      true,
+	"OverconstrainedZonalAllocationRequest": true,
+	"AllocationFailed":                      true,
+	"ZonalAllocationFailed":                 true,
+}
+
+func azureCapacityFailure(err *armdeployments.ErrorResponse) bool {
+	if err == nil {
+		return false
+	}
+	if err.Code != nil && azureCapacityErrorCodes[*err.Code] {
+		return true
+	}
+	for _, detail := range err.Details {
+		if azureCapacityFailure(detail) {
+			return true
+		}
+	}
+	return false
+}
+
+// deploymentCapacityRejected reports whether a terminal Failed deployment's
+// structured error definitively identifies a capacity rejection. Any
+// ambiguity - an unavailable observation, a non-Failed state or an
+// unrecognized code - returns false so the caller keeps the unknown-effect
+// classification instead.
+func (a *AzureSDK) deploymentCapacityRejected(ctx context.Context, c Config, id string) bool {
+	client, err := a.deployments(c)
+	if err != nil {
+		return false
+	}
+	result, err := client.Get(ctx, c.ResourceGroup, id, nil)
+	if err != nil || result.Properties == nil || result.Properties.ProvisioningState == nil || *result.Properties.ProvisioningState != "Failed" {
+		return false
+	}
+	return azureCapacityFailure(result.Properties.Error)
+}
 func (a *AzureSDK) deploy(ctx context.Context, c Config, id string, template map[string]any, bootstrap string) error {
 	client, err := a.deployments(c)
 	if err != nil {
