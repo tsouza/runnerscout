@@ -25,7 +25,7 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
    image OCI archive, Helm chart package, SPDX SBOM and checksums as workflow
    artifacts. `release-build.yml` keeps its standalone `workflow_dispatch`
    trigger for ad hoc manual builds against any commit, but that path only
-   ever runs the `build` job, never the `publish` job below.
+   ever runs the `build` job, never the `publish` or `release` jobs below.
 3. **`publish`**, a job inside `release-build.yml`, runs only when that
    workflow was itself invoked via `workflow_call` — which today only ever
    happens from `release.yml`'s `build` job above, after `preflight` has
@@ -50,6 +50,29 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
    and the SBOM attestation with `cosign verify-attestation` using the same
    `--certificate-identity-regexp`/`--certificate-oidc-issuer` pair and
    `--type spdxjson`.
+4. **`release`**, a job inside `release-build.yml`, runs under the exact
+   same `if: github.event_name == 'workflow_call'` condition as `publish`
+   (and depends on it via `needs: publish`), so it is reachable only from
+   the same tag-triggered, preflight-gated path. It never creates the git
+   tag itself — that already exists by the time this job runs, since a real
+   `git push` of a `v*.*.*` tag is what triggered `release.yml` in the first
+   place. It creates the GitHub Release object for that tag with
+   `gh release create`, using the workflow's own `GITHUB_TOKEN` (`contents:
+   write` permission, granted only to this job). It attaches three release
+   assets, downloaded from the `build` job's uploaded artifact the same way
+   `publish` downloads the SBOM: the Helm chart package, `checksums.txt` and
+   the SPDX SBOM. The multi-arch image OCI archive is not attached as a
+   release asset — consumers get the image from `ghcr.io/tsouza/runnerscout`
+   itself, verified with `cosign` as described above. Release notes are
+   generated automatically from merged pull requests since the previous
+   release (`gh release create --generate-notes`); the repository has no
+   changelog file or release-notes template of its own, so this is a
+   reasonable default rather than a bespoke convention — a future decision
+   to adopt a specific notes format remains open and is not made by this
+   change. The release is marked a GitHub **prerelease** when the tag's
+   major version is `0` (i.e. any `v0.x.y` tag), matching this document's
+   own statement that pre-1.0 APIs remain experimental; a `v1.0.0` or later
+   tag is never marked prerelease.
 
 Publishing has one required one-time manual step outside this automation:
 GHCR creates a package as **private** on its first-ever push, regardless of
@@ -60,9 +83,12 @@ tag release, and change its visibility to public (and confirm it's linked to
 this repository) before downstream consumers can pull or verify it without
 authentication. Every push after that stays public.
 
-This pipeline still never creates a GitHub Release object (`gh release
-create` or the equivalent API) — that remains a distinct, separate decision,
-made outside this automation, per issue #17.
+This closes out issue #17's originally-stated scope: the pipeline now runs
+`preflight` → `build` → `publish`/sign → `release` end to end, every stage
+gated on the same non-bypassable `tools/release_preflight.py` check and the
+same `workflow_call`-only condition, and it remains fully inert — no image
+pushed, no signature created, no GitHub Release opened — until a human pushes
+a real `v*.*.*` tag.
 
 ## Required acceptance
 
