@@ -2,11 +2,10 @@
 # release artifact build is triggered automatically: pushing a version tag
 # matching docs/releases.md's vMAJOR.MINOR.PATCH convention. Once preflight
 # passes, this workflow's `build` job invokes release-build.yml via
-# workflow_call, which pushes the built image to ghcr.io/tsouza/runnerscout
-# and signs it keylessly with cosign - see release-build.yml's own header
-# for exactly why that publish half only ever runs from this path. It still
-# never creates a GitHub Release - that remains a separate, manual decision
-# per docs/releases.md.
+# workflow_call, which pushes the built image to ghcr.io/tsouza/runnerscout,
+# signs it keylessly with cosign, and creates the GitHub Release for the
+# pushed tag - see release-build.yml's own header for exactly why the
+# publish/release halves only ever run from this path.
 name: Release
 on:
   push:
@@ -59,12 +58,15 @@ jobs:
     # relative to what the caller grants here (see "Access permissions when
     # using workflow_call to run a reusable workflow" in GitHub's reusable
     # workflows docs). release-build.yml's publish job needs packages:write
-    # (push to ghcr.io) and id-token:write (cosign keyless OIDC signing) in
-    # addition to contents:read - granting them only here, not at this
-    # workflow's top-level `permissions:`, keeps the blast radius limited to
-    # this one job/call.
+    # (push to ghcr.io) and id-token:write (cosign keyless OIDC signing), and
+    # its release job needs contents:write (create the GitHub Release and
+    # attach assets) - granting them only here, not at this workflow's
+    # top-level `permissions:`, keeps the blast radius limited to this one
+    # job/call. release-build.yml's own `publish`/`release` jobs then narrow
+    # this ceiling further, each job requesting only the subset it actually
+    # uses.
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
     with:

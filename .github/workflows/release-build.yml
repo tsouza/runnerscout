@@ -1,4 +1,4 @@
-# Two jobs, two very different trust levels.
+# Three jobs, three very different trust levels.
 #
 # `build` packages release-candidate artifacts (multi-arch container image,
 # Helm chart package, SBOM, checksums) for manual review. It never pushes an
@@ -13,19 +13,28 @@
 # "workflow_dispatch" for a direct manual run - this is not a value either
 # trigger's `inputs:` can spoof. See
 # https://docs.github.com/en/actions/learn-github-actions/contexts#github-context.
+#
+# `release` creates the GitHub Release object for the pushed tag and
+# attaches the Helm chart, checksums and SBOM built above as release assets.
+# It runs under the exact same `if: github.event_name == 'workflow_call'`
+# condition as `publish`, for the exact same reason - see `publish`'s own
+# comment below. It never creates the underlying git tag itself: that tag
+# already exists by the time this job runs, because a real `git push` of a
+# `v*.*.*` tag is what triggered release.yml in the first place. `release`
+# only attaches a Release object to that pre-existing tag.
+#
 # Today the only caller that reaches workflow_call is release.yml's `build`
-# job, itself gated on tools/release_preflight.py passing - so `publish`
-# transitively only ever runs after that gate. It still never creates a git
-# tag or a GitHub Release; per AGENTS.md and docs/releases.md that remains a
-# separate, explicit decision outside this workflow.
+# job, itself gated on tools/release_preflight.py passing - so `publish` and
+# `release` transitively only ever run after that gate.
 #
 # Two trigger paths, both intentional:
 #   - workflow_dispatch: ad hoc manual runs against any commit. Builds
-#     review artifacts only - `publish` cannot run from this path.
+#     review artifacts only - `publish` and `release` cannot run from this
+#     path.
 #   - workflow_call: invoked by release.yml as a job, once its own
 #     tools/release_preflight.py gate has passed, so the tag-triggered
 #     pipeline and manual dispatch share this same build logic instead of
-#     duplicating it. Only this path also publishes.
+#     duplicating it. Only this path also publishes and releases.
 # Never push/pull_request/tag directly, so this cannot fire automatically
 # or accidentally outside those two explicit paths.
 name: Release build
@@ -249,3 +258,82 @@ jobs:
             --predicate release-artifacts/runnerscout-sbom.spdx.json \
             --type spdxjson \
             "ghcr.io/tsouza/runnerscout@${{ steps.push.outputs.digest }}"
+
+  release:
+    name: release
+    needs: publish
+    # Identical condition to `publish` above, checked the same way: this
+    # value comes from GitHub itself ("workflow_call" only for a run GitHub
+    # invoked via workflow_call, "workflow_dispatch" for a direct manual
+    # run regardless of any input), so no input can spoof it. `needs:
+    # publish` additionally means this job cannot even start unless publish
+    # already ran (and this `if` re-check is not redundant with that: a
+    # skipped `publish` still satisfies `needs`, so the `if` is what
+    # actually keeps `release` off the workflow_dispatch path).
+    if: github.event_name == 'workflow_call'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # Only scope this job needs beyond the workflow's default
+      # contents:read: creating a GitHub Release (and attaching assets to
+      # it) requires contents:write. Granted only here, not at this
+      # workflow's top-level `permissions:` or at `build`/`publish`, per the
+      # same "narrowest possible job" discipline release.yml's call site
+      # already uses for packages:write/id-token:write. release.yml's
+      # `build` job call site grants contents:write as this reusable
+      # workflow's ceiling for that same reason - see its own comment.
+      contents: write
+    steps:
+      - name: Download build artifacts (Helm chart, checksums, SBOM)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-build-${{ inputs.commit_sha }}-${{ github.run_id }}
+          path: release-artifacts
+
+      # Pre-1.0 APIs remain experimental (docs/releases.md). A v0.x.y tag is
+      # marked as a GitHub prerelease so consumers can tell it apart from a
+      # v1.0.0+ tag at a glance; only the major component decides this, per
+      # the vMAJOR.MINOR.PATCH convention documented there.
+      - name: Determine prerelease status from tag major version
+        id: version
+        run: |
+          tag="${{ inputs.release_tag }}"
+          if [[ "$tag" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            major="${BASH_REMATCH[1]}"
+          else
+            echo "release_tag '$tag' does not match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          if [ "$major" = "0" ]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No checkout: the tag itself already exists (a real `git push` of it
+      # is what triggered release.yml), so `gh release create` only needs
+      # to know which repo and which pre-existing tag/commit to attach a
+      # Release object and assets to - both given explicitly below, not
+      # inferred from a local working tree. Release notes are
+      # auto-generated from merged PRs since the previous release
+      # (`--generate-notes`); this repo has no CHANGELOG or release-notes
+      # template of its own (checked: none exists), so auto-generation is
+      # used as a reasonable default rather than a bespoke convention.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          args=(
+            "${{ inputs.release_tag }}"
+            --target "${{ inputs.commit_sha }}"
+            --title "${{ inputs.release_tag }}"
+            --generate-notes
+            release-artifacts/*.tgz
+            release-artifacts/checksums.txt
+            release-artifacts/runnerscout-sbom.spdx.json
+          )
+          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"
