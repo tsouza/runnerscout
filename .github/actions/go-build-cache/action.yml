@@ -1,0 +1,34 @@
+name: Go build cache
+description: Reuse Go compiler output; only the verifier updates the shared cache.
+inputs:
+  go-version:
+    description: Resolved version from actions/setup-go.
+    required: true
+  save:
+    description: Save compiler output after a successful verifier job.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Locate compiler cache
+      id: location
+      shell: bash
+      env:
+        RUNNERSCOUT_BUILD_CACHE_PREFIX: runnerscout-build-Linux-ubuntu24-${{ runner.arch }}-go${{ inputs.go-version }}-${{ hashFiles('go.sum') }}-
+        RUNNERSCOUT_BUILD_CACHE_KEY: runnerscout-build-Linux-ubuntu24-${{ runner.arch }}-go${{ inputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+      run: |
+        printf 'path=%s\nkey=%s\nprefix=%s\n' "$(go env GOCACHE)" "$RUNNERSCOUT_BUILD_CACHE_KEY" "$RUNNERSCOUT_BUILD_CACHE_PREFIX" >> "$GITHUB_OUTPUT"
+    - name: Restore and update compiler cache
+      if: inputs.save == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.location.outputs.path }}
+        key: ${{ steps.location.outputs.key }}
+        restore-keys: ${{ steps.location.outputs.prefix }}
+    - name: Restore compiler cache
+      if: inputs.save != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.location.outputs.path }}
+        key: ${{ steps.location.outputs.key }}
+        restore-keys: ${{ steps.location.outputs.prefix }}

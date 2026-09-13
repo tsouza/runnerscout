@@ -19,10 +19,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
       - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           languages: go
