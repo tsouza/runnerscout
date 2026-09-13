@@ -286,3 +286,78 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 14
+
+  report-post-merge-failure:
+    name: report-post-merge-failure
+    needs: [kubernetes-integration, cloud-emulators, chart, runtime-image]
+    # This job is the forcing function that makes a post-merge failure
+    # visible somewhere a human will actually see it (see docs/qualification.md's
+    # Evaluator authority section) - the four heavy jobs above are the only
+    # validation main gets, and without this a failed or cancelled run was
+    # previously just a red/grey mark on the Actions tab. `if: always()` is
+    # required here (not the default implicit success()-only gate a job
+    # gets from listing `needs:`) because without it this job would itself
+    # be skipped precisely when a dependency failed or was cancelled - the
+    # one case it exists to handle. `always()` makes it run unconditionally
+    # so its steps below can inspect each needs.<job>.result individually;
+    # a job-level `if: failure()` would not help, since that only reflects
+    # this job's own steps, not its dependencies'. github.event_name ==
+    # 'push' keeps this from ever evaluating on a pull_request run, where
+    # these four jobs are always skipped by design and skipped is not a
+    # failure.
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Identify failed or cancelled heavy jobs
+        id: failures
+        env:
+          # A job's own `if: failure()` cannot see which of several sibling
+          # dependencies specifically failed - each needs.<job>.result is
+          # read individually here to build an exact report. `cancelled` is
+          # reported alongside `failure`: the concurrency fix in #60 stops
+          # one push from cancelling another push's run of these jobs, but a
+          # cancellation can still happen for reasons that fix does not
+          # touch (a manual cancellation, a runner outage, an org-level
+          # concurrency limit) - however it happens, a cancelled run means
+          # this commit's tree was not actually validated by this suite,
+          # which is exactly the condition this job exists to surface.
+          # `skipped` (the docs-only fast path from the `changes` job) is
+          # deliberately not reported: that is an intended outcome, not a
+          # failure.
+          KUBERNETES_INTEGRATION_RESULT: ${{ needs.kubernetes-integration.result }}
+          CLOUD_EMULATORS_RESULT: ${{ needs.cloud-emulators.result }}
+          CHART_RESULT: ${{ needs.chart.result }}
+          RUNTIME_IMAGE_RESULT: ${{ needs.runtime-image.result }}
+        run: |
+          declare -A results=(
+            [kubernetes-integration]="$KUBERNETES_INTEGRATION_RESULT"
+            [cloud-emulators]="$CLOUD_EMULATORS_RESULT"
+            [chart]="$CHART_RESULT"
+            [runtime-image]="$RUNTIME_IMAGE_RESULT"
+          )
+          failed=()
+          for job in kubernetes-integration cloud-emulators chart runtime-image; do
+            case "${results[$job]}" in
+              failure|cancelled)
+                failed+=("$job (${results[$job]})")
+                ;;
+            esac
+          done
+          {
+            echo "failed-jobs<<FAILEDJOBSEOF"
+            printf '%s\n' "${failed[@]}"
+            echo "FAILEDJOBSEOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/report-post-merge-failure
+        with:
+          failed-jobs: ${{ steps.failures.outputs.failed-jobs }}
+          sha: ${{ github.sha }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          github-token: ${{ github.token }}

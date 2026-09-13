@@ -1,0 +1,51 @@
+name: Report post-merge failure
+description: >
+  Open or comment on a tracking issue when a post-merge check failed or was
+  cancelled, so the failure is visible somewhere a human will see it instead
+  of only as a mark on the Actions tab.
+inputs:
+  failed-jobs:
+    description: >
+      Newline-separated "name (result)" entries for jobs that failed or were
+      cancelled. An empty string means nothing to report, and no issue is
+      created or commented on.
+    required: true
+  sha:
+    description: The commit SHA that failed post-merge validation.
+    required: true
+  run-url:
+    description: Direct link to the run that produced failed-jobs.
+    required: true
+  github-token:
+    description: Token used to call `gh label`/`gh issue`. Needs `issues:write`.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Ensure the tracking label exists
+      if: inputs.failed-jobs != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh label create post-merge-failure \
+          --repo "$GITHUB_REPOSITORY" \
+          --description "A post-merge check failed or was cancelled on main" \
+          --color d73a4a \
+          --force
+    - name: Open or update the tracking issue
+      if: inputs.failed-jobs != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        FAILED_JOBS: ${{ inputs.failed-jobs }}
+        COMMIT_SHA: ${{ inputs.sha }}
+        RUN_URL: ${{ inputs.run-url }}
+      run: |
+        body=$(printf 'Post-merge validation failed for commit `%s`.\n\nFailed or cancelled job(s):\n%s\nRun: %s\n' "$COMMIT_SHA" "$FAILED_JOBS" "$RUN_URL")
+        existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label post-merge-failure --state open --json number --jq '.[0].number // empty')
+        if [ -n "$existing" ]; then
+          gh issue comment --repo "$GITHUB_REPOSITORY" "$existing" --body "$body"
+        else
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Post-merge validation failure on main" --label post-merge-failure --body "$body"
+        fi

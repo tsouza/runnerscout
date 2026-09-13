@@ -88,3 +88,48 @@ becomes "nothing lands without being checked shortly after, automatically
 and non-bypassably, with the result visible and fixed forward." This was
 a deliberate, explicit trade the instruction above accepted, not an
 oversight.
+
+## Why a post-merge failure now opens a tracking issue
+
+A later adversarial review of this split pointed out that "visible" in the
+trade-off above only meant "not deleted from the Actions tab" - nothing
+reopened the PR, blocked the next merge, or notified anyone, so a failed or
+cancelled post-merge run could sit unnoticed indefinitely. The repo has no
+Slack, email, PagerDuty, or webhook integration configured anywhere, and
+adding a dependency on one of those just to close this gap would trade a
+small, real problem for a new external dependency with its own credentials
+and failure modes. `report-post-merge-failure` closes the gap with what the
+repo already has: `gh issue create`/`gh issue comment`, authenticated with
+the workflow's own `GITHUB_TOKEN`.
+
+`cancelled` is reported alongside `failure` even though #60 already stops
+one push's run from cancelling another's, which was the specific
+cancellation this suite had actually suffered. That fix does not touch
+every way a run can be cancelled - a human cancelling it directly, a
+runner-infrastructure outage, an org-level concurrency limit - and none of
+those leave the commit any more validated than an ordinary failure does, so
+the report treats them the same.
+
+The same job shape (aggregate `needs.*.result`, hand the failed-job list to
+a shared composite action) is duplicated in `codeql.yml` for `analyze`
+rather than factored into one job, because GitHub Actions jobs cannot
+`needs:` a job in a different workflow file - the same constraint that
+already left this repo's `changes` job duplicated across both workflows
+instead of unified into a reusable workflow. What is shared is the part
+most worth not duplicating: the `gh label create`/`gh issue list`/`gh issue
+create`/`gh issue comment` logic itself lives once, in
+`.github/actions/report-post-merge-failure`, mirroring the existing
+`go-build-cache` composite action's role as this repo's pattern for sharing
+step logic across jobs.
+
+Both workflows report to the same `post-merge-failure` label, so a failure
+in `ci.yml`'s heavy jobs and a failure in `codeql.yml`'s `analyze` on the
+same or a later commit consolidate onto one open issue instead of two -
+the stated goal of checking for an existing open issue before creating one.
+The corollary is a small, accepted race: if both workflows' reporting jobs
+happen to run for the first time within the same few seconds, each could
+find no open issue yet and both create one. This is not resolved with a
+lock, since the cost of an occasional duplicate issue (a human notices and
+closes one as a duplicate) is smaller than the complexity a distributed
+lock would add for what is already a best-effort forcing function, not a
+correctness-critical one.
