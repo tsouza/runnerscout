@@ -4,10 +4,10 @@
 
 Each CQ was drawn from a defect class the existing test suite already
 exercises at least partially, on the theory that a challenge with zero
-prior evidence is a guess, not a qualification target. None of this
-constitutes the "protected evaluator" issue #5 also asks for — it only
-answers "what should such an evaluator check," not "who runs it" or
-"what stops the candidate from also being the judge."
+prior evidence is a guess, not a qualification target. "What stops the
+candidate from also being the judge" is answered in `qualification.md`'s
+Evaluator authority section: the non-bypassable required-CI ruleset on
+`main`, not any local script the candidate can edit.
 
 | ID | Motivating evidence (partial, from this repo) |
 | --- | --- |
@@ -40,19 +40,17 @@ recur, not just where it was first found.
 
 An earlier draft ranked challenges by estimated blast radius (data loss >
 duplicate spend > availability > audit-trail gaps). It was dropped because
-severity is itself a judgment call this document should not make
-unilaterally — "protected evaluator authority," the unresolved half of
-issue #5, is precisely the question of who gets to rank consequences.
-Numbering by the order each defect class was first identified in the
-codebase's history avoids smuggling in a severity ranking through the ID
-scheme itself.
+severity ranking would need re-litigating every time a new CQ is added
+between two existing ones. Numbering by the order each defect class was
+first identified in the codebase's history avoids that churn and avoids
+smuggling in a severity ranking through the ID scheme itself.
 
 ## What this document deliberately does not claim
 
-It does not claim CQ-01 through CQ-12 are exhaustive, that passing all
-twelve qualifies a release, or that the cited tests are sufficient
-evidence on their own — they are cited as *motivation* for each
-challenge's existence, not as proof any candidate already satisfies it.
-Whether re-running the cited tests counts as "executing" a CQ, versus
-requiring an independently authored adversarial test per challenge, is
-also left to the issue #5 discussion.
+It does not claim CQ-01 through CQ-12 are exhaustive or that passing all
+twelve qualifies a release on its own. The cited tests are the qualifying
+evidence for CQ-01 through CQ-11 today, since each already runs in the
+required CI suite on every change - re-running them is executing that CQ,
+not just motivation for it. CQ-12 has no such test yet and is not
+qualified until one is added; a CQ whose citation is later removed or
+weakened reverts to unqualified until a replacement lands.

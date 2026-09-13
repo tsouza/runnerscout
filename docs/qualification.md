@@ -1,20 +1,30 @@
 # Controller qualification challenges
 
-> **Status: PROPOSED, not yet accepted.** This document is a draft submitted
-> for review on [issue #5](https://github.com/tsouza/runnerscout/issues/5).
-> Nothing in it is binding until the repository owner accepts, edits, or
-> replaces it. In particular, **who has authority to certify a candidate
-> against these challenges** — separate from whoever implemented the
-> candidate — is not decided here; that is the open half of issue #5.
+Part of [issue #5](https://github.com/tsouza/runnerscout/issues/5).
 
 ## Purpose
 
-`make verify` and CI are diagnostic controls: they run on the same commit a
+`make verify` is a local diagnostic control: it runs on the same commit a
 candidate implementation produced, using an evaluator the candidate's own
-author can edit. They are necessary but not sufficient evidence of
+author can edit. It is necessary but not sufficient evidence of
 correctness. CQ-01 through CQ-12 name the specific adversarial behaviors a
 qualified controller must resist, independent of any one implementation's
 own test suite.
+
+## Evaluator authority
+
+Editable local tooling is not evidence on its own; enforcement that a
+candidate cannot bypass is. `main` is protected by a GitHub Ruleset
+(`main: pull requests and verified checks`, verified 2026-09-13) requiring
+every one of the seven CI checks to pass and forbidding force-push and
+deletion, with `current_user_can_bypass: never` — including for the
+repository owner's own account. That non-bypassable CI run, not any local
+`make verify` invocation, is this project's evaluator authority: CQ-01
+through CQ-12 are qualified by adding an adversarial test for each to the
+required CI suite (see the Provenance table below for the tests that
+already cover most of them), so passing them is enforced the same way for
+every change regardless of who authored it, and cannot be waived by
+editing a local script.
 
 ## Challenges
 
