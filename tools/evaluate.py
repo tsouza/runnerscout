@@ -57,6 +57,10 @@ REQUIRED = {
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKAuthenticationAndTransportFailuresStayUnknown'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureSDKCreateTimeoutRetainsUnknownCommitment'),
 
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestRuntimeMissingRootCannotRemainReady'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestRuntimeConditionRejectsUnobservedRootChanges'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestRuntimeConditionWriteFailureClearsReadiness'),
+    ('github.com/tsouza/runnerscout/internal/configapi', 'TestRuntimeRejectsRootChangedDuringWorkerPreparation'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSAccountDriftCannotConfirmAbsence'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSCreateUsesDurableTokenAndPrivateBootstrap'),
     ('github.com/tsouza/runnerscout/internal/admission', 'TestAdmissionLimits'),
