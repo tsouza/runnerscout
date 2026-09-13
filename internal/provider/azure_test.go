@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/tsouza/runnerscout/internal/lifecycle"
 )
 
 func azureConfig() Config {
@@ -168,6 +169,83 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 	}
 	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || deployments != 1 || updates != 1 || token.calls.Load() == 0 {
 		t.Fatalf("create: id=%q err=%v requests=%v", id, err, requests)
+	}
+}
+
+// azureFailedDeploymentFixture models a deployment that reaches a terminal
+// Failed provisioning state before any of its resources exist. residual lets
+// a test prove a surviving resource blocks capacity classification.
+func azureFailedDeploymentFixture(t *testing.T, deploymentError map[string]any, residual []any) (*Command, *testAzureToken) {
+	t.Helper()
+	deployed := false
+	absent := func(w http.ResponseWriter) {
+		w.WriteHeader(404)
+		writeJSON(w, map[string]any{"error": map[string]string{"code": "ResourceNotFound"}})
+	}
+	return sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.URL.Path, azureFixtureImage) && r.Method == "GET" {
+			writeJSON(w, azureSupportedImage())
+			return
+		}
+		if deploymentPath(r) {
+			if r.Method == "PUT" {
+				deployed = true
+			}
+			if !deployed {
+				absent(w)
+				return
+			}
+			writeJSON(w, map[string]any{"properties": map[string]any{"provisioningState": "Failed", "error": deploymentError}})
+			return
+		}
+		if !deployed {
+			absent(w)
+			return
+		}
+		if strings.HasSuffix(strings.ToLower(r.URL.Path), "/resources") {
+			writeJSON(w, map[string]any{"value": residual})
+			return
+		}
+		absent(w)
+	})
+}
+func TestAzureCreateDefinitiveCapacityRejectionHasNoReceipt(t *testing.T) {
+	p, _ := azureFailedDeploymentFixture(t, map[string]any{
+		"code":    "DeploymentFailed",
+		"message": "top",
+		"details": []any{map[string]any{"code": "OverconstrainedAllocationRequest", "message": "no capacity"}},
+	}, []any{})
+	a := allocation()
+	a.Offering.Image = azureFixtureImage
+	receipt, err := p.createAzure(context.Background(), a, "boot")
+	if !errors.Is(err, lifecycle.ErrCapacity) || receipt.ResourceID != "" || len(receipt.Resources) != 0 {
+		t.Fatal("definitive capacity rejection misclassified", receipt, err)
+	}
+}
+func TestAzureCreateAmbiguousDeploymentFailureStaysUnknown(t *testing.T) {
+	p, _ := azureFailedDeploymentFixture(t, map[string]any{
+		"code":    "DeploymentFailed",
+		"message": "top",
+		"details": []any{map[string]any{"code": "ResourceQuotaExceeded", "message": "quota"}},
+	}, []any{})
+	a := allocation()
+	a.Offering.Image = azureFixtureImage
+	receipt, err := p.createAzure(context.Background(), a, "boot")
+	if err == nil || errors.Is(err, lifecycle.ErrCapacity) || receipt.ResourceID != "" {
+		t.Fatal("ambiguous deployment failure misclassified as capacity", receipt, err)
+	}
+}
+func TestAzureCreateCapacityCodeWithResidualNICStaysUnknown(t *testing.T) {
+	p, _ := azureFailedDeploymentFixture(t, map[string]any{
+		"code":    "DeploymentFailed",
+		"message": "top",
+		"details": []any{map[string]any{"code": "OverconstrainedAllocationRequest", "message": "no capacity"}},
+	}, []any{azureOwnedNIC()})
+	a := allocation()
+	a.Offering.Image = azureFixtureImage
+	receipt, err := p.createAzure(context.Background(), a, "boot")
+	if err == nil || errors.Is(err, lifecycle.ErrCapacity) || receipt.ResourceID != "" {
+		t.Fatal("capacity code misclassified despite a surviving resource", receipt, err)
 	}
 }
 func TestAzureActiveDeploymentCannotProveAbsence(t *testing.T) {

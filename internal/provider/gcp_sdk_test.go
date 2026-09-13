@@ -302,6 +302,58 @@ func TestGCPSDKCreateRefusesOccupiedDiskIdentity(t *testing.T) {
 		t.Fatal("pre-existing disk adopted by name", err, mutations)
 	}
 }
+func TestGCPSDKDefinitiveCapacityRejectionHasNoReceipt(t *testing.T) {
+	var p *Command
+	p = gcpFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			gcpMissing(w)
+			return
+		}
+		op := gcpOperation(p, "create", "instances", "rs-test", "DONE")
+		op["error"] = map[string]any{"errors": []any{map[string]any{"code": "ZONE_RESOURCE_POOL_EXHAUSTED", "message": "no capacity"}}}
+		writeJSON(w, op)
+	})
+	id, err := p.Create(context.Background(), gcpAllocation())
+	if id != "" || !errors.Is(err, lifecycle.ErrCapacity) {
+		t.Fatal("definitive capacity rejection misclassified", id, err)
+	}
+}
+func TestGCPSDKAmbiguousOperationFailureStaysUnknown(t *testing.T) {
+	var p *Command
+	p = gcpFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			gcpMissing(w)
+			return
+		}
+		op := gcpOperation(p, "create", "instances", "rs-test", "DONE")
+		op["error"] = map[string]any{"errors": []any{map[string]any{"code": "RESOURCE_OPERATION_RATE_EXCEEDED", "message": "throttled"}}}
+		writeJSON(w, op)
+	})
+	id, err := p.Create(context.Background(), gcpAllocation())
+	if id != "" || err == nil || errors.Is(err, lifecycle.ErrCapacity) {
+		t.Fatal("ambiguous operation failure misclassified as capacity", id, err)
+	}
+}
+func TestGCPSDKCapacityCodeWithSurvivingVMStaysUnknown(t *testing.T) {
+	var p *Command
+	p = gcpFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			if strings.Contains(r.URL.Path, "/instances/") {
+				writeJSON(w, gcpOwned("instances"))
+				return
+			}
+			gcpMissing(w)
+			return
+		}
+		op := gcpOperation(p, "create", "instances", "rs-test", "DONE")
+		op["error"] = map[string]any{"errors": []any{map[string]any{"code": "ZONE_RESOURCE_POOL_EXHAUSTED", "message": "no capacity"}}}
+		writeJSON(w, op)
+	})
+	id, err := p.Create(context.Background(), gcpAllocation())
+	if id != "" || err == nil || errors.Is(err, lifecycle.ErrCapacity) {
+		t.Fatal("capacity code misclassified despite a surviving VM", id, err)
+	}
+}
 func TestGCPSDKPendingCreateHonorsCancellation(t *testing.T) {
 	var created atomic.Bool
 	var p *Command

@@ -76,6 +76,11 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 	}}
 	bootstrap := base64.StdEncoding.EncodeToString([]byte(script))
 	if err := p.azureClient().deploy(ctx, p.Config, a.ID, template, bootstrap); err != nil {
+		if p.azureClient().deploymentCapacityRejected(ctx, p.Config, a.ID) {
+			if resources, ierr := p.azureResources(ctx, a); ierr == nil && len(resources) == 0 {
+				return lifecycle.Creation{}, lifecycle.ErrCapacity
+			}
+		}
 		return lifecycle.Creation{}, errors.New("Azure deployment commitment unknown")
 	}
 	return p.finishAzureDiskOwnership(ctx, a)
