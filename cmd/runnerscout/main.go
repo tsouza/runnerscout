@@ -194,8 +194,34 @@ func run(args []string) error {
 }
 
 func main() {
-	if err := run(os.Args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) && err != context.Canceled {
+	if err := run(os.Args[1:]); !benignShutdown(err) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func benignShutdown(err error) bool {
+	if err == nil || err == flag.ErrHelp || err == context.Canceled {
+		return true
+	}
+	// errors.Is alone would hide a cleanup failure joined with cancellation.
+	// Every leaf must be benign before the process can report a clean exit.
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children := wrapped.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !benignShutdown(child) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		child := wrapped.Unwrap()
+		return child != nil && benignShutdown(child)
+	default:
+		return false
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -93,5 +94,16 @@ func TestHealthListenerFailurePreventsControllerEffects(t *testing.T) {
 	expected := errors.New("controller failed")
 	if err := withHealth(context.Background(), "127.0.0.1:0", func(context.Context, *health.Status) error { return expected }); err != expected {
 		t.Fatal("health lifecycle hid the controller error", err)
+	}
+}
+
+func TestShutdownExitPreservesCleanupFailures(t *testing.T) {
+	wrapped := fmt.Errorf("listener stopped: %w", context.Canceled)
+	if !benignShutdown(wrapped) || !benignShutdown(errors.Join(wrapped, context.Canceled)) {
+		t.Fatal("ordinary wrapped cancellation became a process failure")
+	}
+	cleanup := errors.New("provider credential cache cleanup incomplete")
+	if benignShutdown(errors.Join(wrapped, cleanup)) || benignShutdown(fmt.Errorf("shutdown: %w", errors.Join(wrapped, cleanup))) || benignShutdown(cleanup) {
+		t.Fatal("cancellation concealed a real cleanup failure")
 	}
 }

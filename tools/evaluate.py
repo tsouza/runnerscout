@@ -12,6 +12,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestShutdownExitPreservesCleanupFailures'),
     ('github.com/tsouza/runnerscout/internal/configapi', 'TestRuntimeBindingChangeRecoversOriginalFleetAfterRestart'),
     ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestCRDCommandRejectsMixedConfigurationAndAuthentication'),
     ('github.com/tsouza/runnerscout/cmd/runnerscout', 'TestMountedValidationRemainsOfflineAndStrict'),
