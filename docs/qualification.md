@@ -35,6 +35,15 @@ This is a deliberate trade against the previous all-seven-before-merge
 model — see
 [qualification.background.md](qualification.background.md) for why.
 
+If any of these five checks fails or is cancelled on a push to `main`, a
+`report-post-merge-failure` job (in `ci.yml` for the four heavy jobs, and
+duplicated in `codeql.yml` for `analyze`) opens a GitHub issue labeled
+`post-merge-failure` naming the failing commit, which job(s) failed or were
+cancelled, and a link to the run — or, if an open issue with that label
+already exists, adds a comment to it instead of opening a duplicate. This
+makes a post-merge failure visible as a tracked issue, not only as a mark
+on the Actions tab.
+
 CQ-01 through CQ-12 are qualified by an adversarial test for each,
 covered by this checked suite (see the Provenance table below for the
 tests that already cover most of them) — non-bypassable in the sense that

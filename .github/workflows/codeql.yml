@@ -59,3 +59,50 @@ jobs:
           build-mode: manual
       - run: go build ./...
       - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+
+  report-post-merge-failure:
+    name: report-post-merge-failure
+    needs: analyze
+    # Same mechanism and reasoning as ci.yml's identical job - see its
+    # comments for why `always()` is required and why `cancelled` is
+    # reported alongside `failure`. Duplicated rather than shared because
+    # GitHub Actions jobs cannot `needs:` a job in a different workflow
+    # file, mirroring this repo's existing choice to duplicate the small
+    # `changes` job across ci.yml and codeql.yml rather than build a
+    # reusable workflow for it. `analyze` also runs on the weekly
+    # `schedule` trigger, which this job deliberately does not cover: the
+    # gap this closes is specifically the post-merge one named in
+    # docs/qualification.md's Evaluator authority section, not scheduled
+    # scans.
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Identify a failed or cancelled analyze job
+        id: failures
+        env:
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+        run: |
+          failed=()
+          case "$ANALYZE_RESULT" in
+            failure|cancelled)
+              failed+=("analyze ($ANALYZE_RESULT)")
+              ;;
+          esac
+          {
+            echo "failed-jobs<<FAILEDJOBSEOF"
+            printf '%s\n' "${failed[@]}"
+            echo "FAILEDJOBSEOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/report-post-merge-failure
+        with:
+          failed-jobs: ${{ steps.failures.outputs.failed-jobs }}
+          sha: ${{ github.sha }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          github-token: ${{ github.token }}
