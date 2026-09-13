@@ -121,11 +121,12 @@ func Compile(s Snapshot) (Resolved, error) {
 		names = append(names, ref.Name)
 	}
 	slices.Sort(names)
-	if err := network(s, providers); err != nil {
+	networkProfile, err := network(s, providers)
+	if err != nil {
 		return result, err
 	}
 	r, p, limits := s.Class.Spec.Resources, s.Class.Spec.Placement, s.ScaleSet.Spec
-	cfg := operator.Config{Name: s.ScaleSet.Name, Namespace: ns, GitHubURL: limits.GitHub.URL, ScaleSetID: limits.GitHub.ScaleSetID, MaxRunners: limits.MaxRunners, ProvisioningSeconds: limits.ProvisioningSeconds, MaxLifetimeSeconds: limits.MaxLifetimeSeconds, Providers: providers,
+	cfg := operator.Config{Name: s.ScaleSet.Name, Namespace: ns, GitHubURL: limits.GitHub.URL, ScaleSetID: limits.GitHub.ScaleSetID, MaxRunners: limits.MaxRunners, ProvisioningSeconds: limits.ProvisioningSeconds, MaxLifetimeSeconds: limits.MaxLifetimeSeconds, Providers: providers, NetworkProfile: networkProfile,
 		Requirements: placement.Requirements{CPU: r.CPU, MemoryMiB: r.MemoryMiB, Architecture: r.Architecture, Vendor: r.Vendor, Capabilities: slices.Clone(r.Capabilities), Providers: names, Regions: slices.Clone(p.Regions), MaxPriceMicros: p.MaxPriceMicros, AllowOnDemand: p.AllowOnDemand, Policy: p.Policy},
 		Retry:        recovery.Policy{Enabled: s.Class.Spec.Retry.Enabled, MaxRetries: s.Class.Spec.Retry.MaxRetries, AcknowledgeRepeatedEffects: s.Class.Spec.Retry.AcknowledgeRepeatedEffects}}
 	cfg.Catalog.Complete = make(map[string]bool)
@@ -145,25 +146,65 @@ func credentialVariable(kind, name string) bool {
 	return provider.CredentialVariable(kind, name)
 }
 
-func network(s Snapshot, providers map[string]provider.Config) error {
+// network validates the optional NetworkProfile a RunnerClass references and
+// returns the identity that must be threaded onto every allocation this
+// scale set creates: non-empty only for a "wireguard" mode profile, matching
+// lifecycle.Allocation.NetworkProfile's own doc comment ("only ever non-empty
+// for a wireguard mode NetworkProfile"). "separate" mode returns "" - it has
+// no peer overlay for an allocation to join.
+func network(s Snapshot, providers map[string]provider.Config) (string, error) {
 	if s.Class.Spec.NetworkRef == nil {
 		if s.Network != nil {
-			return errors.New("unreferenced network configuration")
+			return "", errors.New("unreferenced network configuration")
 		}
-		return nil
+		return "", nil
 	}
 	if s.Network == nil {
-		return errors.New("referenced network configuration is missing")
+		return "", errors.New("referenced network configuration is missing")
 	}
 	n := s.Network
 	if err := object(n.ObjectMeta, s.ScaleSet.Namespace, s.Class.Spec.NetworkRef.Name); err != nil {
-		return err
+		return "", err
 	}
-	if n.Spec.Mode != "separate" {
-		return fmt.Errorf("%w: shared network integration", ErrUnsupported)
+	if n.Spec.Mode != "separate" && n.Spec.Mode != "wireguard" {
+		return "", fmt.Errorf("%w: shared network integration", ErrUnsupported)
 	}
-	if n.Spec.EnrollmentRef != nil || len(n.Spec.AllowedServices) != 0 {
-		return errors.New("separate networking cannot enroll peers or imply overlay access rules")
+	if n.Spec.Mode == "separate" {
+		if n.Spec.EnrollmentRef != nil || len(n.Spec.AllowedServices) != 0 {
+			return "", errors.New("separate networking cannot enroll peers or imply overlay access rules")
+		}
+	}
+	if n.Spec.Mode == "wireguard" {
+		// AllowedServices has no defined meaning for any mode this codebase
+		// implements: "separate" mode already rejects it outright, and
+		// docs/networking-peer-model.md's wireguard peer/overlay design
+		// (peer trust, revocation, secret shape) never assigns it a meaning
+		// either - the overlay it describes has no per-service access-rule
+		// layer. Accepting it silently here would let an operator believe it
+		// does something it does not.
+		if len(n.Spec.AllowedServices) != 0 {
+			return "", errors.New("wireguard networking does not define overlay access rules for AllowedServices")
+		}
+		// EnrollmentRef is the optional WireGuard PSK Secret reference
+		// (docs/networking-peer-model.md's "Secret shape" section). It is
+		// validated the same way every other SecretKeyReference in this file
+		// is - nil remains fully valid, since the PSK is defense-in-depth,
+		// never a trust root.
+		if n.Spec.EnrollmentRef != nil {
+			if err := secret(*n.Spec.EnrollmentRef); err != nil {
+				return "", err
+			}
+		}
+		// lifecycle.Allocation.WireGuardEndpoint's own doc comment explains
+		// why: a peer's outer dial address is only known to be reachable
+		// within the single directly-routable private network a
+		// NetworkMapping provisions. A NetworkProfile spanning more than one
+		// NetworkMapping would silently produce peers that cannot actually
+		// reach each other - reject it explicitly rather than accept
+		// something that would misbehave at runtime.
+		if len(n.Spec.Mappings) != 1 {
+			return "", errors.New("wireguard networking supports exactly one network mapping")
+		}
 	}
 	seen := make(map[string]bool)
 	var prefixes []netip.Prefix
@@ -171,17 +212,17 @@ func network(s Snapshot, providers map[string]provider.Config) error {
 		p, ok := providers[mapping.ProviderRef.Name]
 		key := mapping.ProviderRef.Name + "/" + mapping.Region
 		if !ok || seen[key] || mapping.NetworkID == "" || mapping.SubnetID != p.Subnet || !slices.Contains(s.Class.Spec.Placement.Regions, mapping.Region) || len(mapping.CIDRs) == 0 {
-			return errors.New("invalid or duplicate provider network mapping")
+			return "", errors.New("invalid or duplicate provider network mapping")
 		}
 		seen[key] = true
 		for _, cidr := range mapping.CIDRs {
 			prefix, err := netip.ParsePrefix(cidr)
 			if err != nil || prefix != prefix.Masked() {
-				return errors.New("network CIDR must be a canonical prefix")
+				return "", errors.New("network CIDR must be a canonical prefix")
 			}
 			for _, previous := range prefixes {
 				if prefix.Overlaps(previous) {
-					return errors.New("overlapping network CIDRs")
+					return "", errors.New("overlapping network CIDRs")
 				}
 			}
 			prefixes = append(prefixes, prefix)
@@ -193,13 +234,16 @@ func network(s Snapshot, providers map[string]provider.Config) error {
 			covered = covered || mapping.ProviderRef.Name == name
 		}
 		if !covered {
-			return errors.New("network profile does not cover every allowed provider")
+			return "", errors.New("network profile does not cover every allowed provider")
 		}
 	}
 	for _, offering := range s.Catalog.Spec.Offerings {
 		if _, allowed := providers[offering.Provider]; allowed && slices.Contains(s.Class.Spec.Placement.Regions, offering.Region) && !seen[offering.Provider+"/"+offering.Region] {
-			return errors.New("catalog offering lacks a network mapping")
+			return "", errors.New("catalog offering lacks a network mapping")
 		}
 	}
-	return nil
+	if n.Spec.Mode == "wireguard" {
+		return n.Name, nil
+	}
+	return "", nil
 }
