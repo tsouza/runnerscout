@@ -250,3 +250,57 @@ mock, and that its revocation assertion (remove a peer, observe the next
 packet silently dropped) is an *observed effect*, in the same spirit CQ-09
 already requires for interruption detection — not an assertion that the
 removal code path merely ran.
+
+### Addendum: why the implemented lane uses two same-process instances, not two containers
+
+The reasoning above was written before `internal/wireguard/tunnel` or its
+test existed, reasoning from `tools/emulators.py`'s container-based
+convention by analogy alone. Actually building the package and its
+qualification test surfaced a reason to revisit it: the property a
+two-container topology would add proof of — "the netstack (gVisor) backend
+never needs an elevated container capability" — is not something running
+the same two `device.Device` instances inside two containers proves any
+more rigorously than running them in the same test process does, because
+neither topology ever requests `NET_ADMIN`, `/dev/net/tun`, or
+`--privileged` in the first place. The absence of a capability request is
+visible in the process/container's own argument list regardless of which
+topology is chosen; it is not a guarantee that requires kernel-level
+container isolation to observe.
+
+What a two-container setup would add over a same-process test is genuine
+network-namespace isolation and traffic crossing a real Docker bridge
+instead of loopback. Neither is what this document's "Recommendation"
+section actually requires the qualification lane to prove: a payload
+delivered peer-to-peer, and a revoked peer's traffic silently dropped, are
+both properties entirely internal to `golang.zx2c4.com/wireguard/device`'s
+Noise handshake and per-peer AllowedIPs enforcement, and are exercised
+identically regardless of whether the outer UDP transport crosses a Docker
+bridge or stays on loopback — WireGuard's own `conn.Bind` abstraction
+treats the outer transport as an unauthenticated packet pipe either way, so
+nothing about the protocol-level behavior under test changes with the
+transport's topology.
+
+Given that, building `tools/emulators.py`'s `wireguard` path and two
+containers would add Docker orchestration, image selection, and
+container startup/teardown machinery to prove a topology-insensitive
+property — the same shape of unneeded infrastructure this codebase's own
+existing convention already avoids for library code under test:
+`internal/prices/aws_test.go` and `internal/azurequeue/azurequeue_test.go`
+both drive real SDK/library code against an in-process `httptest` server
+rather than a container, reserving actual containers
+(`internal/provider/emulator_test.go`, `azure_emulator_test.go`) for cases
+where the code under test is a *client* of a REST API surface only a real
+server implementation can stand in for. `internal/wireguard/tunnel`'s
+qualification test is not a client of anything external — both ends of the
+protocol run inside the test process — so the same reasoning applies here.
+The `emulators` build tag is kept regardless, matching this family's
+existing convention of gating slower, closer-to-real, non-mocked tests
+behind an opt-in tag distinct from the fast default suite, independent of
+whether Docker is involved.
+
+This addendum does not retract the reasoning above it: a container-based
+`tools/emulators.py` `wireguard` path remains the documented fallback if a
+future need ever requires proving something this test cannot — genuine
+cross-host UDP behavior, or NAT/firewall traversal specific to a real
+network boundary, for example. Nothing about the properties this task was
+actually asked to prove needed it.

@@ -1,17 +1,16 @@
 # WireGuard peer model: trust, revocation, secrets and qualification
 
-> **Status: PARTIALLY IMPLEMENTED, deliberately inert.** This document
-> answers the four questions
-> [networking-control-plane.md](networking-control-plane.md) explicitly left
-> open for issue #16's `wireguard` `NetworkProfile` mode. The "Peer trust"
-> and "Secret shape" sections are implemented (`internal/wireguard`'s
-> keypair/poll-token generation and peer-snapshot computation;
-> `internal/lifecycle.Allocation`'s checkpointed public-key/overlay-address/
-> poll-token-hash fields; `provider.Command`'s cloud-init embedding), and the
-> "Revocation" section's poll endpoint is implemented
-> (`internal/health.WireGuardPeersHandler`). The actual WireGuard tunnel/
-> data-plane bring-up this endpoint's peer list would feed is separate,
-> ongoing work. None of it is reachable yet:
+> **Status: IMPLEMENTED, deliberately inert.** This document answers the
+> four questions [networking-control-plane.md](networking-control-plane.md)
+> explicitly left open for issue #16's `wireguard` `NetworkProfile` mode, and
+> all four are now implemented: "Peer trust" and "Secret shape"
+> (`internal/wireguard`'s keypair/poll-token generation and peer-snapshot
+> computation; `internal/lifecycle.Allocation`'s checkpointed
+> public-key/overlay-address/poll-token-hash fields; `provider.Command`'s
+> cloud-init embedding), "Revocation"'s poll endpoint
+> (`internal/health.WireGuardPeersHandler`), and the actual WireGuard
+> tunnel/data-plane device bring-up plus its qualification lane
+> (`internal/wireguard/tunnel`). None of it is reachable yet, by design:
 > `internal/configapi/compile.go` (`network()`, `compile.go:162`) still
 > rejects any `NetworkProfileSpec.Mode` other than `"separate"`
 > unconditionally, and no code path in this repository can set
@@ -82,25 +81,44 @@ layer on top of the Noise handshake, not a trust root: trust already comes
 entirely from §1, so an unset `EnrollmentRef` is fully supported and is the
 default.
 
-### 4. Local qualification lane: two `--internal`-network containers, no TUN
+### 4. Local qualification lane: two same-process `Tunnel` instances over real loopback UDP, no TUN, no containers
 
-The qualification lane adds a `wireguard` path to `tools/emulators.py`
-alongside its existing `aws`/`azure` paths: two containers on a
-`docker network create --internal` network (the same isolation
-`tools/emulators.py` already uses for Moto/floci-az), each running the real
-userspace-WireGuard-plus-netstack code path, addressed by their docker
-network IPs the same way `RUNNERSCOUT_AWS_ENDPOINT`/`RUNNERSCOUT_AZURE_ENDPOINT`
-already address the emulator containers. Neither container is given
+The data-plane device bring-up itself lives in `internal/wireguard/tunnel`
+(a subpackage of `internal/wireguard`, kept separate so
+`golang.zx2c4.com/wireguard/tun/netstack`'s own gVisor dependency tree does
+not reach `cmd/runnerscout` until something actually calls it): `tunnel.BringUp`
+takes a private key, an overlay address and a peer list, and returns a
+`*tunnel.Tunnel` backed by a real `golang.zx2c4.com/wireguard/device.Device`
+on the netstack (gVisor) TUN backend, with `Close` and `RemovePeer` methods
+and a `Net()` accessor exposing netstack's own `net.Dialer`/`net.Listener`-
+compatible surface for sending or receiving traffic through the tunnel.
+
+The qualification lane is that package's own `//go:build emulators` test
+(`internal/wireguard/tunnel/qualification_emulator_test.go`, mirroring
+`internal/provider/azure_emulator_test.go`'s structure: a header comment
+naming exactly which real, non-mocked code is under test and why). It does
+not add a `wireguard` path to `tools/emulators.py`, and no Docker container
+is involved: it brings up two independent `tunnel.Tunnel` instances — the
+same `BringUp` production code path any future caller uses — each bound to
+its own real loopback UDP port, and proves the two properties this
+document actually requires: a payload sent from one peer over a real Noise
+handshake and real per-peer encryption is delivered correctly to the other,
+and once one side's peer list is reconfigured to no longer include the
+other (`Tunnel.RemovePeer` — the data-plane action a controller-side
+revocation ultimately drives), the next attempted packet from the revoked
+peer is silently dropped rather than delivered. This is the same
+observed-effect testing philosophy this codebase already uses for
+interruption detection (CQ-09). Neither instance is given
 `--cap-add=NET_ADMIN`, `--device=/dev/net/tun`, `--privileged` or
 `--network host` — the netstack (gVisor) TUN backend never touches a kernel
-TUN device, so none of those are needed, the same guarantee
-[networking-control-plane.md](networking-control-plane.md) already relies on.
-A `//go:build emulators` test (mirroring `internal/provider/azure_emulator_test.go`'s
-structure) drives the real package code against the two containers: it sends
-a payload peer-to-peer, then removes one peer from the authoritative list and
-asserts the next packet is silently dropped — the same observed-effect
-testing philosophy this codebase already uses for interruption detection
-(CQ-09).
+TUN device, so none of those are ever requested, the same guarantee
+[networking-control-plane.md](networking-control-plane.md) already relies
+on, regardless of container topology. See
+[networking-peer-model.background.md](networking-peer-model.background.md)
+for why two same-process instances over loopback prove the same
+protocol-level properties a real two-container setup would, for this
+specific test, without container/network-namespace scaffolding no code
+path here actually depends on.
 
 ## Why
 
@@ -111,7 +129,7 @@ testing philosophy this codebase already uses for interruption detection
 | CQ-05 (no cross-namespace Secret/ConfigMap reference) | `EnrollmentRef` is validated through the exact same `secret()` helper (`compile.go:48-53`) every other `SecretKeyReference` in this codebase already uses. |
 | CQ-07 (no fabricated replacement identity after an uncertain outcome) | The allocation's WireGuard public key and overlay address are checkpointed on `lifecycle.Allocation` the same way `ResourceID`/`Resources` already are, so a controller restart recovers rather than re-mints. |
 | CQ-11 (finalizer removal gated on observed effect, not intent) | Deliberately **not** reused for peer revocation: revocation is triggered eagerly at the phase transition, decoupled from drain observation, because the two guard different failure modes (stale network trust vs. duplicate cloud delete) and coupling them risks a stuck-forever cleanup if peer delivery fails. |
-| Qualification lane: "no host-network mode... only the minimum container capabilities/devices required" | Two containers on an `--internal` docker network, no `NET_ADMIN`/`/dev/net/tun`/`--privileged`/host networking — provable in the same way `tools/emulators.py` already isolates its cloud emulator containers. |
+| Qualification lane: "no host-network mode... only the minimum container capabilities/devices required" | No test topology here ever requests `NET_ADMIN`/`/dev/net/tun`/`--privileged`/host networking — the netstack (gVisor) TUN backend never touches a kernel TUN device regardless of whether the two `Tunnel` instances run in one process or two containers; see §4. |
 
 ## Rejected alternatives
 
@@ -156,10 +174,18 @@ which would defeat the entire point of updating a live peer list.
 
 The concrete wire schema of the poll endpoint and its response format, the
 polling interval and backoff policy, overlay IP address allocation and
-exhaustion handling, the exact `internal/` package layout for the new
-WireGuard code, PSK rotation policy when `EnrollmentRef` is set, rate
-limiting or abuse protection on the new controller-hosted endpoint, and
-observability for peer-convergence lag are all real implementation decisions
-this document does not make. See
+exhaustion handling, how a VM-side peer learns another peer's outer
+transport endpoint (the real dialable network address:port for the
+underlying UDP socket a `device.Device` sends encrypted packets to — distinct
+from the inner overlay address `CloudInitPayload.Peer` already carries, which
+only supplies an AllowedIPs entry; `internal/wireguard/tunnel.Peer` had to
+add its own `Endpoint` field to have anything to dial in its own
+qualification test, and nothing decides how a real VM-side agent would
+learn one from cloud-init or the poll response), PSK rotation policy when
+`EnrollmentRef` is set, rate limiting or abuse protection on the new
+controller-hosted endpoint, observability for peer-convergence lag, and the
+VM-side systemd unit or other boot-time integration that would actually
+call `internal/wireguard/tunnel.BringUp` on a running instance are all real
+implementation decisions this document does not make. See
 [networking-peer-model.background.md](networking-peer-model.background.md)
 for the investigation and reasoning behind each recommendation above.
