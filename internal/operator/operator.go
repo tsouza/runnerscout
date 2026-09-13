@@ -102,7 +102,7 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 	o := &Operator{Config: c, Client: k, GitHub: g, Store: s}
 	providers := map[string]lifecycle.Provider{}
 	for name, p := range c.Providers {
-		providers[name] = &provider.Command{Config: p, Exec: provider.OSExecutor{}, Bootstrap: func(ctx context.Context, id string) (string, error) {
+		providers[name] = &provider.Command{Config: p, Bootstrap: func(ctx context.Context, id string) (string, error) {
 			if g == nil {
 				return "", errors.New("GitHub JIT client unavailable during recovery")
 			}

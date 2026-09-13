@@ -12,6 +12,17 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSEnvelopeRequiresCompleteInventory'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSRecordedVolumeSurvivesDiscoveryLoss'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSSDKBindsAccountAndEC2ToOneIdentity'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSProfileProjectionAndFrozenIdentity'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSProfileRejectsProcessAndAmbientSources'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSWebIdentityUsesProjectedTokenAndScopedEndpoint'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSSDKCreationReceiptAndOrderedCleanup'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSSDKLostCreateResponseRecoversDependencies'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSSDKAccountDriftStopsEffects'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAWSSDKDefinitiveCapacityRejectionHasNoReceipt'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCreationReceiptPersistsDependenciesAndOverridesRetryClassification'),
     ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCloudDependenciesPersistBeforeDeleteAndSurviveRestart'),
     ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCloudDependencyCheckpointConflictPreventsDeletion'),
     ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestInvalidCloudDependenciesPreventDeletion'),

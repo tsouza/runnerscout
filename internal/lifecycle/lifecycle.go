@@ -59,6 +59,17 @@ type Observation struct {
 	Known      bool
 	ResourceID string
 }
+
+// Creation retains identities returned by the create operation itself, before a
+// later observation or interruption can hide its dependent resources.
+type Creation struct {
+	ResourceID string
+	Resources  []ResourceReference
+}
+type ResourceCreator interface {
+	CreateWithResources(context.Context, Allocation) (Creation, error)
+}
+
 type Provider interface {
 	Create(context.Context, Allocation) (string, error)
 	Observe(context.Context, Allocation) (Observation, error)
@@ -92,6 +103,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		return nil
 	}
 	if a.Phase == Pending {
+		if a.ResourceID != "" || len(a.Resources) > 0 {
+			return errors.New("pending allocation retains cloud resources")
+		}
 		if a.Retire || expired || a.Attempts >= a.MaxAttempts {
 			a.Phase = TimedOut
 			a.Condition = "LocalProvisioningTimeout"
@@ -123,13 +137,19 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		resource, e := p.Create(ctx, a)
-		if errors.Is(e, ErrNoEffect) && resource == "" {
+		var creation Creation
+		if creator, ok := p.(ResourceCreator); ok {
+			creation, e = creator.CreateWithResources(ctx, a)
+		} else {
+			creation.ResourceID, e = p.Create(ctx, a)
+		}
+		empty := creation.ResourceID == "" && len(creation.Resources) == 0
+		if errors.Is(e, ErrNoEffect) && empty {
 			a.Phase = Pending
 			a.Condition = "CreatePreparationFailed"
 			return save()
 		}
-		if errors.Is(e, ErrCapacity) {
+		if errors.Is(e, ErrCapacity) && empty {
 			a.Phase = Pending
 			if a.Outcomes == nil {
 				a.Outcomes = map[string]placement.Outcome{}
@@ -142,13 +162,25 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			a.Condition = "CapacityRejected"
 			return save()
 		}
-		if e != nil {
+		if creation.ResourceID != "" {
+			a.ResourceID = creation.ResourceID
+		}
+		resources, _, referenceError := MergeResources(a.Resources, creation.Resources)
+		if referenceError != nil {
+			if err := save(); err != nil {
+				return err
+			}
+			return referenceError
+		}
+		a.Resources = resources
+		if e != nil || creation.ResourceID == "" {
+			if !empty {
+				if err := save(); err != nil {
+					return err
+				}
+			}
 			return fmt.Errorf("create commitment unknown for %s", a.ID)
 		}
-		if resource == "" {
-			return errors.New("create returned empty identity; commitment unknown")
-		}
-		a.ResourceID = resource
 		a.Phase = Running
 		a.Condition = "VMCreated"
 		return save()

@@ -30,10 +30,10 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
             time.sleep(1)
         raise RuntimeError(name + " did not complete")
 
-    stats_code = "import ssl,urllib.request; c=ssl.create_default_context(cafile='/fixture-ca/ca.crt'); print(urllib.request.urlopen('https://api.github.com/fixture/stats',context=c).read().decode())"
+    stats_code = "import ssl,urllib.request; c=ssl.create_default_context(cafile='/tls/tls.crt'); print(urllib.request.urlopen('https://localhost:8443/fixture/stats',context=c).read().decode())"
 
     def stats():
-        return json.loads(run("crd-protocol-stats", namespaced + ["exec", "deployment/runnerscout", "--", "python3", "-c", stats_code]).stdout)
+        return json.loads(run("crd-protocol-stats", kube + ["-n", "runnerscout-test", "exec", "pod/github-fixture", "--", "python3", "-c", stats_code]).stdout)
 
     def sessions():
         values = stats()

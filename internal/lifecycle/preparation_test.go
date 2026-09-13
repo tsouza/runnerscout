@@ -8,41 +8,44 @@ import (
 
 	l "github.com/tsouza/runnerscout/internal/lifecycle"
 	"github.com/tsouza/runnerscout/internal/provider"
+	"github.com/tsouza/runnerscout/internal/testutil"
 )
-
-type preparationExecutor struct{ calls int }
-
-func (e *preparationExecutor) Run(_ context.Context, _ string, args ...string) ([]byte, error) {
-	e.calls++
-	if len(args) > 0 && args[0] == "sts" {
-		return []byte(`{"Account":"000000000000"}`), nil
-	}
-	return []byte(`{"Instances":[{"InstanceId":"i-preparation"}]}`), nil
-}
 
 func TestJITPreparationFailureRetriesWithoutCloudCommitment(t *testing.T) {
 	for _, finish := range []string{"recover", "deadline", "attempt-limit"} {
 		t.Run(finish, func(t *testing.T) {
 			controller, durable, _, now := setup()
-			executor := &preparationExecutor{}
+			fixture := testutil.NewAWS(t)
+			durable.a.Offering = durable.a.Catalog.Offerings[0]
+			durable.a.Offering.Region = "us-east-1"
+			durable.a.Offering.Zone = "us-east-1a"
+			durable.a.Offering.Image = "ami-test"
+			durable.a.Offering.Machine = "c6i.large"
+			durable.a.Offering.Architecture = "amd64"
+			durable.a.Catalog.Offerings[0] = durable.a.Offering
+			durable.a.Requirements.Regions = []string{"us-east-1"}
 			fail := true
 			requests := 0
-			adapter := &provider.Command{Config: provider.Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: executor,
-				Bootstrap: func(context.Context, string) (string, error) {
-					requests++
-					if fail {
-						return "", errors.New("private upstream failure")
-					}
-					return "jit", nil
-				},
+			adapter, cleanup, err := provider.NewCommand(provider.Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "private-subnet", SecurityGroup: "private-sg"}, map[string]string{"AWS_ACCESS_KEY_ID": "fixture-id", "AWS_SECRET_ACCESS_KEY": "fixture-secret"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cleanup() })
+			adapter.AWS.HTTPClient, adapter.AWS.Endpoint = fixture.Server.Client(), fixture.Server.URL
+			adapter.Bootstrap = func(context.Context, string) (string, error) {
+				requests++
+				if fail {
+					return "", errors.New("private upstream failure")
+				}
+				return "jit", nil
 			}
 			controller.Providers = map[string]l.Provider{"a": adapter}
 			deadline := durable.a.Deadline
 			if err := controller.Step(context.Background(), "rs-test"); err != nil {
 				t.Fatal(err)
 			}
-			if durable.a.Phase != l.Pending || executor.calls != 0 || durable.a.Attempts != 1 {
-				t.Fatalf("preparation failure invented a cloud obligation: phase=%s calls=%d attempts=%d", durable.a.Phase, executor.calls, durable.a.Attempts)
+			if durable.a.Phase != l.Pending || len(fixture.Requests()) != 0 || durable.a.Attempts != 1 {
+				t.Fatalf("preparation failure invented a cloud obligation: phase=%s calls=%d attempts=%d", durable.a.Phase, len(fixture.Requests()), durable.a.Attempts)
 			}
 			// Reconstruct the controller: all retry/deadline state must be durable.
 			controller = &l.Controller{Store: durable, Providers: map[string]l.Provider{"a": adapter}, Now: func() time.Time { return *now }}
@@ -65,11 +68,11 @@ func TestJITPreparationFailureRetriesWithoutCloudCommitment(t *testing.T) {
 				t.Fatal("preparation failure moved deadline")
 			}
 			if finish == "recover" {
-				if durable.a.Phase != l.Running || durable.a.ResourceID != "i-preparation" || executor.calls != 2 || requests != 2 {
-					t.Fatalf("recovery failed: %+v calls=%d requests=%d", durable.a, executor.calls, requests)
+				if durable.a.Phase != l.Running || durable.a.ResourceID != testutil.AWSInstanceID || len(fixture.Requests()) != 6 || len(durable.a.Resources) != 2 || requests != 2 {
+					t.Fatalf("recovery failed: %+v calls=%d requests=%d", durable.a, len(fixture.Requests()), requests)
 				}
-			} else if durable.a.Phase != l.TimedOut || executor.calls != 0 || requests > durable.a.MaxAttempts {
-				t.Fatalf("unbounded preparation retries: %+v calls=%d requests=%d", durable.a, executor.calls, requests)
+			} else if durable.a.Phase != l.TimedOut || len(fixture.Requests()) != 0 || requests > durable.a.MaxAttempts {
+				t.Fatalf("unbounded preparation retries: %+v calls=%d requests=%d", durable.a, len(fixture.Requests()), requests)
 			}
 		})
 	}
