@@ -88,6 +88,7 @@ REQUIRED = {
     ('github.com/tsouza/runnerscout/internal/provider', 'TestGCPSDKPendingCreateHonorsCancellation'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestGCPCredentialFilesIsolateRealTokenExchanges'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestGCPExplicitCredentialFailureNeverFallsBack'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestGCPCredentialExchangeCancellationAndRecovery'),
 
     ('github.com/tsouza/runnerscout/internal/placement', 'TestHardConstraintsAndFreshness'),
     ('github.com/tsouza/runnerscout/internal/placement', 'TestIndependentSmallCatalogOracle'),
