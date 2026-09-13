@@ -4,7 +4,7 @@ updates:
     directory: /
     groups:
       kubernetes-modules:
-        patterns: ["k8s.io/api", "k8s.io/apimachinery", "k8s.io/client-go"]
+        patterns: ["k8s.io/api", "k8s.io/apimachinery", "k8s.io/client-go", "k8s.io/kube-openapi", "sigs.k8s.io/structured-merge-diff/*"]
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
