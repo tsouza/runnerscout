@@ -118,11 +118,17 @@ type Operator struct {
 	GitHubJobs  githubJobsClient
 	AWSPrices   awsPriceObserver
 	AzurePrices azurePriceObserver
-	Store       *state.Kubernetes
-	Controller  *lifecycle.Controller
-	mu          sync.Mutex
-	paused      bool
-	draining    bool
+	// AzureInterruptions is declared but never read anywhere yet - see
+	// azure_interruptions.go and docs/azure-interruption-delivery.md. It
+	// exists only as the same nil-is-inert dependency-injection point
+	// AWSPrices/AzurePrices already are, so a future change can start
+	// constructing and consuming it without first landing this shape.
+	AzureInterruptions azureInterruptionObserver
+	Store              *state.Kubernetes
+	Controller         *lifecycle.Controller
+	mu                 sync.Mutex
+	paused             bool
+	draining           bool
 }
 
 func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
