@@ -94,3 +94,9 @@ Use `-check-crd` with the namespace and scale-set flags for read-only Kubernetes
 configuration validation. `-check-uninstall` requires root absence and completed
 durable cleanup without reading Secrets or contacting cloud providers. Helm runs
 these checks in its CRD test and pre-delete hooks, respectively.
+
+Allocation records containing cloud dependency IDs use the `allocation-v2` data key.
+Older development binaries cannot read these records; rollback requires a binary
+that understands this format. Never remove dependency IDs or rename the key to
+force a downgrade. Restore a compatible controller and retain state until cleanup
+is confirmed. Providers that cannot reconcile a recorded dependency refuse work.

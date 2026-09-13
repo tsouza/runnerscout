@@ -26,7 +26,9 @@ resourceVersion compare-and-swap; a Lease coordinates leadership. Every cloud
 effect uses a durable allocation identity and explicit provider/account binding.
 
 An ambiguous create outcome requires observation, never blind replacement.
-Deletion completes only after observed absence. Unknown outcomes retain cleanup
+Discovered cloud dependency IDs are saved before deletion and retained across restart;
+providers must reconcile those exact IDs even if discovery tags disappear. Each allocation
+retains at most 64 dependency references. Deletion completes only after observed absence. Unknown outcomes retain cleanup
 obligations across restart. Local provisioning timeout does not cancel a GitHub
 workflow or decide its result. Credentials remain external Secret files or
 workload identity; they are not catalog data.

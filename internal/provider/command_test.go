@@ -133,3 +133,21 @@ func TestJITPreparationFailureHasNoCloudEffects(t *testing.T) {
 		})
 	}
 }
+
+func TestUnsupportedDependencyRecordsRefuseCloudEffects(t *testing.T) {
+	for _, kind := range []string{"aws", "azure", "gcp"} {
+		calls := 0
+		p := Command{Config: credentialConfig(kind), Bootstrap: func(context.Context, string) (string, error) { calls++; return "jit", nil }}
+		a := allocation()
+		a.Resources = []lifecycle.ResourceReference{{Kind: "future-resource", ID: "retained"}}
+		if _, err := p.Create(context.Background(), a); err == nil {
+			t.Fatal("created over unsupported dependencies")
+		}
+		if ob, err := p.Observe(context.Background(), a); err == nil || ob.Known {
+			t.Fatal("unsupported dependency falsely observed absent")
+		}
+		if err := p.Delete(context.Background(), a); err == nil || calls != 0 {
+			t.Fatal("unsupported dependency allowed cloud effects")
+		}
+	}
+}
