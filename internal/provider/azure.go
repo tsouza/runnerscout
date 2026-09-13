@@ -75,6 +75,9 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 	if !strings.HasPrefix(strings.ToLower(a.Offering.Image), "/subscriptions/") {
 		return "", errors.New("Azure requires a pinned managed-image resource ID")
 	}
+	if err := p.azureClient().requireVacantCreation(ctx, p.Config, a.ID); err != nil {
+		return "", err
+	}
 	tags := map[string]string{"runnerscout-owner": p.Config.Owner, "runnerscout-operation": a.ID}
 	nicID := p.azureID("Microsoft.Network/networkInterfaces", a.ID+"-nic")
 	properties := map[string]any{

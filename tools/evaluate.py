@@ -12,6 +12,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCreationRefusesOccupiedOrUnknownResourceNames'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCreationCannotRetagForeignDisk'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureDiskTaggingRequiresOwnedCreationGraph'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureLostTaggingRecoversWithoutRedeployment'),

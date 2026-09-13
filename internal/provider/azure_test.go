@@ -60,6 +60,24 @@ func sdkFixture(t *testing.T, handler http.HandlerFunc) (*Command, *testAzureTok
 	return &Command{Config: azureConfig(), Azure: &AzureSDK{Credential: token, Options: options}, Bootstrap: func(context.Context, string) (string, error) { return "jit-secret", nil }}, token
 }
 func writeJSON(w http.ResponseWriter, value any) { _ = json.NewEncoder(w).Encode(value) }
+
+// Model an empty resource group until this test submits its deployment. Recovery
+// tests use sdkFixture directly because their resources are already committed.
+func azureCreationFixture(t *testing.T, handler http.HandlerFunc) (*Command, *testAzureToken) {
+	t.Helper()
+	deployed := false
+	return sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if !deployed && r.Method == "GET" {
+			w.WriteHeader(404)
+			writeJSON(w, map[string]any{"error": map[string]string{"code": "ResourceNotFound"}})
+			return
+		}
+		if deploymentPath(r) && r.Method == "PUT" {
+			deployed = true
+		}
+		handler(w, r)
+	})
+}
 func deploymentPath(r *http.Request) bool {
 	return strings.Contains(strings.ToLower(r.URL.Path), "/microsoft.resources/deployments/")
 }
@@ -70,7 +88,7 @@ func ownedResource(kind, name, owner string) map[string]any {
 func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 	var requests []string
 	disk := azureCreationDisk()
-	p, token := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+	p, token := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		if r.Method == "GET" {
 			if strings.HasSuffix(strings.ToLower(r.URL.Path), "/disks/rs-test-os") {
@@ -239,7 +257,7 @@ func TestAzureSDKAuthenticationAndTransportFailuresStayUnknown(t *testing.T) {
 	}
 }
 func TestAzureSDKCreateTimeoutRetainsUnknownCommitment(t *testing.T) {
-	p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+	p, _ := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if !deploymentPath(r) {
 			t.Error("tagging before deployment completion")
 		}

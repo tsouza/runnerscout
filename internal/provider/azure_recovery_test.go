@@ -13,7 +13,7 @@ import (
 
 func TestAzureCreationCannotRetagForeignDisk(t *testing.T) {
 	var updates atomic.Int32
-	p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+	p, _ := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if deploymentPath(r) && r.Method == "PUT" {
 			writeJSON(w, map[string]any{"properties": map[string]any{"provisioningState": "Succeeded"}})
 			return
@@ -93,7 +93,7 @@ func TestAzureDiskTaggingRequiresOwnedCreationGraph(t *testing.T) {
 				storage["osDisk"].(map[string]any)["createOption"] = "Attach"
 			}
 			patches := 0
-			p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+			p, _ := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
 				if deploymentPath(r) && r.Method == "PUT" {
 					writeJSON(w, map[string]any{"properties": map[string]any{"provisioningState": "Succeeded"}})
 					return

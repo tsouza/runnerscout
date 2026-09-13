@@ -67,6 +67,35 @@ func missingAzureResource(err error) bool {
 	var response *azcore.ResponseError
 	return errors.As(err, &response) && response.StatusCode == 404
 }
+
+// ARM deployment submission is create-or-update, so occupied names must not be
+// used as a retry mechanism. This preflight does not make submission atomic;
+// the dedicated resource group must still exclude competing resource writers.
+func (a *AzureSDK) requireVacantCreation(ctx context.Context, c Config, id string) error {
+	missing := func(err error, deployment bool) bool {
+		var response *azcore.ResponseError
+		return errors.As(err, &response) && response.StatusCode == 404 &&
+			(response.ErrorCode == "ResourceNotFound" || deployment && response.ErrorCode == "DeploymentNotFound")
+	}
+	client, err := a.deployments(c)
+	if err != nil {
+		return errors.New("Azure creation inventory unavailable")
+	}
+	if _, err := client.Get(ctx, c.ResourceGroup, id, nil); !missing(err, true) {
+		return errors.New("Azure deployment name occupied or absence unconfirmed")
+	}
+	for _, resource := range []struct{ kind, name, version string }{
+		{"Microsoft.Compute/virtualMachines", id, "2024-07-01"},
+		{"Microsoft.Network/networkInterfaces", id + "-nic", "2024-05-01"},
+		{"Microsoft.Compute/disks", id + "-os", "2024-03-02"},
+	} {
+		path := "/subscriptions/" + c.Subscription + "/resourceGroups/" + c.ResourceGroup + "/providers/" + resource.kind + "/" + resource.name
+		if _, err := a.get(ctx, c, path, resource.version); !missing(err, false) {
+			return errors.New("Azure resource name occupied or absence unconfirmed")
+		}
+	}
+	return nil
+}
 func (a *AzureSDK) list(ctx context.Context, c Config, id string) ([]azureResource, error) {
 	client, err := a.resources(c)
 	if err != nil {
