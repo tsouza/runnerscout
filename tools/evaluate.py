@@ -12,6 +12,14 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureObservationRetainsImmutableResourceIdentities'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureRecordedGenerationsRejectReplacementAndRetainDiscoveryLoss'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCleanupRetainsGenerationsUntilAllResourcesAreAbsent'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCreationReceiptKeepsGenerationsAfterLostTagResponse'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureVMDeletionRefusesUntrackedAttachments'),
+    ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureAbsenceRequiresRecognizedNotFoundResponses'),
+    ('github.com/tsouza/runnerscout/internal/state', 'TestDurableResourceGenerationSurvivesRestartAndCannotChange'),
+    ('github.com/tsouza/runnerscout/internal/lifecycle', 'TestCreationRecoveryKeepsProvenIdentitiesOnUnknownOutcome'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureManagedImageContractPrecedesDeployment'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureImageMetadataRequiresMatchingIdentityAndCompleteShape'),
     ('github.com/tsouza/runnerscout/internal/provider', 'TestAzureCreationRefusesOccupiedOrUnknownResourceNames'),

@@ -83,15 +83,14 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	case "aws":
 		return p.createAWS(ctx, a, script)
 	case "azure":
-		id, err := p.createAzure(ctx, a, script)
-		return lifecycle.Creation{ResourceID: id}, err
+		return p.createAzure(ctx, a, script)
 	default:
 		id, err := p.createGCP(ctx, a, script)
 		return lifecycle.Creation{ResourceID: id}, err
 	}
 }
 func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
-	if len(a.Resources) > 0 && p.Config.Kind != "aws" {
+	if len(a.Resources) > 0 && p.Config.Kind != "aws" && p.Config.Kind != "azure" {
 		return lifecycle.Observation{}, errors.New("provider cannot reconcile recorded cloud dependencies")
 	}
 	if err := ValidateName(a.ID); err != nil {
@@ -123,9 +122,6 @@ func (p *Command) ReconcileCreation(ctx context.Context, a lifecycle.Allocation)
 	if err := p.Validate(); err != nil {
 		return lifecycle.Observation{}, err
 	}
-	if len(a.Resources) > 0 {
-		return lifecycle.Observation{}, errors.New("provider cannot reconcile recorded cloud dependencies")
-	}
 	return p.reconcileAzureCreation(ctx, a)
 }
 func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
@@ -137,6 +133,9 @@ func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
 	}
 	if p.Config.Kind == "aws" {
 		return p.deleteAWS(ctx, a)
+	}
+	if p.Config.Kind == "azure" {
+		return p.deleteAzure(ctx, a)
 	}
 	ob, err := p.Observe(ctx, a)
 	if err != nil {
@@ -152,9 +151,6 @@ func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
 		return errors.New("resource identity mismatch")
 	}
 	a.ResourceID = ob.ResourceID
-	if p.Config.Kind == "azure" {
-		return p.deleteAzure(ctx, a)
-	}
 	return p.deleteGCP(ctx, a)
 }
 

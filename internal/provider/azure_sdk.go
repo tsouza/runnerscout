@@ -65,7 +65,7 @@ func (a *AzureSDK) deployments(c Config) (*armdeployments.DeploymentsClient, err
 }
 func missingAzureResource(err error) bool {
 	var response *azcore.ResponseError
-	return errors.As(err, &response) && response.StatusCode == 404
+	return errors.As(err, &response) && response.StatusCode == 404 && (response.ErrorCode == "ResourceNotFound" || response.ErrorCode == "DeploymentNotFound")
 }
 
 // ARM deployment submission is create-or-update, so occupied names must not be

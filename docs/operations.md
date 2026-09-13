@@ -70,8 +70,10 @@ terminal deployment. It requires matching VM ownership, image and disk attachmen
 evidence, and verifies service-generated VM/disk identities around the update.
 Normal observation remains read-only. Missing evidence or conflicting ownership
 retains the allocation for investigation; recovery never redeploys the VM. These
-checks do not provide atomic tagging or persist immutable Azure identities across
-restarts. Preflight and deployment are separate requests: keep the resource group
+checks do not provide atomic tagging. VM, disk and NIC service identities are
+checkpointed across restarts, including proven identities from partial creation
+recovery. Changed generations, conflicting ownership and untracked VM attachments
+block deletion. Preflight and deployment are separate requests: keep the resource group
 dedicated to RunnerScout, exclude competing resource writers and preserve its state.
 
 Each named provider uses its own credential scope. AWS profiles require an
@@ -124,3 +126,7 @@ Older development binaries cannot read these records; rollback requires a binary
 that understands this format. Never remove dependency IDs or rename the key to
 force a downgrade. Restore a compatible controller and retain state until cleanup
 is confirmed. Providers that cannot reconcile a recorded dependency refuse work.
+
+Azure dependency records include a `uid` alongside each resource path. Older
+binaries that cannot read this field must not be used to resume those allocations.
+Never strip a generation ID to force rollback or adopt a replacement resource.
