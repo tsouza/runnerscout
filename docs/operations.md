@@ -56,6 +56,13 @@ A failed configured credential does not fall back to developer CLI credentials.
 Mount credential files through Secrets or workload-identity admission; never place
 secret values in the public configuration. Existing `az login` caches are not used.
 
+Azure images must be available, generalized Linux managed images in the selected
+region, containing only an OS disk. RunnerScout reads and validates their metadata
+before deployment; the provider identity needs permission to read each image.
+Data-disk images and specialized images are rejected. The managed-image API does
+not expose architecture: maintain the image-to-machine architecture mapping in
+the catalog and qualify the image before admitting jobs.
+
 Azure creation requires confirmed absence of the deployment, VM, NIC and disk
 names before submitting an ARM template. An occupied name or unknown inventory
 stops creation. Creation recovery can finish interrupted OS-disk ownership tagging after a

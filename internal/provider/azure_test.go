@@ -67,6 +67,10 @@ func azureCreationFixture(t *testing.T, handler http.HandlerFunc) (*Command, *te
 	t.Helper()
 	deployed := false
 	return sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.URL.Path, azureFixtureImage) && r.Method == "GET" {
+			writeJSON(w, azureSupportedImage())
+			return
+		}
 		if !deployed && r.Method == "GET" {
 			w.WriteHeader(404)
 			writeJSON(w, map[string]any{"error": map[string]string{"code": "ResourceNotFound"}})
