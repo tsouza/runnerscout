@@ -12,7 +12,9 @@ package wireguard
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -114,6 +116,52 @@ func Generate() (KeyPair, error) {
 	return kp, nil
 }
 
+// PollTokenSize is the byte length of a poll token's raw entropy before hex
+// encoding - 256 bits, the same budget KeySize's Curve25519 keys already
+// carry. That margin is what docs/networking-peer-model.md's "What this
+// document does not decide" section left as an open "rate limiting or abuse
+// protection" question: see the poll endpoint's own doc comment
+// (internal/health package) for why no separate rate limiter is layered on
+// top of this margin for a first slice with zero live callers.
+const PollTokenSize = 32
+
+// GeneratePollToken mints a fresh per-allocation bearer credential for the
+// controller's WireGuard peer-poll endpoint
+// (docs/networking-peer-model.md's "Revocation" section), plus the SHA-256
+// hash of it that the caller should checkpoint instead of the raw token -
+// see PollTokenHash's rationale on lifecycle.Allocation.
+// WireGuardPollTokenHash. It is generated with crypto/rand, the same entropy
+// source Generate already uses for keypairs.
+//
+// The raw token is returned hex-encoded rather than base64: unlike
+// PrivateKey.Base64 above, no external WireGuard tool has to interoperate
+// with this value's encoding, so the choice is free, and hex has no
+// characters (+, /, =) that ever need quoting or escaping in an HTTP
+// Authorization header, a shell-quoted cloud-init script, or a log line that
+// accidentally includes it - unlike base64's alphabet.
+func GeneratePollToken() (string, [sha256.Size]byte, error) {
+	raw := make([]byte, PollTokenSize)
+	if _, err := rand.Read(raw); err != nil {
+		return "", [sha256.Size]byte{}, fmt.Errorf("wireguard: generate poll token: %w", err)
+	}
+	return hex.EncodeToString(raw), sha256.Sum256(raw), nil
+}
+
+// HashPollToken returns the SHA-256 hash of a poll token's raw bytes, given
+// the same hex encoding GeneratePollToken returns and CloudInitPayload
+// embeds. The poll endpoint calls this on every request to turn a presented
+// Authorization header value into the same shape as the checkpointed hash it
+// compares against (in constant time) - it never compares raw token bytes,
+// mirroring GeneratePollToken's own separation of "the raw secret, delivered
+// once" from "the hash, checked repeatedly".
+func HashPollToken(token string) ([sha256.Size]byte, error) {
+	raw, err := hex.DecodeString(token)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("wireguard: decode poll token: %w", err)
+	}
+	return sha256.Sum256(raw), nil
+}
+
 // Peer is one entry in the peer list an allocation's cloud-init needs:
 // another allocation's already-checkpointed public identity on the same
 // NetworkProfile's overlay.
@@ -178,7 +226,16 @@ func Snapshot(forID, networkProfile string, allocations []lifecycle.Allocation) 
 // concrete to iterate on instead of inventing a format with no embedding
 // code to validate it against.
 type CloudInitPayload struct {
-	PrivateKey     string `json:"privateKey"`     // base64, KeySize raw bytes
+	PrivateKey string `json:"privateKey"` // base64, KeySize raw bytes
+	// PollToken is the raw, hex-encoded bearer credential
+	// (GeneratePollToken) this allocation's VM presents to the controller's
+	// WireGuard peer-poll endpoint. Delivered in the clear, exactly like
+	// PrivateKey and the GitHub JIT token above it in cloud-init - the same
+	// accepted threat model (docs/networking-peer-model.background.md, "Why
+	// trust is derived from cloud-init instead of a handshake"). The
+	// controller checkpoints only this token's hash, never the raw value; see
+	// lifecycle.Allocation.WireGuardPollTokenHash.
+	PollToken      string `json:"pollToken"`
 	OverlayAddress string `json:"overlayAddress"` // format not yet decided; see peer-model doc
 	Peers          []Peer `json:"peers"`
 }

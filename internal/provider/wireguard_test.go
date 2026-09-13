@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -67,6 +69,9 @@ func TestCreateWithResourcesZeroEffectWithoutNetworkProfile(t *testing.T) {
 	if len(receipt.WireGuardPublicKey) != 0 {
 		t.Fatalf("wireguard key material generated with no NetworkProfile intent: %x", receipt.WireGuardPublicKey)
 	}
+	if len(receipt.WireGuardPollTokenHash) != 0 {
+		t.Fatalf("wireguard poll token hash generated with no NetworkProfile intent: %x", receipt.WireGuardPollTokenHash)
+	}
 	var script string
 	for _, request := range f.Requests() {
 		if request.Get("Action") == "RunInstances" {
@@ -99,7 +104,7 @@ func TestCreateWithResourcesWithoutNetworkPeersHookRefusesWireGuardIntent(t *tes
 	if err != lifecycle.ErrNoEffect {
 		t.Fatalf("expected ErrNoEffect, got %v", err)
 	}
-	if receipt.ResourceID != "" || len(receipt.WireGuardPublicKey) != 0 {
+	if receipt.ResourceID != "" || len(receipt.WireGuardPublicKey) != 0 || len(receipt.WireGuardPollTokenHash) != 0 {
 		t.Fatal("wireguard intent without a NetworkPeers hook produced a receipt", receipt)
 	}
 	if len(f.Requests()) != 0 {
@@ -174,6 +179,23 @@ func TestCreateWithResourcesEmbedsWireGuardIdentityWhenIntended(t *testing.T) {
 	}
 	if len(decodedPayload.Peers) != 1 || decodedPayload.Peers[0] != wantPeers[0] {
 		t.Fatalf("peer snapshot mismatch: got %+v want %+v", decodedPayload.Peers, wantPeers)
+	}
+	if len(receipt.WireGuardPollTokenHash) != sha256.Size {
+		t.Fatalf("checkpointed poll token hash has wrong size: %d", len(receipt.WireGuardPollTokenHash))
+	}
+	if decodedPayload.PollToken == "" {
+		t.Fatal("cloud-init payload does not embed a poll token")
+	}
+	rawToken, err := hex.DecodeString(decodedPayload.PollToken)
+	if err != nil || len(rawToken) != wireguard.PollTokenSize {
+		t.Fatalf("embedded poll token malformed: %v (len %d)", err, len(rawToken))
+	}
+	tokenHash, err := wireguard.HashPollToken(decodedPayload.PollToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(tokenHash[:]) != string(receipt.WireGuardPollTokenHash) {
+		t.Fatal("checkpointed poll token hash does not match the token embedded in cloud-init")
 	}
 	privateKeyBytes, err := base64.StdEncoding.DecodeString(decodedPayload.PrivateKey)
 	if err != nil || len(privateKeyBytes) != wireguard.KeySize {
