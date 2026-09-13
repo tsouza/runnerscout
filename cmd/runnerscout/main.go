@@ -154,6 +154,23 @@ func awsPricesObserver(controller *operator.Operator, cfg operator.Config) (*pro
 	return command.AWS.SpotPrices(), nil
 }
 
+// azurePricesObserver builds a live Azure Retail Prices spot observer,
+// mirroring awsPricesObserver: nil unless the operator explicitly opts in
+// via cfg.AzurePriceRefresh. Unlike AWS, the Retail Prices API needs no
+// credentials at all, so the "azure" provider entry here is required only
+// to confirm Azure is actually a configured provider, never to supply
+// credentials to the price call itself.
+func azurePricesObserver(controller *operator.Operator, cfg operator.Config) (*provider.AzureSpotPrices, error) {
+	if !cfg.AzurePriceRefresh {
+		return nil, nil
+	}
+	command, ok := controller.Controller.Providers["azure"].(*provider.Command)
+	if !ok || command.Azure == nil {
+		return nil, errors.New(`Azure price refresh requires a configured "azure" provider`)
+	}
+	return command.Azure.SpotPrices(), nil
+}
+
 func withHealth(ctx context.Context, address string, run func(context.Context, *health.Status) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -254,6 +271,13 @@ func run(args []string) error {
 		}
 		if awsPrices != nil {
 			controller.AWSPrices = awsPrices
+		}
+		azurePrices, err := azurePricesObserver(controller, cfg)
+		if err != nil {
+			return err
+		}
+		if azurePrices != nil {
+			controller.AzurePrices = azurePrices
 		}
 		controller.Readiness = status.SetReady
 		err = controller.Run(ctx)

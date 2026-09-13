@@ -116,6 +116,13 @@ func (r *Runtime) newWorker(resolved Resolved, credentials Credentials, mode Wor
 		}
 		op.AWSPrices = command.AWS.SpotPrices()
 	}
+	if resolved.Config.AzurePriceRefresh {
+		command, ok := op.Controller.Providers["azure"].(*provider.Command)
+		if !ok || command.Azure == nil {
+			return nil, nil, errors.New(`Azure price refresh requires a configured "azure" provider`)
+		}
+		op.AzurePrices = command.Azure.SpotPrices()
+	}
 	op.Readiness = ready
 	if mode == CleanupMode {
 		op.Drain()

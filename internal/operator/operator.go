@@ -47,6 +47,14 @@ type Config struct {
 	// It defaults to false so existing deployments never start making live
 	// AWS API calls without an explicit choice to do so.
 	AWSPriceRefresh bool `json:"awsPriceRefresh,omitempty"`
+	// AzurePriceRefresh opts into live Azure Retail Prices API spot price
+	// observation on every admission cycle, using the "azure" entry in
+	// Providers only to confirm Azure is actually a configured provider -
+	// the Retail Prices API itself is public and unauthenticated, so no
+	// credentials are read from that entry for this call. It defaults to
+	// false so existing deployments never start making live Azure API
+	// calls without an explicit choice to do so.
+	AzurePriceRefresh bool `json:"azurePriceRefresh,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -103,17 +111,18 @@ type fleet struct {
 }
 type Operator struct {
 	// Readiness is an optional concurrency-safe observer of session/reconciliation state.
-	Readiness  func(bool)
-	Config     Config
-	Client     kubernetes.Interface
-	GitHub     *scaleset.Client
-	GitHubJobs githubJobsClient
-	AWSPrices  awsPriceObserver
-	Store      *state.Kubernetes
-	Controller *lifecycle.Controller
-	mu         sync.Mutex
-	paused     bool
-	draining   bool
+	Readiness   func(bool)
+	Config      Config
+	Client      kubernetes.Interface
+	GitHub      *scaleset.Client
+	GitHubJobs  githubJobsClient
+	AWSPrices   awsPriceObserver
+	AzurePrices azurePriceObserver
+	Store       *state.Kubernetes
+	Controller  *lifecycle.Controller
+	mu          sync.Mutex
+	paused      bool
+	draining    bool
 }
 
 func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
@@ -298,6 +307,7 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 	}
 	if e == nil {
 		catalog = o.refreshAWSPrices(ctx, catalog)
+		catalog = o.refreshAzurePrices(ctx, catalog)
 	}
 	if n > 0 {
 		if _, e = placement.Choose(time.Now(), o.Config.Requirements, catalog, nil); e != nil {

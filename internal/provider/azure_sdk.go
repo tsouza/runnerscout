@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -24,6 +25,17 @@ type AzureSDK struct {
 	once       sync.Once
 	credential azcore.TokenCredential
 	err        error
+
+	// PricesHTTPClient and PricesEndpoint override the Azure Retail Prices
+	// API's transport and endpoint for local fixtures only, never product
+	// configuration - mirroring AWSSDK's own HTTPClient/Endpoint test
+	// injection fields. They are kept separate from Options/Credential
+	// above on purpose: the Retail Prices API (prices.azure.com) is a
+	// distinct, unauthenticated public REST endpoint, not an ARM
+	// management-plane call, so it has no ARM client options or credential
+	// to share.
+	PricesHTTPClient *http.Client
+	PricesEndpoint   string
 }
 
 func (a *AzureSDK) credentials() (azcore.TokenCredential, error) {
