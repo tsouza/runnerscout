@@ -42,6 +42,7 @@ const azureFixtureImage = "/subscriptions/sub/resourceGroups/rg/providers/Micros
 func azureCreationVM() map[string]any {
 	vm := ownedResource("Microsoft.Compute/virtualMachines", "rs-test", "test")
 	vm["properties"] = map[string]any{"vmId": azureFixtureVMUID, "provisioningState": "Succeeded", "storageProfile": map[string]any{"imageReference": map[string]any{"id": azureFixtureImage}, "osDisk": map[string]any{"name": "rs-test-os", "createOption": "FromImage", "managedDisk": map[string]any{"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/disks/rs-test-os"}}}}
+	vm["properties"].(map[string]any)["networkProfile"] = map[string]any{"networkInterfaces": []any{map[string]string{"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/rs-test-nic"}}}
 	return vm
 }
 func azureCreationDisk() map[string]any {
@@ -168,7 +169,7 @@ func TestAzureLostTaggingRecoversWithoutRedeployment(t *testing.T) {
 	for _, mode := range []string{"recover", "tag-response-lost", "foreign-nic", "foreign-disk", "parent-missing", "deployment-active", "deployment-failed", "inventory-unavailable", "receipt-mismatch", "read-only-observe", "not-creating"} {
 		t.Run(mode, func(t *testing.T) {
 			disk, vm := azureCreationDisk(), azureCreationVM()
-			nic := ownedResource("Microsoft.Network/networkInterfaces", "rs-test-nic", "test")
+			nic := azureOwnedNIC()
 			if mode == "foreign-nic" {
 				nic["tags"].(map[string]string)["runnerscout-owner"] = "foreign"
 			}
@@ -206,6 +207,10 @@ func TestAzureLostTaggingRecoversWithoutRedeployment(t *testing.T) {
 						resources = append(resources, vm)
 					}
 					writeJSON(w, map[string]any{"value": resources})
+					return
+				}
+				if strings.HasSuffix(strings.ToLower(r.URL.Path), "/networkinterfaces/rs-test-nic") {
+					writeJSON(w, nic)
 					return
 				}
 				if strings.HasSuffix(strings.ToLower(r.URL.Path), "/virtualmachines/rs-test") {

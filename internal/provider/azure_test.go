@@ -79,6 +79,16 @@ func azureCreationFixture(t *testing.T, handler http.HandlerFunc) (*Command, *te
 		if deploymentPath(r) && r.Method == "PUT" {
 			deployed = true
 		}
+		if deployed && r.Method == "GET" && strings.HasSuffix(strings.ToLower(r.URL.Path), "/resources") {
+			// The list view can lag the disk tag update. Direct reads below use
+			// the test's current resource state and decide its ownership.
+			writeJSON(w, map[string]any{"value": []any{azureCreationVM(), azureCreationDisk(), azureOwnedNIC()}})
+			return
+		}
+		if deployed && r.Method == "GET" && strings.HasSuffix(strings.ToLower(r.URL.Path), "/networkinterfaces/rs-test-nic") {
+			writeJSON(w, azureOwnedNIC())
+			return
+		}
 		handler(w, r)
 	})
 }
@@ -147,7 +157,16 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 	a := allocation()
 	a.Offering.Image = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/test"
 	id, err := p.Create(context.Background(), a)
-	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || len(requests) != 6 || token.calls.Load() == 0 {
+	deployments, updates := 0, 0
+	for _, request := range requests {
+		if strings.HasPrefix(request, "PUT ") {
+			deployments++
+		}
+		if strings.HasPrefix(request, "PATCH ") {
+			updates++
+		}
+	}
+	if err != nil || !strings.HasSuffix(id, "/virtualMachines/rs-test") || deployments != 1 || updates != 1 || token.calls.Load() == 0 {
 		t.Fatalf("create: id=%q err=%v requests=%v", id, err, requests)
 	}
 }
@@ -182,22 +201,35 @@ func TestAzureForeignDiskCannotBeDeleted(t *testing.T) {
 	}
 }
 func TestAzureResidualOwnedNICRetainsCleanup(t *testing.T) {
+	nic := azureOwnedNIC()
+	delete(nic["properties"].(map[string]any), "virtualMachine")
 	p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if deploymentPath(r) {
 			w.WriteHeader(404)
 			writeJSON(w, map[string]any{"error": map[string]string{"code": "DeploymentNotFound"}})
 			return
 		}
-		writeJSON(w, map[string]any{"value": []any{ownedResource("Microsoft.Network/networkInterfaces", "rs-test-nic", "test")}})
+		if strings.HasSuffix(strings.ToLower(r.URL.Path), "/resources") {
+			writeJSON(w, map[string]any{"value": []any{nic}})
+			return
+		}
+		if strings.EqualFold(r.URL.Path, nic["id"].(string)) {
+			writeJSON(w, nic)
+			return
+		}
+		w.WriteHeader(404)
+		writeJSON(w, map[string]any{"error": map[string]string{"code": "ResourceNotFound"}})
 	})
 	ob, err := p.Observe(context.Background(), allocation())
-	if err != nil || !ob.Known || !ob.Exists {
+	if err != nil || !ob.Known || !ob.Exists || len(ob.Resources) != 1 || ob.Resources[0].UID != azureFixtureNICUID {
 		t.Fatal(ob, err)
 	}
 }
 func TestAzureSDKPaginatedInventoryAndObservedCleanup(t *testing.T) {
+	nic := azureOwnedNIC()
+	delete(nic["properties"].(map[string]any), "virtualMachine")
 	deleted := false
-	pages := 0
+	deletes, secondPages := 0, 0
 	p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		if deploymentPath(r) {
 			w.WriteHeader(404)
@@ -205,30 +237,50 @@ func TestAzureSDKPaginatedInventoryAndObservedCleanup(t *testing.T) {
 			return
 		}
 		if r.Method == "DELETE" {
+			if !strings.EqualFold(r.URL.Path, nic["id"].(string)) {
+				t.Error("unexpected resource deletion", r.URL.Path)
+			}
+			deletes++
 			deleted = true
 			w.WriteHeader(204)
 			return
 		}
-		pages++
-		if r.URL.Query().Get("page") == "2" {
-			writeJSON(w, map[string]any{"value": []any{ownedResource("Microsoft.Network/networkInterfaces", "rs-test-nic", "test")}})
+		if strings.HasSuffix(strings.ToLower(r.URL.Path), "/resources") {
+			if r.URL.Query().Get("page") == "2" {
+				secondPages++
+				items := []any{}
+				if !deleted {
+					items = append(items, nic)
+				}
+				writeJSON(w, map[string]any{"value": items})
+				return
+			}
+			writeJSON(w, map[string]any{"value": []any{}, "nextLink": "https://" + r.Host + r.URL.Path + "?api-version=2021-04-01&page=2"})
 			return
 		}
-		if deleted {
-			writeJSON(w, map[string]any{"value": []any{}})
+		if !deleted && strings.EqualFold(r.URL.Path, nic["id"].(string)) {
+			writeJSON(w, nic)
 			return
 		}
-		writeJSON(w, map[string]any{"value": []any{}, "nextLink": "https://" + r.Host + r.URL.Path + "?api-version=2021-04-01&page=2"})
+		w.WriteHeader(404)
+		writeJSON(w, map[string]any{"error": map[string]string{"code": "ResourceNotFound"}})
 	})
-	if err := p.Delete(context.Background(), allocation()); err != nil {
-		t.Fatal(err)
+	a := allocation()
+	if err := p.Delete(context.Background(), a); err == nil || deletes != 0 {
+		t.Fatal("uncheckpointed dependency was deleted", deletes, err)
 	}
-	if !deleted || pages != 4 {
-		t.Fatal("did not observe all pages before cleanup", deleted, pages)
+	observed, err := p.Observe(context.Background(), a)
+	if err != nil || !observed.Exists || len(observed.Resources) != 1 {
+		t.Fatal("residual dependency not observed", observed, err)
 	}
-	ob, err := p.Observe(context.Background(), allocation())
-	if err != nil || !ob.Known || ob.Exists {
-		t.Fatal(ob, err)
+	a.ResourceID = observed.ResourceID
+	a.Resources = observed.Resources
+	if err := p.Delete(context.Background(), a); err != nil || deletes != 1 {
+		t.Fatal("cleanup did not delete the checkpointed NIC once", deletes, err)
+	}
+	observed, err = p.Observe(context.Background(), a)
+	if err != nil || !observed.Known || observed.Exists || secondPages < 3 || len(observed.Resources) != 1 || observed.Resources[0] != a.Resources[0] {
+		t.Fatal("cleanup lost identity or confirmed absence incorrectly", observed, err)
 	}
 }
 func TestAzureSDKAuthenticationAndTransportFailuresStayUnknown(t *testing.T) {

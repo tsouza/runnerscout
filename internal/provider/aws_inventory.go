@@ -53,6 +53,9 @@ func awsNext(token *string, seen map[string]bool) (bool, error) {
 
 func (p *Command) awsInventory(ctx context.Context, client *ec2.Client, a lifecycle.Allocation) (awsInventory, error) {
 	for _, resource := range a.Resources {
+		if resource.UID != "" {
+			return awsInventory{}, errors.New("unsupported AWS dependency generation")
+		}
 		if resource.Kind != "aws-volume" && resource.Kind != "aws-network-interface" {
 			return awsInventory{}, errors.New("unsupported AWS dependency kind")
 		}

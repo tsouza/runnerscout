@@ -12,7 +12,7 @@ func TestAzureCreationRefusesOccupiedOrUnknownResourceNames(t *testing.T) {
 	for _, mode := range []string{"vacant", "foreign-vm", "foreign-nic", "foreign-disk", "owned-vm", "untagged-disk", "unavailable", "invalid-404", "empty-404", "existing-deployment"} {
 		t.Run(mode, func(t *testing.T) {
 			vm, disk := azureCreationVM(), azureCreationDisk()
-			nic := ownedResource("Microsoft.Network/networkInterfaces", "rs-test-nic", "test")
+			nic := azureOwnedNIC()
 			target := "virtualmachines/rs-test"
 			switch mode {
 			case "foreign-vm":
@@ -33,6 +33,10 @@ func TestAzureCreationRefusesOccupiedOrUnknownResourceNames(t *testing.T) {
 				path := strings.ToLower(r.URL.Path)
 				if strings.EqualFold(r.URL.Path, azureFixtureImage) && r.Method == "GET" {
 					writeJSON(w, azureSupportedImage())
+					return
+				}
+				if deployed && r.Method == "GET" && strings.HasSuffix(path, "/resources") {
+					writeJSON(w, map[string]any{"value": []any{vm, disk, nic}})
 					return
 				}
 				if r.Method != "GET" {

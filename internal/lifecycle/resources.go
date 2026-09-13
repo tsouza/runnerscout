@@ -12,11 +12,17 @@ import (
 // results never remove obligations; the provider must observe each recorded ID.
 func MergeResources(current, observed []ResourceReference) ([]ResourceReference, bool, error) {
 	set := make(map[ResourceReference]bool)
+	identities := make(map[[2]string]string)
 	for _, group := range [][]ResourceReference{current, observed} {
 		for _, resource := range group {
-			if resource.Kind == "" || len(resource.Kind) > 64 || strings.Trim(resource.Kind, "abcdefghijklmnopqrstuvwxyz0123456789-./") != "" || resource.ID == "" || len(resource.ID) > 2048 || strings.TrimSpace(resource.ID) != resource.ID || strings.ContainsAny(resource.ID, "\x00\r\n\t") {
+			if resource.Kind == "" || len(resource.Kind) > 64 || strings.Trim(resource.Kind, "abcdefghijklmnopqrstuvwxyz0123456789-./") != "" || resource.ID == "" || len(resource.ID) > 2048 || strings.TrimSpace(resource.ID) != resource.ID || strings.ContainsAny(resource.ID, "\x00\r\n\t") || len(resource.UID) > 256 || strings.TrimSpace(resource.UID) != resource.UID || strings.ContainsAny(resource.UID, "\x00\r\n\t") {
 				return nil, false, errors.New("invalid cloud dependency reference")
 			}
+			key := [2]string{resource.Kind, resource.ID}
+			if uid, exists := identities[key]; exists && uid != resource.UID {
+				return nil, false, errors.New("cloud dependency generation changed or discarded")
+			}
+			identities[key] = resource.UID
 			set[resource] = true
 			if len(set) > 64 {
 				return nil, false, errors.New("cloud dependency reference limit exceeded")
