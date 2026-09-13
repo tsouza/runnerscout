@@ -8,7 +8,32 @@ on:
 permissions:
   contents: read
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # See ci.yml's identical changes job for why this filter is a
+          # deny-list of exactly **/*.md and nothing more.
+          filters: |
+            code:
+              - '!**/*.md'
   analyze:
+    needs: changes
+    # needs.changes.result != 'success' defaults to running this job
+    # whenever the changes job itself did not cleanly resolve (see ci.yml's
+    # identical reasoning). A scheduled run's purpose is a periodic full
+    # scan regardless of what its nominal "last commit" diff contains, so
+    # it always runs too.
+    if: github.event_name == 'schedule' || needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

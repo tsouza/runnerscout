@@ -9,6 +9,34 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # A change is "docs-only" (code: false) only when every changed
+          # file matches **/*.md - this is a deny-list of exactly one
+          # pattern, never an allow-list of "safe" paths, so anything this
+          # filter has not seen before (a renamed file, a new file type, a
+          # workflow edit, a chart/Dockerfile change) defaults to code:
+          # true and the full required-check suite still runs. A required
+          # GitHub Actions check that is skipped (rather than run and
+          # green) still satisfies a Ruleset's required-status-check rule,
+          # so this filter being wrong in the unsafe direction would
+          # silently weaken this repo's evaluator authority
+          # (docs/qualification.md) - it must only ever skip when the diff
+          # provably cannot contain anything the skipped jobs check.
+          filters: |
+            code:
+              - '!**/*.md'
   verify:
     name: verify
     runs-on: ubuntu-24.04
@@ -59,6 +87,13 @@ jobs:
 
   kubernetes-integration:
     name: kubernetes-integration
+    needs: changes
+    # needs.changes.result != 'success' defaults to running this job
+    # whenever the changes job itself did not cleanly resolve (failed,
+    # cancelled) - a custom `if:` replaces the default success() gate, so
+    # without this, a failed changes job would leave outputs.code unset
+    # and silently skip this required check instead of safely running it.
+    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -92,6 +127,13 @@ jobs:
 
   cloud-emulators:
     name: cloud-emulators
+    needs: changes
+    # needs.changes.result != 'success' defaults to running this job
+    # whenever the changes job itself did not cleanly resolve (failed,
+    # cancelled) - a custom `if:` replaces the default success() gate, so
+    # without this, a failed changes job would leave outputs.code unset
+    # and silently skip this required check instead of safely running it.
+    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -119,6 +161,13 @@ jobs:
 
   chart:
     name: chart
+    needs: changes
+    # needs.changes.result != 'success' defaults to running this job
+    # whenever the changes job itself did not cleanly resolve (failed,
+    # cancelled) - a custom `if:` replaces the default success() gate, so
+    # without this, a failed changes job would leave outputs.code unset
+    # and silently skip this required check instead of safely running it.
+    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -148,6 +197,13 @@ jobs:
 
   runtime-image:
     name: runtime-image
+    needs: changes
+    # needs.changes.result != 'success' defaults to running this job
+    # whenever the changes job itself did not cleanly resolve (failed,
+    # cancelled) - a custom `if:` replaces the default success() gate, so
+    # without this, a failed changes job would leave outputs.code unset
+    # and silently skip this required check instead of safely running it.
+    if: needs.changes.result != 'success' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
