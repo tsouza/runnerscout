@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tsouza/runnerscout/internal/health"
 	"github.com/tsouza/runnerscout/internal/operator"
@@ -209,13 +212,71 @@ func TestHealthListenerFailurePreventsControllerEffects(t *testing.T) {
 	}
 	defer listener.Close()
 	called := false
-	err = withHealth(context.Background(), listener.Addr().String(), func(context.Context, *health.Status) error { called = true; return nil })
+	err = withHealth(context.Background(), listener.Addr().String(), nil, func(context.Context, *health.Status) error { called = true; return nil })
 	if err == nil || called {
 		t.Fatal("controller started without its required health endpoint")
 	}
 	expected := errors.New("controller failed")
-	if err := withHealth(context.Background(), "127.0.0.1:0", func(context.Context, *health.Status) error { return expected }); err != expected {
+	if err := withHealth(context.Background(), "127.0.0.1:0", nil, func(context.Context, *health.Status) error { return expected }); err != expected {
 		t.Fatal("health lifecycle hid the controller error", err)
+	}
+}
+
+// TestWithHealthMountsWireGuardPeersHandlerBeforeServing proves the real
+// structural constraint this wiring has to satisfy: Status.Handler builds
+// its mux once, so a non-nil WireGuardPeers handler must already be set on
+// the *health.Status before withHealth calls Handler() to build the server -
+// setting it later, from inside run, would silently never register the
+// route. withHealth takes it as a parameter for exactly this reason.
+func TestWithHealthMountsWireGuardPeersHandlerBeforeServing(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+	marker := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	done := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		done <- withHealth(ctx, addr, marker, func(ctx context.Context, status *health.Status) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}()
+	var resp *http.Response
+	for i := 0; i < 50; i++ {
+		resp, err = http.Get("http://" + addr + "/v1/wireguard/peers/x")
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTeapot {
+		t.Fatalf("expected the provided WireGuardPeers handler to be mounted, got status %d", resp.StatusCode)
+	}
+}
+
+func TestWireGuardPeersHandlerServesTheOwnerScopedAllocationStore(t *testing.T) {
+	client := fake.NewClientset()
+	handler := wireGuardPeersHandler(client, "test", "build")
+	if handler == nil {
+		t.Fatal("expected a non-nil WireGuardPeers handler")
+	}
+	req := httptest.NewRequest("GET", "/v1/wireguard/peers/does-not-exist", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	// No Authorization header and no such allocation: this must be the
+	// handler's own 401, not a 404 (which would mean it wasn't reached) or a
+	// panic (which would mean its Store was left nil).
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 from a real WireGuardPeersHandler, got %d", recorder.Code)
 	}
 }
 

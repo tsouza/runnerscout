@@ -91,11 +91,99 @@ func TestCompileDoesNotPretendUnsupportedExecutionExists(t *testing.T) {
 	if _, err := Compile(s); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("retry execution claimed for App authentication: %v", err)
 	}
+	// "wireguard" is a real, validated mode as of this change (see
+	// TestCompileAcceptsSingleMappingWireGuardNetwork and its sibling
+	// rejection tests below) - only a mode outside the CRD's own
+	// +kubebuilder:validation:Enum=separate;wireguard is still unsupported at
+	// this Go-level defense-in-depth check.
 	s = fixture()
 	s.Class.Spec.NetworkRef = &api.LocalReference{Name: "mesh"}
-	s.Network = &api.NetworkProfile{ObjectMeta: metav1.ObjectMeta{Name: "mesh", Namespace: "test"}, Spec: api.NetworkProfileSpec{Mode: "wireguard"}}
+	s.Network = &api.NetworkProfile{ObjectMeta: metav1.ObjectMeta{Name: "mesh", Namespace: "test"}, Spec: api.NetworkProfileSpec{Mode: "shared"}}
 	if _, err := Compile(s); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("overlay execution claimed: %v", err)
+	}
+}
+
+// wireGuardFixture returns a Snapshot scoped to exactly one provider ("aws"),
+// matching the single-NetworkMapping restriction wireguard mode enforces:
+// with only one provider referenced, one mapping can honestly cover it and
+// every catalog offering.
+func wireGuardFixture() Snapshot {
+	s := fixture()
+	s.Class.Spec.Providers = []api.LocalReference{{Name: "aws"}}
+	s.Class.Spec.NetworkRef = &api.LocalReference{Name: "mesh"}
+	s.Network = &api.NetworkProfile{ObjectMeta: metav1.ObjectMeta{Name: "mesh", Namespace: "test"}, Spec: api.NetworkProfileSpec{Mode: "wireguard", Mappings: []api.NetworkMapping{
+		{ProviderRef: api.LocalReference{Name: "aws"}, Region: "us-east-1", NetworkID: "vpc", SubnetID: "subnet-1", CIDRs: []string{"10.1.0.0/24"}},
+	}}}
+	return s
+}
+
+func TestCompileAcceptsSingleMappingWireGuardNetwork(t *testing.T) {
+	s := wireGuardFixture()
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.NetworkProfile != "mesh" {
+		t.Fatalf("expected NetworkProfile %q threaded into resolved config, got %q", "mesh", r.Config.NetworkProfile)
+	}
+}
+
+func TestCompileSeparateModeNeverThreadsNetworkProfile(t *testing.T) {
+	base := fixture()
+	base.Class.Spec.NetworkRef = &api.LocalReference{Name: "private"}
+	base.Network = &api.NetworkProfile{ObjectMeta: metav1.ObjectMeta{Name: "private", Namespace: "test"}, Spec: api.NetworkProfileSpec{Mode: "separate", Mappings: []api.NetworkMapping{
+		{ProviderRef: api.LocalReference{Name: "aws"}, Region: "us-east-1", NetworkID: "vpc", SubnetID: "subnet-1", CIDRs: []string{"10.1.0.0/24"}},
+		{ProviderRef: api.LocalReference{Name: "azure"}, Region: "eastus", NetworkID: "vnet", SubnetID: "subnet-2", CIDRs: []string{"10.2.0.0/24"}},
+		{ProviderRef: api.LocalReference{Name: "gcp"}, Region: "us-central1", NetworkID: "vpc", SubnetID: "subnet-3", CIDRs: []string{"10.3.0.0/24"}},
+	}}}
+	r, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.NetworkProfile != "" {
+		t.Fatalf("separate mode must never set Allocation.NetworkProfile identity, got %q", r.Config.NetworkProfile)
+	}
+}
+
+func TestCompileRejectsMultiMappingWireGuardNetwork(t *testing.T) {
+	s := fixture()
+	s.Class.Spec.NetworkRef = &api.LocalReference{Name: "mesh"}
+	s.Network = &api.NetworkProfile{ObjectMeta: metav1.ObjectMeta{Name: "mesh", Namespace: "test"}, Spec: api.NetworkProfileSpec{Mode: "wireguard", Mappings: []api.NetworkMapping{
+		{ProviderRef: api.LocalReference{Name: "aws"}, Region: "us-east-1", NetworkID: "vpc", SubnetID: "subnet-1", CIDRs: []string{"10.1.0.0/24"}},
+		{ProviderRef: api.LocalReference{Name: "azure"}, Region: "eastus", NetworkID: "vnet", SubnetID: "subnet-2", CIDRs: []string{"10.2.0.0/24"}},
+		{ProviderRef: api.LocalReference{Name: "gcp"}, Region: "us-central1", NetworkID: "vpc", SubnetID: "subnet-3", CIDRs: []string{"10.3.0.0/24"}},
+	}}}
+	if _, err := Compile(s); err == nil {
+		t.Fatal("multi-mapping wireguard profile accepted")
+	}
+}
+
+func TestCompileWireGuardRejectsAllowedServices(t *testing.T) {
+	s := wireGuardFixture()
+	s.Network.Spec.AllowedServices = []string{"svc"}
+	if _, err := Compile(s); err == nil {
+		t.Fatal("wireguard AllowedServices accepted despite undefined semantics")
+	}
+}
+
+func TestCompileWireGuardValidatesEnrollmentRefSecretKey(t *testing.T) {
+	s := wireGuardFixture()
+	s.Network.Spec.EnrollmentRef = &api.SecretKeyReference{Name: "psk", Key: "../psk"}
+	if _, err := Compile(s); err == nil {
+		t.Fatal("invalid EnrollmentRef Secret key accepted")
+	}
+	s.Network.Spec.EnrollmentRef.Key = "psk"
+	if _, err := Compile(s); err != nil {
+		t.Fatal("valid EnrollmentRef rejected", err)
+	}
+}
+
+func TestCompileWireGuardAcceptsNilEnrollmentRef(t *testing.T) {
+	s := wireGuardFixture()
+	s.Network.Spec.EnrollmentRef = nil
+	if _, err := Compile(s); err != nil {
+		t.Fatal("nil EnrollmentRef (the default) rejected", err)
 	}
 }
 func TestCompileAcceptsRetryPolicyWithPATAuthentication(t *testing.T) {

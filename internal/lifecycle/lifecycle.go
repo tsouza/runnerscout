@@ -59,9 +59,9 @@ type Allocation struct {
 	RetryProcessed bool `json:"retryProcessed,omitempty"`
 	// NetworkProfile names the NetworkProfile this allocation's overlay
 	// membership belongs to. It is only ever non-empty for a "wireguard" mode
-	// NetworkProfile; internal/configapi/compile.go's network() still rejects
-	// every other NetworkProfileSpec.Mode unconditionally, so no allocation
-	// produced by this codebase's own configuration path can set it yet.
+	// NetworkProfile; internal/configapi/compile.go's network() rejects every
+	// other NetworkProfileSpec.Mode, and "separate" mode itself never sets
+	// this field on an allocation (it has no peer overlay to join).
 	// WireGuardPublicKey and WireGuardOverlayAddress are that allocation's
 	// checkpointed overlay identity: generated once in controller memory at
 	// the Pending->Creating transition and persisted here exactly like
@@ -100,10 +100,10 @@ type Allocation struct {
 	// (docs/networking-control-plane.md: "never authorizes the controller to
 	// create a paid gateway"). Making WireGuard work across mappings is a
 	// separate, larger networking-topology decision this field does not
-	// make; it is safe as far as it goes because compile.go still rejects
-	// every wireguard-mode NetworkProfile unconditionally, so no allocation
-	// this codebase can produce today exercises a multi-mapping profile at
-	// all.
+	// make; it is safe as far as it goes because compile.go's network()
+	// rejects any wireguard-mode NetworkProfile referencing more than one
+	// NetworkMapping, so no allocation this codebase can produce exercises a
+	// multi-mapping profile.
 	WireGuardEndpoint string `json:"wireGuardEndpoint,omitempty"`
 	// WireGuardPollTokenHash is the SHA-256 hash
 	// (internal/wireguard.HashPollToken) of the bearer token this

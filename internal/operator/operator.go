@@ -16,10 +16,12 @@ import (
 	"github.com/tsouza/runnerscout/internal/provider"
 	"github.com/tsouza/runnerscout/internal/recovery"
 	"github.com/tsouza/runnerscout/internal/state"
+	"github.com/tsouza/runnerscout/internal/wireguard"
 	"io"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 	"log/slog"
 	"net/url"
@@ -68,11 +70,27 @@ type Config struct {
 	// calls without an explicit choice to do so - exactly the same opt-in
 	// default shape as AWSPriceRefresh/AzurePriceRefresh above.
 	AzureInterruptionQueueURL string `json:"azureInterruptionQueueURL,omitempty"`
+	// NetworkProfile names the api/v1alpha1.NetworkProfile this scale set's
+	// allocations join, as compiled by internal/configapi/compile.go's
+	// network(). It is only ever non-empty for a "wireguard" mode profile -
+	// "separate" mode, and a scale set with no NetworkProfile at all, both
+	// compile to "" - matching lifecycle.Allocation.NetworkProfile's own doc
+	// comment ("only ever non-empty for a wireguard mode NetworkProfile").
+	// HandleDesiredRunnerCount copies this value onto every newly created
+	// Allocation; it is otherwise inert (no provider, poll endpoint, or
+	// peer-snapshot code path is affected by a "" value). omitempty keeps
+	// every existing deployment's fleet ConfigMap binding hash (see
+	// bindingWithLimit) unchanged, exactly like AzureInterruptionQueueURL
+	// above.
+	NetworkProfile string `json:"networkProfile,omitempty"`
 }
 
 func (c Config) Validate() error {
 	if err := provider.ValidateName(c.Name); err != nil {
 		return err
+	}
+	if c.NetworkProfile != "" && len(validation.IsDNS1123Label(c.NetworkProfile)) != 0 {
+		return errors.New("invalid network profile name")
 	}
 	if c.Namespace == "" || c.ScaleSetID < 1 || c.MaxRunners < 1 || c.MaxRunners > 10 || c.ProvisioningSeconds < 1 || c.ProvisioningSeconds > 600 || c.MaxLifetimeSeconds < c.ProvisioningSeconds || c.MaxLifetimeSeconds > 21600 {
 		return errors.New("invalid namespace, scale set, capacity or time limits")
@@ -150,6 +168,22 @@ type Operator struct {
 func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 	s := &state.Kubernetes{Maps: k.CoreV1().ConfigMaps(c.Namespace), Owner: c.Name}
 	o := &Operator{Config: c, Client: k, GitHub: g, Store: s}
+	// networkPeers supplies provider.Command.NetworkPeers for every provider
+	// this scale set configures: the current WireGuard peer snapshot for an
+	// allocation intending wireguard-mode networking, computed from this
+	// same Store's own List (the allocation list this Operator already
+	// reconciles) via wireguard.Snapshot - exactly the composition
+	// NetworkPeers's own doc comment describes. It is a complete no-op for
+	// every allocation with NetworkProfile == "" - i.e. every allocation
+	// except one compiled from a "wireguard" mode NetworkProfile (see
+	// Config.NetworkProfile and internal/configapi/compile.go's network()).
+	networkPeers := func(ctx context.Context, a lifecycle.Allocation) ([]wireguard.Peer, error) {
+		allocations, e := s.List(ctx)
+		if e != nil {
+			return nil, e
+		}
+		return wireguard.Snapshot(a.ID, a.NetworkProfile, allocations), nil
+	}
 	providers := map[string]lifecycle.Provider{}
 	for name, p := range c.Providers {
 		providers[name] = &provider.Command{Config: p, Bootstrap: func(ctx context.Context, id string) (string, error) {
@@ -161,7 +195,7 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 				return "", errors.New("GitHub JIT request failed")
 			}
 			return r.EncodedJITConfig, nil
-		}}
+		}, NetworkPeers: networkPeers}
 	}
 	o.Controller = &lifecycle.Controller{Store: s, Providers: providers, Now: time.Now}
 	return o
@@ -341,7 +375,7 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 		id := "rs-" + uuid.NewString()
 		now := time.Now()
 		f.Created[id] = now
-		f.Pending[id] = lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: catalog, Requirements: o.Config.Requirements}
+		f.Pending[id] = lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: catalog, Requirements: o.Config.Requirements, NetworkProfile: o.Config.NetworkProfile}
 	}
 	if e = o.saveFleet(ctx, cm, f); e != nil {
 		return active, e

@@ -65,6 +65,33 @@ func TestNewWorkerLeavesAWSPricesNilWhenDisabled(t *testing.T) {
 	}
 }
 
+// TestNewWorkerAlwaysWiresNetworkPeers proves provider.Command.NetworkPeers
+// reaches the CRD-driven (Runtime) entry point too, not only the mounted
+// -config entry point cmd/runnerscout/main.go exercises directly through
+// operator.NewWithCredentials: Runtime.newWorker calls the exact same
+// operator.NewWithCredentials, so this hook needs no separate wiring here -
+// but unlike AWSPriceRefresh above, it is never gated behind a Config flag,
+// so it must be wired unconditionally.
+func TestNewWorkerAlwaysWiresNetworkPeers(t *testing.T) {
+	cfg := awsPriceRefreshConfig(false, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	cfg.NetworkProfile = "mesh"
+	r := &Runtime{Client: fake.NewClientset()}
+	credentials := Credentials{Providers: map[string]map[string]string{"aws": {"AWS_ACCESS_KEY_ID": "fixture-id", "AWS_SECRET_ACCESS_KEY": "fixture-secret"}}}
+	worker, cleanup, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	op, ok := worker.(*operator.Operator)
+	if !ok {
+		t.Fatal("expected the real operator worker")
+	}
+	command, ok := op.Controller.Providers["aws"].(*provider.Command)
+	if !ok || command.NetworkPeers == nil {
+		t.Fatal("provider.Command.NetworkPeers was not wired through the CRD-driven Runtime entry point")
+	}
+}
+
 func TestNewWorkerRequiresConfiguredAWSProviderWhenEnabled(t *testing.T) {
 	cfg := awsPriceRefreshConfig(true, map[string]provider.Config{"azure": {Kind: "azure", Owner: "test", Subnet: "private", Subscription: "sub", ResourceGroup: "rg", SecurityGroup: "sg", SSHPublicKey: "ssh-ed25519 AAAA"}}, []string{"azure"})
 	r := &Runtime{Client: fake.NewClientset()}

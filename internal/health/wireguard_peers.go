@@ -93,16 +93,18 @@ type AllocationStore interface {
 // the existing Kubernetes-backed store per request, and its response size is
 // bounded by the real number of allocations in one NetworkProfile - never by
 // anything an unauthenticated caller controls. A failed auth attempt costs
-// one Load and nothing else. This is, today, an endpoint with zero live
-// callers (see Status.WireGuardPeers's doc comment); if and when it is
-// wired up for real traffic, the concrete threat this leaves open is a
-// compromised VM polling far faster than any intended interval and
-// generating a correspondingly higher rate of List calls against the
-// Kubernetes API server than a cooperative poller would - the natural fix
-// then would be a minimum per-allocation poll interval enforced
+// one Load and nothing else. Status.WireGuardPeers now mounts a real,
+// non-nil instance of this handler at both cmd/runnerscout/main.go entry
+// points, but it still has zero real traffic until an operator actually
+// configures a "wireguard" mode NetworkProfile (see
+// internal/configapi/compile.go's network()) - the concrete threat this
+// leaves open is a compromised VM polling far faster than any intended
+// interval and generating a correspondingly higher rate of List calls
+// against the Kubernetes API server than a cooperative poller would - the
+// natural fix then would be a minimum per-allocation poll interval enforced
 // server-side (e.g. 429 on a too-recent repeat poll), deliberately not
-// built here since it would be speculative machinery for a code path
-// nothing can reach yet.
+// built here since it would be speculative machinery ahead of any observed
+// real traffic pattern.
 type WireGuardPeersHandler struct {
 	Store AllocationStore
 }

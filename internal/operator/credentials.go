@@ -48,7 +48,9 @@ func NewWithCredentials(c Config, k kubernetes.Interface, g *scaleset.Client, cr
 			return nil, nil, errors.Join(err, cleanup())
 		}
 		cleanups = append(cleanups, close)
-		command.Bootstrap = o.Controller.Providers[name].(*provider.Command).Bootstrap
+		original := o.Controller.Providers[name].(*provider.Command)
+		command.Bootstrap = original.Bootstrap
+		command.NetworkPeers = original.NetworkPeers
 		o.Controller.Providers[name] = command
 	}
 	return o, cleanup, nil

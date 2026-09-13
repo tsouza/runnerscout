@@ -64,12 +64,13 @@ type Command struct {
 	// allocation intending wireguard-mode networking
 	// (lifecycle.Allocation.NetworkProfile != ""), the same optional,
 	// caller-injected side-effect pattern Bootstrap already uses for the
-	// GitHub JIT token. No caller sets this today: nothing in this codebase's
-	// configuration path can ever produce an allocation with NetworkProfile
-	// set (see lifecycle.Allocation.NetworkProfile), so this field stays nil
-	// everywhere it is constructed. The eventual caller is expected to source
-	// the allocation list this hook needs from internal/state.Kubernetes.List
-	// and filter it through internal/wireguard.Snapshot.
+	// GitHub JIT token. internal/operator.New constructs a real, non-nil
+	// value here for every provider.Command it builds, sourcing the
+	// allocation list this hook needs from the same
+	// internal/state.Kubernetes.List the Operator already reconciles
+	// against, filtered through internal/wireguard.Snapshot. It remains nil
+	// only when a *Command is built directly, bypassing operator.New (e.g. a
+	// unit test exercising a single provider in isolation).
 	NetworkPeers func(context.Context, lifecycle.Allocation) ([]wireguard.Peer, error)
 	// AzureInterrupted is a per-Tick-cycle snapshot of confirmed Azure spot
 	// preemptions, keyed by the exact ARM resource ID azureID builds
@@ -171,11 +172,12 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 	if err != nil || jit == "" {
 		return lifecycle.Creation{}, lifecycle.ErrNoEffect
 	}
-	// Wireguard-mode embedding only runs when NetworkProfile is set - which,
-	// as of this change, no allocation this codebase produces ever is (see
-	// lifecycle.Allocation.NetworkProfile and NetworkPeers above). Every
-	// existing call path takes the wireGuardJSON == "" branch of
-	// BootstrapWithWireGuard, which reproduces Bootstrap(jit) unchanged.
+	// Wireguard-mode embedding only runs when NetworkProfile is set - only
+	// true for an allocation compiled from a "wireguard" mode NetworkProfile
+	// (see lifecycle.Allocation.NetworkProfile and NetworkPeers above).
+	// Every allocation without wireguard intent still takes the
+	// wireGuardJSON == "" branch of BootstrapWithWireGuard, which reproduces
+	// Bootstrap(jit) unchanged.
 	var wireGuardJSON string
 	var wireGuardPublicKey []byte
 	var wireGuardPollTokenHash []byte
