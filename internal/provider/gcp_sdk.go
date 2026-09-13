@@ -231,7 +231,33 @@ func (p *Command) observeGCP(ctx context.Context, a lifecycle.Allocation) (lifec
 	if err != nil {
 		return lifecycle.Observation{}, err
 	}
-	return lifecycle.Observation{Known: true, Exists: inventory.vm != nil || inventory.disk != nil, ResourceID: a.ID}, nil
+	exists := inventory.vm != nil || inventory.disk != nil
+	interrupted := !exists && a.Offering.Spot && p.gcpConfirmedPreemption(ctx, a)
+	return lifecycle.Observation{Known: true, Exists: exists, Interrupted: interrupted, ResourceID: a.ID}, nil
+}
+
+// gcpConfirmedPreemption reports whether GCP's own compute.instances.preempted
+// system operation - never inferred from a bare absence - is recorded against
+// this instance. Any ambiguity (an unavailable observation or a non-matching
+// target) returns false.
+func (p *Command) gcpConfirmedPreemption(ctx context.Context, a lifecycle.Allocation) bool {
+	service, err := p.gcpClient()
+	if err != nil {
+		return false
+	}
+	found := false
+	err = service.ZoneOperations.List(p.Config.Project, a.Offering.Zone).Filter(`operationType = "compute.instances.preempted"`).Pages(ctx, func(page *compute.OperationList) error {
+		if page.Kind != "compute#operationList" {
+			return errors.New("invalid GCP operation inventory")
+		}
+		for _, op := range page.Items {
+			if op != nil && op.OperationType == "compute.instances.preempted" && gcpMatches(op.TargetLink, p.gcpResource(a, "instances", a.ID)) {
+				found = true
+			}
+		}
+		return nil
+	})
+	return err == nil && found
 }
 func (p *Command) deleteGCP(ctx context.Context, a lifecycle.Allocation) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

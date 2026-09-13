@@ -130,6 +130,10 @@ func TestGCPSDKLostResponseAndResidualDiskCleanup(t *testing.T) {
 			kind = "disks"
 		}
 		if strings.HasSuffix(r.URL.Path, "/operations") {
+			if strings.Contains(r.URL.Query().Get("filter"), "preempted") {
+				writeJSON(w, map[string]any{"kind": "compute#operationList", "items": []any{}})
+				return
+			}
 			if !strings.Contains(r.URL.Query().Get("filter"), p.gcpRequestID(gcpAllocation(), "create")) {
 				t.Error("wrong operation filter")
 			}
@@ -332,6 +336,55 @@ func TestGCPSDKAmbiguousOperationFailureStaysUnknown(t *testing.T) {
 	id, err := p.Create(context.Background(), gcpAllocation())
 	if id != "" || err == nil || errors.Is(err, lifecycle.ErrCapacity) {
 		t.Fatal("ambiguous operation failure misclassified as capacity", id, err)
+	}
+}
+func gcpPreemptionFixture(t *testing.T, includeVM bool) *Command {
+	t.Helper()
+	return gcpFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/operations") {
+			if strings.Contains(r.URL.Query().Get("filter"), "preempted") {
+				op := map[string]any{"kind": "compute#operation", "name": "preempt-op", "operationType": "compute.instances.preempted", "targetLink": gcpLink("instances", "rs-test"), "status": "DONE"}
+				writeJSON(w, map[string]any{"kind": "compute#operationList", "items": []any{op}})
+				return
+			}
+			writeJSON(w, map[string]any{"kind": "compute#operationList", "items": []any{}})
+			return
+		}
+		if includeVM && strings.Contains(r.URL.Path, "/instances/") {
+			writeJSON(w, gcpOwned("instances"))
+			return
+		}
+		gcpMissing(w)
+	})
+}
+func TestGCPObservationConfirmsSpotPreemption(t *testing.T) {
+	p := gcpPreemptionFixture(t, false)
+	a := gcpAllocation()
+	a.Offering.Spot = true
+	a.ResourceID = a.ID
+	observed, err := p.Observe(context.Background(), a)
+	if err != nil || !observed.Known || observed.Exists || !observed.Interrupted {
+		t.Fatal("confirmed GCP preemption not observed", observed, err)
+	}
+}
+func TestGCPObservationRequiresSpotOfferingForPreemption(t *testing.T) {
+	p := gcpPreemptionFixture(t, false)
+	a := gcpAllocation()
+	a.Offering.Spot = false
+	a.ResourceID = a.ID
+	observed, err := p.Observe(context.Background(), a)
+	if err != nil || !observed.Known || observed.Exists || observed.Interrupted {
+		t.Fatal("on-demand offering misclassified as spot preemption", observed, err)
+	}
+}
+func TestGCPObservationPreemptionWithSurvivingVMStaysUnknown(t *testing.T) {
+	p := gcpPreemptionFixture(t, true)
+	a := gcpAllocation()
+	a.Offering.Spot = true
+	a.ResourceID = a.ID
+	observed, err := p.Observe(context.Background(), a)
+	if err != nil || !observed.Known || !observed.Exists || observed.Interrupted {
+		t.Fatal("preemption op misclassified despite a surviving VM", observed, err)
 	}
 }
 func TestGCPSDKCapacityCodeWithSurvivingVMStaysUnknown(t *testing.T) {
