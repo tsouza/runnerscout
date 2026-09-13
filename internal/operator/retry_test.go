@@ -2,18 +2,29 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"github.com/tsouza/runnerscout/internal/recovery"
 	"github.com/tsouza/runnerscout/internal/state"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+// attemptResponse overrides fakeGitHubJobs's AttemptJobs answer for one
+// specific attempt number, so a test can make different attempts (e.g. the
+// original attempt vs. a prospective rerun's attempt+1) behave differently -
+// exactly what reconciliation needs to distinguish.
+type attemptResponse struct {
+	jobs []recovery.RESTJob
+	err  error
+}
 type fakeGitHubJobs struct {
 	jobs        []recovery.RESTJob
 	fetchErr    error
+	responses   map[int]attemptResponse
 	reranOwner  string
 	reranRepo   string
 	reranRun    int64
@@ -22,6 +33,9 @@ type fakeGitHubJobs struct {
 }
 
 func (f *fakeGitHubJobs) AttemptJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]recovery.RESTJob, error) {
+	if r, ok := f.responses[attempt]; ok {
+		return r.jobs, r.err
+	}
 	return f.jobs, f.fetchErr
 }
 func (f *fakeGitHubJobs) RerunFailedJobs(ctx context.Context, owner, repo string, runID int64) error {
@@ -145,5 +159,115 @@ func TestInterruptionRetryIgnoresUnrelatedAllocations(t *testing.T) {
 	}
 	if gh.rerunCalled != 0 {
 		t.Fatal("unrelated allocations triggered a rerun", gh)
+	}
+}
+
+// matchingTerminalJob is the one REST job whose identity/status combination
+// satisfies recovery.Eligible for interruptedAllocation() at attempt 1.
+var matchingTerminalJob = recovery.RESTJob{ID: 345, RunID: 99, Attempt: 1, RunnerName: "rs-test", Status: "completed", Conclusion: "failure"}
+
+func TestInterruptionRetryAmbiguousRerunBlocksSecondAttemptUntilReconciled(t *testing.T) {
+	ctx := context.Background()
+	gh := &fakeGitHubJobs{jobs: []recovery.RESTJob{matchingTerminalJob}, rerunErr: errors.New("connection reset by peer")}
+	policy := recovery.Policy{Enabled: true, MaxRetries: 2, AcknowledgeRepeatedEffects: true}
+	o, s := retryOperator(t, gh, policy)
+	seedAllocation(t, ctx, s, interruptedAllocation())
+
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if gh.rerunCalled != 1 {
+		t.Fatal("expected exactly one rerun attempt", gh)
+	}
+	got, e := s.Load(ctx, "rs-test")
+	if e != nil || got.RetryProcessed {
+		t.Fatal("an ambiguous rerun outcome must not be marked processed", got, e)
+	}
+	_, f, e := o.loadFleet(ctx)
+	if e != nil || f.RetriesUsedByRun[99] != 0 {
+		t.Fatal("an ambiguous rerun outcome must not be counted as a used retry", f, e)
+	}
+
+	// A later pass, before reconciliation resolves anything (attempt+1
+	// returns a plain ambiguous error, not a definitive "not found"): a
+	// second rerun request for the same RunID must still be refused by
+	// recovery.Eligible via RequestPending, not merely skipped.
+	gh.responses = map[int]attemptResponse{2: {err: errors.New("still ambiguous")}}
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if gh.rerunCalled != 1 {
+		t.Fatal("a second retry must not be requested while the first is unresolved", gh)
+	}
+}
+
+func TestInterruptionRetryReconciliationConfirmsRerunHappened(t *testing.T) {
+	ctx := context.Background()
+	gh := &fakeGitHubJobs{jobs: []recovery.RESTJob{matchingTerminalJob}, rerunErr: errors.New("timeout")}
+	policy := recovery.Policy{Enabled: true, MaxRetries: 2, AcknowledgeRepeatedEffects: true}
+	o, s := retryOperator(t, gh, policy)
+	seedAllocation(t, ctx, s, interruptedAllocation())
+
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+
+	// GitHub's rerun actually landed server-side despite the timeout: attempt
+	// 2 now has jobs recorded.
+	gh.responses = map[int]attemptResponse{2: {jobs: []recovery.RESTJob{{ID: 987, RunID: 99, Attempt: 2, RunnerName: "rs-test", Status: "queued"}}}}
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if gh.rerunCalled != 1 {
+		t.Fatal("a confirmed rerun must not trigger a second request", gh)
+	}
+	got, e := s.Load(ctx, "rs-test")
+	if e != nil || !got.RetryProcessed {
+		t.Fatal("a confirmed rerun must close out the interruption", got, e)
+	}
+	_, f, e := o.loadFleet(ctx)
+	if e != nil || f.RetriesUsedByRun[99] != 1 {
+		t.Fatal("a confirmed rerun must count as the used retry", f, e)
+	}
+	if _, ok := f.PendingReruns[99]; ok {
+		t.Fatal("pending state must be cleared once resolved", f)
+	}
+}
+
+func TestInterruptionRetryReconciliationConfirmsRerunDidNotHappen(t *testing.T) {
+	ctx := context.Background()
+	gh := &fakeGitHubJobs{jobs: []recovery.RESTJob{matchingTerminalJob}, rerunErr: errors.New("connection reset by peer")}
+	policy := recovery.Policy{Enabled: true, MaxRetries: 2, AcknowledgeRepeatedEffects: true}
+	o, s := retryOperator(t, gh, policy)
+	seedAllocation(t, ctx, s, interruptedAllocation())
+
+	// Pass 1: the rerun request itself is ambiguous and gets parked.
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+	// GitHub definitively has no attempt 2 - it never created the rerun.
+	// This same absence must be re-confirmed across several passes (the
+	// original attempt's terminal job staying unchanged throughout) before
+	// it counts as proof, rather than a single not-yet-materialized read.
+	gh.responses = map[int]attemptResponse{2: {err: githubjobs.ErrAttemptNotFound}}
+	for i := 0; i < rerunReconciliationPolls; i++ {
+		if e := o.processInterruptionRetries(ctx); e != nil {
+			t.Fatal(e)
+		}
+	}
+
+	if gh.rerunCalled != 2 {
+		t.Fatal("resolving 'did not happen' must allow a legitimate future retry attempt", gh)
+	}
+	_, f, e := o.loadFleet(ctx)
+	if e != nil || f.RetriesUsedByRun[99] != 0 {
+		t.Fatal("a rerun that never happened must never be counted as a used retry", f, e)
+	}
+	if _, ok := f.PendingReruns[99]; !ok {
+		t.Fatal("the fresh retry attempt (itself still ambiguous) must be freshly parked", f)
+	}
+	got, e := s.Load(ctx, "rs-test")
+	if e != nil || got.RetryProcessed {
+		t.Fatal("the allocation remains unprocessed while the fresh retry is unresolved", got, e)
 	}
 }

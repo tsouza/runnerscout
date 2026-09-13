@@ -94,6 +94,12 @@ type fleet struct {
 	// a rerun keeps the same run ID but is reassigned as a brand new,
 	// otherwise unrelated allocation.
 	RetriesUsedByRun map[int64]int `json:"retriesUsedByRun,omitempty"`
+	// PendingReruns is keyed by GitHub workflow run ID for the same reason as
+	// RetriesUsedByRun above: an ambiguous RerunFailedJobs outcome must block
+	// every allocation sharing that RunID from requesting another rerun,
+	// whichever allocation eventually observes and reconciles it. See
+	// pendingRerun and processInterruptionRetries in retry.go.
+	PendingReruns map[int64]pendingRerun `json:"pendingReruns,omitempty"`
 }
 type Operator struct {
 	// Readiness is an optional concurrency-safe observer of session/reconciliation state.
@@ -219,6 +225,9 @@ func (o *Operator) readFleet(ctx context.Context, create bool) (*corev1.ConfigMa
 	}
 	if f.RetriesUsedByRun == nil {
 		f.RetriesUsedByRun = map[int64]int{}
+	}
+	if f.PendingReruns == nil {
+		f.PendingReruns = map[int64]pendingRerun{}
 	}
 	return cm, f, e
 }

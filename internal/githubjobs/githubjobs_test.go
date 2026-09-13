@@ -3,6 +3,7 @@ package githubjobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,6 +53,16 @@ func TestAttemptJobsRejectsNonOKStatus(t *testing.T) {
 	})
 	if _, err := c.AttemptJobs(context.Background(), "acme", "widgets", 99, 2); err == nil {
 		t.Fatal("expected error for non-200 response")
+	}
+}
+func TestAttemptJobsReports404AsErrAttemptNotFound(t *testing.T) {
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+		writeJSON(w, map[string]any{"message": "Not Found"})
+	})
+	_, err := c.AttemptJobs(context.Background(), "acme", "widgets", 99, 7)
+	if !errors.Is(err, ErrAttemptNotFound) {
+		t.Fatal("expected a 404 response to report ErrAttemptNotFound", err)
 	}
 }
 func TestAttemptJobsRejectsMalformedBody(t *testing.T) {
