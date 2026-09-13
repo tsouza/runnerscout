@@ -1,19 +1,29 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/tsouza/runnerscout/internal/testutil"
+	"io"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,102 +34,89 @@ func credentialConfig(kind string) Config {
 	return Config{Kind: kind, Owner: "test", Subnet: "private-subnet", SecurityGroup: "private-sg", AccountID: "000000000000", Project: "test-project", Subscription: "test-subscription", ResourceGroup: "test-group", SSHPublicKey: "ssh-ed25519 fixture"}
 }
 
-// This subprocess endpoint reports the environment actually received by exec,
-// not a separately assembled expected environment.
-func TestCredentialEnvironmentHelper(t *testing.T) {
-	if os.Args[len(os.Args)-1] != "runnerscout-env-helper" {
-		return
-	}
-	values := map[string]string{}
-	for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "AWS_EC2_METADATA_DISABLED", "AZURE_CLIENT_SECRET", "GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "HOME", "CLOUDSDK_CONFIG", "PYTHONPATH", "ENV"} {
-		if value, ok := os.LookupEnv(name); ok {
-			values[name] = value
-		}
-	}
-	if err := json.NewEncoder(os.Stdout).Encode(values); err != nil {
-		os.Exit(2)
-	}
-	os.Exit(0)
-}
-
 func TestProviderCredentialScopesSeparateNamedIdentities(t *testing.T) {
-	for key, value := range map[string]string{"AWS_ACCESS_KEY_ID": "ambient-id", "AWS_SECRET_ACCESS_KEY": "ambient-secret", "AWS_SESSION_TOKEN": "ambient-session", "AZURE_CLIENT_SECRET": "ambient-azure", "GOOGLE_APPLICATION_CREDENTIALS": "/ambient/gcp.json", "CLOUDSDK_CONFIG": "/ambient/cache", "PYTHONPATH": "/ambient/python", "ENV": "/ambient/shell"} {
+	for key, value := range map[string]string{"AWS_ACCESS_KEY_ID": "ambient-id", "AWS_SECRET_ACCESS_KEY": "ambient-secret", "AWS_SESSION_TOKEN": "ambient-session", "AZURE_CLIENT_SECRET": "ambient-azure", "GOOGLE_APPLICATION_CREDENTIALS": "/ambient/gcp.json"} {
 		t.Setenv(key, value)
 	}
-	firstValues := map[string]string{"AWS_ACCESS_KEY_ID": "first-id", "AWS_SECRET_ACCESS_KEY": "first-secret"}
-	first, cleanFirst, err := NewCommand(credentialConfig("aws"), firstValues)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cleanFirst() })
-	firstValues["AWS_SECRET_ACCESS_KEY"] = "changed-after-construction"
-	second, cleanSecond, err := NewCommand(credentialConfig("aws"), map[string]string{"AWS_ACCESS_KEY_ID": "second-id", "AWS_SECRET_ACCESS_KEY": "second-secret"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cleanSecond() })
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	commands := []*Command{first, second}
-	results := make([]map[string]string, len(commands))
-	errors := make([]error, len(commands))
 	var wg sync.WaitGroup
-	for i, command := range commands {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			out, err := command.Exec.Run(ctx, binary, "-test.run=^TestCredentialEnvironmentHelper$", "--", "runnerscout-env-helper")
-			if err == nil {
-				err = json.Unmarshal(out, &results[i])
+	for _, prefix := range []string{"first", "second"} {
+		values := map[string]string{"AWS_ACCESS_KEY_ID": prefix + "-id", "AWS_SECRET_ACCESS_KEY": prefix + "-secret"}
+		command, cleanup, err := NewCommand(credentialConfig("aws"), values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cleanup() })
+		values["AWS_SECRET_ACCESS_KEY"] = "changed-after-construction"
+		fixture := testutil.NewAWS(t)
+		var identities atomic.Int64
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
 			}
-			errors[i] = err
-		}()
+			authorization := r.Header.Get("Authorization")
+			if !strings.Contains(authorization, "Credential="+prefix+"-id/") || r.Header.Get("X-Amz-Security-Token") != "" {
+				t.Error("wrong or ambient credential signed request")
+			}
+			signed := strings.Split(strings.Split(authorization, "SignedHeaders=")[1], ",")[0]
+			reconstructed, err := http.NewRequestWithContext(r.Context(), r.Method, "https://"+r.Host+r.URL.RequestURI(), bytes.NewReader(body))
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			for _, name := range strings.Split(signed, ";") {
+				if name != "host" {
+					reconstructed.Header[http.CanonicalHeaderKey(name)] = append([]string{}, r.Header.Values(name)...)
+				}
+			}
+			when, err := time.Parse("20060102T150405Z", r.Header.Get("X-Amz-Date"))
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			form, err := url.ParseQuery(string(body))
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			service := "ec2"
+			if form.Get("Action") == "GetCallerIdentity" {
+				service = "sts"
+				identities.Add(1)
+			}
+			hash := sha256.Sum256(body)
+			err = v4.NewSigner().SignHTTP(r.Context(), aws.Credentials{AccessKeyID: prefix + "-id", SecretAccessKey: prefix + "-secret"}, reconstructed, hex.EncodeToString(hash[:]), service, "us-east-1", when)
+			if err != nil || reconstructed.Header.Get("Authorization") != authorization {
+				t.Error("request was not signed with the original isolated secret", err)
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			fixture.Server.Config.Handler.ServeHTTP(w, r)
+		}))
+		t.Cleanup(server.Close)
+		command.AWS.HTTPClient, command.AWS.Endpoint = server.Client(), server.URL
+		if strings.Contains(fmt.Sprintf("%v %+v %#v", command.AWS, command.AWS, command.AWS), "-secret") {
+			t.Fatal("SDK diagnostics expose secret")
+		}
+		wg.Go(func() {
+			for range 3 {
+				ob, err := command.Observe(context.Background(), allocation())
+				if err != nil || !ob.Known || ob.Exists {
+					t.Error("isolated observation failed", ob, err)
+				}
+			}
+			if identities.Load() != 3 {
+				t.Error("account was not checked per operation")
+			}
+		})
 	}
 	wg.Wait()
-	homes := map[string]bool{}
-	for i, result := range results {
-		if errors[i] != nil {
-			t.Fatal("credential subprocess failed", errors[i])
-		}
-		home := result["HOME"]
-		info, err := os.Stat(home)
-		if err != nil || info.Mode().Perm() != 0700 || homes[home] {
-			t.Fatal("credential scope lacks a unique private directory")
-		}
-		homes[home] = true
-		for _, forbidden := range []string{"AZURE_CLIENT_SECRET", "AWS_SESSION_TOKEN", "PYTHONPATH", "ENV"} {
-			if _, exists := result[forbidden]; exists {
-				t.Fatalf("inherited unrelated variable %s", forbidden)
-			}
-		}
-		if i < 2 {
-			prefix := []string{"first", "second"}[i]
-			if result["AWS_ACCESS_KEY_ID"] != prefix+"-id" || result["AWS_SECRET_ACCESS_KEY"] != prefix+"-secret" || result["GOOGLE_APPLICATION_CREDENTIALS"] != "" || result["CLOUDSDK_CONFIG"] != "" {
-				t.Fatal("named AWS identity leaked or changed")
-			}
-			if result["AWS_CONFIG_FILE"] != filepath.Join(home, "config") || result["AWS_SHARED_CREDENTIALS_FILE"] != filepath.Join(home, "credentials") || result["AWS_EC2_METADATA_DISABLED"] != "true" {
-				t.Fatal("AWS can read a shared default credential source")
-			}
-		}
-		if strings.Contains(fmt.Sprintf("%v %+v %#v", commands[i].Exec, commands[i].Exec, commands[i].Exec), "-secret") {
-			t.Fatal("executor diagnostics exposed credentials")
-		}
-	}
-	if os.Getenv("AWS_SECRET_ACCESS_KEY") != "ambient-secret" || os.Getenv("CLOUDSDK_CONFIG") != "/ambient/cache" {
-		t.Fatal("provider construction mutated process-wide credentials")
-	}
-	if err := cleanFirst(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(results[0]["HOME"]); !os.IsNotExist(err) {
-		t.Fatal("closed scope retained credential cache")
-	}
-	if _, err := os.Stat(results[1]["HOME"]); err != nil {
-		t.Fatal("closing one scope removed another")
+	if os.Getenv("AWS_SECRET_ACCESS_KEY") != "ambient-secret" || os.Getenv("AWS_SESSION_TOKEN") != "ambient-session" {
+		t.Fatal("provider changed process credentials")
 	}
 }
 
@@ -205,7 +202,7 @@ func TestAzureNamedCredentialsUseExplicitSDKMechanisms(t *testing.T) {
 			case "managed":
 				_, valid = credential.(*azidentity.ManagedIdentityCredential)
 			}
-			if !valid || command.Exec != nil {
+			if !valid {
 				t.Fatal("Azure credential selection used another mechanism or a CLI")
 			}
 		})

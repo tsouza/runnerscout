@@ -102,7 +102,7 @@ func TestGCPCredentialFilesIsolateRealTokenExchanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer cleanup()
-		if command.Exec != nil || command.GCP == nil || strings.Contains(fmt.Sprintf("%v %#v", command.GCP, command.GCP), "PRIVATE KEY") {
+		if command.GCP == nil || strings.Contains(fmt.Sprintf("%v %#v", command.GCP, command.GCP), "PRIVATE KEY") {
 			t.Fatal("native credential scope used a CLI or exposed key material")
 		}
 		environment["GOOGLE_APPLICATION_CREDENTIALS"] = "/later/invalid.json"
@@ -299,7 +299,7 @@ func TestGCPExplicitCredentialFailureNeverFallsBack(t *testing.T) {
 		t.Fatal("missing explicit file fell back", err)
 	}
 	command, cleanup, err := NewCommand(credentialConfig("gcp"), map[string]string{})
-	if err != nil || command.GCP == nil || command.Exec != nil {
+	if err != nil || command.GCP == nil {
 		t.Fatal("explicit metadata mode consulted ambient ADC or CLI", err)
 	}
 	if err := cleanup(); err != nil {

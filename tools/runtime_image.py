@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Execute the runtime image under chart-equivalent restrictions, without networking."""
+import os
 import argparse
 import datetime
 import json
@@ -28,13 +29,15 @@ def main():
             config["namespace"] = "runtime-test"
             path.write_text(json.dumps(config))
             path.chmod(0o644)
-            base = ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "1g", "--cpus", "2", "--tmpfs", "/tmp:rw,noexec,nosuid,size=268435456", "--mount", f"type=bind,src={path},dst=/config.json,readonly"]
+            probe = Path(tmp) / "runtime-probe"
+            subprocess.run(["go", "build", "-trimpath", "-o", str(probe), "tools/fixtures/runtime_probe.go"], env={**os.environ, "CGO_ENABLED": "0", "GOOS": "linux"}, check=True, timeout=120)
+            base = ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "1g", "--cpus", "2", "--tmpfs", "/tmp:rw,noexec,nosuid,size=268435456", "--mount", f"type=bind,src={path},dst=/config.json,readonly", "--mount", f"type=bind,src={probe},dst=/runtime-probe,readonly"]
             commands = {
-                "identity": ["python3", "-c", "import os; assert os.getuid()==10001; assert not os.access('/usr/local',os.W_OK); print('non-root; read-only root')"],
+                "identity_and_filesystem": ["/runtime-probe", "permissions"],
                 "controller_config": ["/usr/local/bin/runnerscout", "-config=/config.json", "-validate"],
-                "aws_cli": ["aws", "--version"],
-                "azure_python_dependency_absence": ["python", "-c", "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('azure', 'msal', 'cryptography')); print('Azure uses native Go SDK')"],
-                "gcp_sdk_only": ["python3", "-c", "import importlib.util, shutil; from pathlib import Path; assert shutil.which('gcloud') is None; assert not Path('/opt/google-cloud-sdk').exists(); assert importlib.util.find_spec('google') is None; print('GCP uses the native Go SDK; no bundled CLI or emulators')"],
+                "controller_help": ["/usr/local/bin/runnerscout", "-h"],
+                "native_sdk_runtime": ["/runtime-probe", "dependencies"],
+                "tls_trust_store": ["/runtime-probe", "trust"],
             }
             for name, command in commands.items():
                 container_name = "runnerscout-image-test-" + str(uuid.uuid4())

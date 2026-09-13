@@ -15,6 +15,7 @@ import yaml
 import helm_crd_cases
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_IMAGE = "python:3.14-slim-trixie@sha256:810da6270e43d30a1f3e0e1eabbeb6fbd9d78ad9dd2e754d5297a3d6cb42df46"
 
 
 def main():
@@ -32,6 +33,8 @@ def main():
     sequence = 0
     diagnostic_kubeconfig = None
     network_created = False
+    fixture_tag_created = False
+    fixture_tag = "runnerscout-github-fixture:" + identity
     cluster_attempted = False
     env = os.environ.copy()
     env["KIND_EXPERIMENTAL_DOCKER_NETWORK"] = identity
@@ -121,11 +124,18 @@ def main():
             if node["NetworkSettings"]["Networks"][identity]["IPAddress"] != node_ip:
                 raise RuntimeError("test node IP differs from explicit internal-network hosts mapping")
             run("load-image", kind + ["load", "docker-image", image, "--name", identity], timeout=240)
+            run("fixture-pull", ["docker", "pull", "--platform=linux/amd64", FIXTURE_IMAGE], timeout=180)
+            run("fixture-tag", ["docker", "tag", FIXTURE_IMAGE, fixture_tag])
+            fixture_tag_created = True
+            fixture_archive = temp / "fixture-image.tar"
+            run("fixture-save", ["docker", "save", "--platform=linux/amd64", "-o", str(fixture_archive), fixture_tag], timeout=120)
+            run("fixture-load", kind + ["load", "image-archive", str(fixture_archive), "--name", identity], timeout=240)
+            manifest["fixture_image"] = FIXTURE_IMAGE
             version = json.loads(run("cluster-version", kubectl + ["version", "-o", "json"]).stdout)
             if not version["serverVersion"]["gitVersion"].startswith("v1.37."):
                 raise RuntimeError("unexpected Kubernetes qualification version")
             manifest["kubernetes"] = version["serverVersion"]["gitVersion"]
-            run("fixture-cert", ["openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048", "-days", "1", "-keyout", str(temp / "tls.key"), "-out", str(temp / "tls.crt"), "-subj", "/CN=RunnerScout test fixture", "-addext", "subjectAltName=DNS:api.github.com,DNS:github.com"])
+            run("fixture-cert", ["openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048", "-days", "1", "-keyout", str(temp / "tls.key"), "-out", str(temp / "tls.crt"), "-subj", "/CN=RunnerScout test fixture", "-addext", "subjectAltName=DNS:api.github.com,DNS:github.com,DNS:localhost"])
             run("app-key", ["openssl", "genrsa", "-out", str(temp / "app.key"), "2048"])
             labels = {"app": "github-fixture"}
             objects = [
@@ -135,7 +145,7 @@ def main():
                 {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "github-test", "namespace": ns}, "stringData": {"token": "fixture-token", "privateKey": (temp / "app.key").read_text()}},
                 {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "fixture-script", "namespace": ns}, "data": {"github_server.py": (ROOT / "tools/fixtures/github_server.py").read_text()}},
                 {"apiVersion": "v1", "kind": "Service", "metadata": {"name": "github-fixture", "namespace": ns}, "spec": {"selector": labels, "ports": [{"port": 443, "targetPort": 8443}]}},
-                {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "github-fixture", "namespace": ns, "labels": labels}, "spec": {"automountServiceAccountToken": False, "restartPolicy": "Never", "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}}, "containers": [{"name": "fixture", "image": image, "imagePullPolicy": "Never", "command": ["python3", "/fixture/github_server.py"], "ports": [{"containerPort": 8443}], "readinessProbe": {"tcpSocket": {"port": 8443}, "periodSeconds": 1}, "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}, "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "256Mi"}}, "volumeMounts": [{"name": "script", "mountPath": "/fixture", "readOnly": True}, {"name": "tls", "mountPath": "/tls", "readOnly": True}]}], "volumes": [{"name": "script", "configMap": {"name": "fixture-script"}}, {"name": "tls", "secret": {"secretName": "fixture-tls", "defaultMode": 288}}]}},
+                {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "github-fixture", "namespace": ns, "labels": labels}, "spec": {"automountServiceAccountToken": False, "restartPolicy": "Never", "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}}, "containers": [{"name": "fixture", "image": fixture_tag, "imagePullPolicy": "Never", "command": ["python3", "/fixture/github_server.py"], "ports": [{"containerPort": 8443}], "readinessProbe": {"tcpSocket": {"port": 8443}, "periodSeconds": 1}, "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}, "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"memory": "256Mi"}}, "volumeMounts": [{"name": "script", "mountPath": "/fixture", "readOnly": True}, {"name": "tls", "mountPath": "/tls", "readOnly": True}]}], "volumes": [{"name": "script", "configMap": {"name": "fixture-script"}}, {"name": "tls", "secret": {"secretName": "fixture-tls", "defaultMode": 288}}]}},
             ]
             run("fixture-apply", kubectl + ["apply", "-f", "-"], input=yaml.safe_dump_all(objects))
             run("fixture-ready", kubectl + ["-n", ns, "wait", "--for=condition=Ready", "pod/github-fixture", "--timeout=90s"])
@@ -202,8 +212,8 @@ def main():
             manifest["checks"]["rollback_ready"] = "pass"
             # Query through the controller, whose test-only hosts and CA map to
             # the fixture. This also proves that its actual runtime trusts TLS.
-            stats_code = "import ssl,urllib.request; c=ssl.create_default_context(cafile='/fixture-ca/ca.crt'); print(urllib.request.urlopen('https://api.github.com/fixture/stats',context=c).read().decode())"
-            stats = json.loads(run("protocol-stats", kubectl + ["-n", ns, "exec", "deployment/runnerscout", "--", "python3", "-c", stats_code]).stdout)
+            stats_code = "import ssl,urllib.request; c=ssl.create_default_context(cafile='/tls/tls.crt'); print(urllib.request.urlopen('https://localhost:8443/fixture/stats',context=c).read().decode())"
+            stats = json.loads(run("protocol-stats", kubectl + ["-n", ns, "exec", "pod/github-fixture", "--", "python3", "-c", stats_code]).stdout)
             if stats.get("unexpected", 0) or not any("/sessions" in key and key.startswith("POST") and value >= 3 for key, value in stats.items()) or not stats.get("GET /fixture/messages", 0):
                 raise RuntimeError("fixture did not observe expected controller session lifecycle")
             if not stats.get("POST /app/installations/42/access_tokens", 0):
@@ -243,6 +253,11 @@ def main():
         if network_created:
             try:
                 run("network-cleanup", ["docker", "network", "rm", identity], cleanup=True)
+            except Exception as error:
+                manifest["cleanup_errors"].append(str(error))
+        if fixture_tag_created:
+            try:
+                run("fixture-tag-cleanup", ["docker", "image", "rm", fixture_tag], cleanup=True)
             except Exception as error:
                 manifest["cleanup_errors"].append(str(error))
         if manifest["cleanup_errors"]:

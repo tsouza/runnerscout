@@ -41,7 +41,10 @@ the default kubeconfig or skips when the explicit test environment is missing.
 AWS configurations require `accountID` as well as their named credential profile
 or workload identity. STS caller identity must match before EC2 observations or
 effects. A profile rebound to another account produces an explicit error and
-retains cleanup obligations. AWS runner images must support IMDSv2 in cloud-init.
+retains cleanup obligations. AWS runner images must be available Linux EBS-root
+images matching the selected architecture, without Marketplace product codes.
+EBS volumes use encryption and delete-on-termination; durable dependency IDs retain
+cleanup obligations for residual disks and interfaces. Images must support IMDSv2 in cloud-init.
 The VM metadata endpoint requires tokens with a one-hop response limit; IPv6
 metadata and instance-tag access are disabled. Runner VMs have no instance profile.
 
@@ -55,8 +58,11 @@ secret values in the public configuration. Existing `az login` caches are not us
 
 Each named provider uses its own credential scope. AWS profiles require an
 explicit mounted `AWS_CONFIG_FILE` or `AWS_SHARED_CREDENTIALS_FILE`; implicit
-home-directory profiles are not used. Shutdown joins operations before removing
-AWS CLI caches.
+home-directory profiles are not used. AWS uses the native Go SDK and rereads
+selected credential files per operation.
+Static keys, mounted profiles and web identity are supported; credential processes,
+developer SSO, interactive MFA and implicit instance-metadata credentials are rejected.
+Each operation freezes one credential identity for account verification and EC2 calls.
 
 GCP uses the native Go SDK. Select a mounted credential JSON file with
 `GOOGLE_APPLICATION_CREDENTIALS` or `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`;
