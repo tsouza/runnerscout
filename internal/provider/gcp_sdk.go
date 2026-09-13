@@ -2,22 +2,16 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tsouza/runnerscout/internal/lifecycle"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
-	"google.golang.org/api/option"
 )
 
 // GCPSDK uses provider-local credentials. Service permits an isolated HTTPS
@@ -26,79 +20,6 @@ type GCPSDK struct{ Service *compute.Service }
 
 func (*GCPSDK) String() string   { return "GCP SDK (credentials redacted)" }
 func (*GCPSDK) GoString() string { return "GCP SDK (credentials redacted)" }
-
-func gcpCredential(ctx context.Context, environment map[string]string) (oauth2.TokenSource, error) {
-	file, alias := environment["GOOGLE_APPLICATION_CREDENTIALS"], environment["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]
-	if file != "" && alias != "" && file != alias {
-		return nil, errors.New("ambiguous GCP credential files")
-	}
-	if file == "" {
-		file = alias
-	}
-	if file == "" {
-		return google.ComputeTokenSource("", compute.ComputeScope), nil
-	}
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, errors.New("GCP credential file unavailable")
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
-	if err != nil || len(data) > 1<<20 {
-		return nil, errors.New("GCP credential file invalid")
-	}
-	var document map[string]any
-	if json.Unmarshal(data, &document) != nil || !gcpCredentialDocument(document, 0) {
-		return nil, errors.New("unsupported GCP credential configuration")
-	}
-	var identity struct {
-		Type google.CredentialsType `json:"type"`
-	}
-	if json.Unmarshal(data, &identity) != nil {
-		return nil, errors.New("GCP credential JSON invalid")
-	}
-	switch identity.Type {
-	case google.ServiceAccount, google.AuthorizedUser, google.ExternalAccount, google.ImpersonatedServiceAccount:
-	default:
-		return nil, errors.New("unsupported GCP credential type")
-	}
-	credentials, err := google.CredentialsFromJSONWithType(ctx, data, identity.Type, compute.ComputeScope)
-	if err != nil {
-		return nil, errors.New("GCP credential configuration invalid")
-	}
-	return credentials.TokenSource, nil
-}
-
-// Credential JSON may describe a token source, never a process to execute.
-func gcpCredentialDocument(document map[string]any, depth int) bool {
-	if depth > 3 {
-		return false
-	}
-	if source, ok := document["credential_source"].(map[string]any); ok {
-		if _, executable := source["executable"]; executable {
-			return false
-		}
-	}
-	if source, ok := document["source_credentials"].(map[string]any); ok {
-		return gcpCredentialDocument(source, depth+1)
-	}
-	return true
-}
-
-func newGCPSDK(environment map[string]string) (*GCPSDK, error) {
-	// Token refresh has a finite HTTP budget even when its owning controller is
-	// shutting down. API requests additionally carry the effect's context.
-	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, &http.Client{Timeout: 30 * time.Second})
-	credential, err := gcpCredential(ctx, environment)
-	if err != nil {
-		return nil, err
-	}
-	service, err := compute.NewService(ctx, option.WithTokenSource(credential))
-	if err != nil {
-		return nil, errors.New("GCP client configuration invalid")
-	}
-	return &GCPSDK{Service: service}, nil
-}
 
 func (p *Command) gcpClient() (*compute.Service, error) {
 	if p.GCP == nil || p.GCP.Service == nil {

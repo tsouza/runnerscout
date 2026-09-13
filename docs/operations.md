@@ -63,8 +63,9 @@ GCP uses the native Go SDK. Select a mounted credential JSON file with
 different files in both variables are rejected. An explicit file never falls
 back to another identity after failure. Without a file, the SDK uses metadata
 workload identity; developer ADC and gcloud login caches are not read. Executable
-credential sources are rejected. Credential-file changes require a controller
-reload or restart. Grant access to instance and disk inventory/creation/deletion
+credential sources are rejected. The running client detects projected credential-file
+changes on its next request; invalid or missing updates fail without reusing an old
+token. Grant access to instance and disk inventory/creation/deletion
 and zonal operation inventory/observation in the configured project.
 
 GCP labels the VM and its boot disk at creation and checks operation commitment
