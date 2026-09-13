@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,10 +26,15 @@ func namedCredentialConfig() Config {
 func TestOperatorNamedCredentialsStayOutOfDurableState(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
+	credentialFile := filepath.Join(t.TempDir(), "gcp.json")
+	if err := os.WriteFile(credentialFile, []byte(`{"type":"authorized_user","client_id":"fixture","client_secret":"fixture-gcp-client-secret","refresh_token":"fixture-refresh"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	client := fake.NewClientset()
 	credentials := map[string]map[string]string{
 		"a-aws": {"AWS_ACCESS_KEY_ID": "fixture-access-id", "AWS_SECRET_ACCESS_KEY": "fixture-access-secret"},
-		"z-gcp": {"GOOGLE_APPLICATION_CREDENTIALS": "/mounted/private-fixture.json"},
+		"z-gcp": {"GOOGLE_APPLICATION_CREDENTIALS": credentialFile},
 	}
 	op, cleanup, err := NewWithCredentials(namedCredentialConfig(), client, nil, credentials)
 	if err != nil {
@@ -36,12 +42,12 @@ func TestOperatorNamedCredentialsStayOutOfDurableState(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cleanup() })
 	entries, err := os.ReadDir(tmp)
-	if err != nil || len(entries) != 2 {
+	if err != nil || len(entries) != 1 {
 		t.Fatal("provider scopes not independently created")
 	}
 	for _, command := range op.Controller.Providers {
 		p, ok := command.(*provider.Command)
-		if !ok || p.Exec == nil || p.Bootstrap == nil {
+		if !ok || p.Bootstrap == nil || (p.Config.Kind == "aws" && p.Exec == nil) || (p.Config.Kind == "gcp" && (p.GCP == nil || p.Exec != nil)) {
 			t.Fatal("provider lost its runtime wiring")
 		}
 	}
@@ -56,7 +62,7 @@ func TestOperatorNamedCredentialsStayOutOfDurableState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"fixture-access-id", "fixture-access-secret", "/mounted/private-fixture.json", tmp} {
+	for _, value := range []string{"fixture-access-id", "fixture-access-secret", credentialFile, "fixture-gcp-client-secret", "fixture-refresh", tmp} {
 		if strings.Contains(string(data), value) {
 			t.Fatal("credential material or cache path persisted to Kubernetes")
 		}
@@ -64,6 +70,10 @@ func TestOperatorNamedCredentialsStayOutOfDurableState(t *testing.T) {
 	if err := cleanup(); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(credentialFile); err != nil {
+		t.Fatal("cleanup removed caller-owned credentials", err)
+	}
+
 	entries, err = os.ReadDir(tmp)
 	if err != nil || len(entries) != 0 {
 		t.Fatal("credential caches retained after controller shutdown")

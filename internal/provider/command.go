@@ -1,5 +1,5 @@
-// Package provider implements isolated AWS, GCP and Azure command adapters. Cloud CLI
-// binaries are deployment dependencies. No shell evaluates configuration values.
+// Package provider implements isolated cloud adapters with durable ownership.
+// Azure and GCP use native SDKs; AWS uses an isolated CLI without a shell.
 package provider
 
 import (
@@ -50,6 +50,7 @@ func (e OSExecutor) Run(ctx context.Context, name string, args ...string) ([]byt
 }
 
 type Command struct {
+	GCP       *GCPSDK
 	Azure     *AzureSDK
 	azureOnce sync.Once
 	Config    Config
@@ -96,9 +97,6 @@ func (p *Command) aws(ctx context.Context, region string, args ...string) ([]byt
 		all = append(all, "--profile", p.Config.Profile)
 	}
 	return p.Exec.Run(ctx, "aws", append(all, args...)...)
-}
-func (p *Command) gcp(ctx context.Context, args ...string) ([]byte, error) {
-	return p.Exec.Run(ctx, "gcloud", append([]string{"compute", "--project", p.Config.Project, "--format=json", "--quiet"}, args...)...)
 }
 func privateFile(content string) (string, func(), error) {
 	f, e := os.CreateTemp("", "runnerscout-*")
@@ -168,20 +166,7 @@ func (p *Command) Create(ctx context.Context, a lifecycle.Allocation) (string, e
 		}
 		return response.Instances[0].InstanceID, nil
 	}
-	path, clean, e := privateFile(script)
-	if e != nil {
-		return "", e
-	}
-	defer clean()
-	args := []string{"instances", "create", a.ID, "--zone", a.Offering.Zone, "--machine-type", a.Offering.Machine, "--image", a.Offering.Image, "--subnet", p.Config.Subnet, "--no-address", "--no-service-account", "--no-scopes", "--metadata-from-file", "startup-script=" + path, "--labels", "runnerscout-owner=" + p.Config.Owner + ",runnerscout-operation=" + a.ID, "--boot-disk-auto-delete"}
-	if a.Offering.Spot {
-		args = append(args, "--provisioning-model=SPOT", "--instance-termination-action=DELETE")
-	}
-	_, e = p.gcp(ctx, args...)
-	if e != nil {
-		return "", e
-	}
-	return a.ID, nil
+	return p.createGCP(ctx, a, script)
 }
 func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycle.Observation, error) {
 	if err := ValidateName(a.ID); err != nil {
@@ -228,27 +213,7 @@ func (p *Command) Observe(ctx context.Context, a lifecycle.Allocation) (lifecycl
 	if p.Config.Kind == "azure" {
 		return p.observeAzure(ctx, a)
 	}
-	out, err := p.gcp(ctx, "instances", "list", "--zones", a.Offering.Zone, "--filter", "name="+a.ID)
-	if err != nil {
-		return lifecycle.Observation{}, err
-	}
-	var instances []struct {
-		Name   string
-		Labels map[string]string
-	}
-	if err = json.Unmarshal(out, &instances); err != nil {
-		return lifecycle.Observation{}, err
-	}
-	if instances == nil {
-		return lifecycle.Observation{}, errors.New("missing instance inventory")
-	}
-	if len(instances) == 0 {
-		return lifecycle.Observation{Known: true}, nil
-	}
-	if len(instances) != 1 || instances[0].Name != a.ID || instances[0].Labels["runnerscout-owner"] != p.Config.Owner || instances[0].Labels["runnerscout-operation"] != a.ID {
-		return lifecycle.Observation{}, errors.New("resource ownership mismatch")
-	}
-	return lifecycle.Observation{Known: true, Exists: true, ResourceID: a.ID}, nil
+	return p.observeGCP(ctx, a)
 }
 func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
 	ob, err := p.Observe(ctx, a)
@@ -270,7 +235,7 @@ func (p *Command) Delete(ctx context.Context, a lifecycle.Allocation) error {
 	if p.Config.Kind == "aws" {
 		_, err = p.aws(ctx, a.Offering.Region, "terminate-instances", "--instance-ids", ob.ResourceID)
 	} else {
-		_, err = p.gcp(ctx, "instances", "delete", a.ID, "--zone", a.Offering.Zone)
+		err = p.deleteGCP(ctx, a)
 	}
 	return err
 }

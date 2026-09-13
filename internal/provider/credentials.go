@@ -70,13 +70,12 @@ func NewCommand(c Config, environment map[string]string) (*Command, func() error
 		}
 	}
 	if c.Kind == "gcp" {
-		adc, override := values["GOOGLE_APPLICATION_CREDENTIALS"], values["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"]
-		if adc != "" && override != "" && adc != override {
-			return nil, nil, errors.New("ambiguous GCP credential files")
+		sdk, err := newGCPSDK(values)
+		if err != nil {
+			return nil, nil, err
 		}
-		if adc != "" {
-			values["CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"] = adc
-		}
+		p.GCP = sdk
+		return p, func() error { return nil }, nil
 	}
 	dir, err := os.MkdirTemp("", "runnerscout-auth-")
 	if err != nil {
@@ -86,7 +85,7 @@ func NewCommand(c Config, environment map[string]string) (*Command, func() error
 	// Inherit transport/runtime settings, not cloud identities, Python import
 	// overrides, shell initialization, or shared CLI credential caches.
 	env := map[string]string{"HOME": dir, "TMPDIR": dir, "PYTHONDONTWRITEBYTECODE": "1"}
-	for _, name := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "CLOUDSDK_PYTHON"} {
+	for _, name := range []string{"PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"} {
 		if value, ok := os.LookupEnv(name); ok {
 			env[name] = value
 		}
@@ -95,9 +94,6 @@ func NewCommand(c Config, environment map[string]string) (*Command, func() error
 		env["AWS_EC2_METADATA_DISABLED"] = "true"
 		env["AWS_CONFIG_FILE"] = filepath.Join(dir, "config")
 		env["AWS_SHARED_CREDENTIALS_FILE"] = filepath.Join(dir, "credentials")
-	} else {
-		env["CLOUDSDK_CONFIG"] = dir
-		env["CLOUDSDK_CORE_DISABLE_USAGE_REPORTING"] = "true"
 	}
 	for name, value := range values {
 		env[name] = value

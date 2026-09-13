@@ -56,7 +56,7 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
     fixture_secrets = {
         "github": {"privateKey": (temp / "app.key").read_text()},
         "aws-credentials": {"path": "/etc/runnerscout/providers/aws-credentials/credentials", "credentials": "[runnerscout]\naws_access_key_id=fixture\naws_secret_access_key=fixture\n"},
-        "gcp-credentials": {"path": "/etc/runnerscout/providers/gcp-credentials/credentials.json", "credentials.json": "{}"},
+        "gcp-credentials": {"path": "/etc/runnerscout/providers/gcp-credentials/credentials.json", "credentials.json": json.dumps({"type": "authorized_user", "client_id": "fixture", "client_secret": "fixture", "refresh_token": "fixture"})},
         "azure-identity": {"client-id": "00000000-0000-0000-0000-000000000000", "tenant-id": "00000000-0000-0000-0000-000000000000", "token-file": "/etc/runnerscout/providers/azure-identity/token", "token": "fixture"},
     }
     for name, data in fixture_secrets.items():

@@ -41,3 +41,7 @@ Keep Kubernetes libraries, OpenAPI and structured-merge-diff compatible as a set
 Kubernetes 0.37 uses structured-merge-diff/v6; OpenAPI revisions requiring v7
 cannot be substituted until Kubernetes supports them. Required CI validates
 dependency updates before merge.
+
+BuildKit retains Go compiler output within a reused builder. The Actions layer
+cache retains the module-download layer; compiler cache mounts are local to the
+builder and are not exported by that layer cache.
