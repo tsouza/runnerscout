@@ -82,16 +82,6 @@ func TestAWSCreateUsesDurableTokenAndPrivateBootstrap(t *testing.T) {
 		t.Fatal(id, e)
 	}
 }
-func TestGCPOwnershipBlocksDeletion(t *testing.T) {
-	f := &fakeExec{responses: [][]byte{[]byte(`[{"name":"rs-test","labels":{"runnerscout-owner":"someone-else"}}]`)}}
-	p := Command{Config: Config{Kind: "gcp", Owner: "test", Subnet: "subnet", Project: "project"}, Exec: f}
-	if e := p.Delete(context.Background(), allocation()); e == nil {
-		t.Fatal("deleted foreign VM")
-	}
-	if len(f.calls) != 1 {
-		t.Fatal(f.calls)
-	}
-}
 func TestUnknownProviderOutputIsNotAbsence(t *testing.T) {
 	f := &fakeExec{responses: [][]byte{[]byte(`{"Account":"000000000000"}`), []byte(`not-json`)}}
 	p := Command{Config: Config{Kind: "aws", AccountID: "000000000000", Owner: "test", Subnet: "subnet", SecurityGroup: "sg"}, Exec: f}

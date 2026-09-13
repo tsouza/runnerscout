@@ -3,23 +3,15 @@
 `make image` builds `runnerscout:development`. `make image-test` runs it without
 network access as a non-root user, with a read-only filesystem, dropped
 capabilities and bounded CPU, memory and temporary storage. Checks exercise the
-controller parser, AWS CLI and Google Cloud CLI and confirm the Azure Python
-authentication stack is absent. Evidence is retained under ignored `evidence/`.
+controller parser and AWS CLI and verify that Azure/GCP Python libraries and
+the Google Cloud CLI are absent. Evidence stays under ignored `evidence/`.
 
-Azure uses Microsoft's Go identity, deployments and resource-management SDKs.
-Authentication uses a configured federated workload identity, environment
-credential or managed identity. It never invokes Azure CLI or falls back to a
-developer login. GitHub and cloud credentials are external to the image.
+Azure and GCP use native Go SDKs pinned in `go.mod` and `go.sum`. AWS uses a
+digest-pinned CLI with isolated credential files and caches. The build and runtime
+base images are digest-pinned; Debian security updates are installed at build time.
+No provider emulator is included in the controller image.
 
-Go, Python, AWS CLI and Google Cloud CLI base stages are digest-pinned. The image
-uses system Python for gcloud and removes gcloud's bundled interpreter. Debian
-updates are resolved at build time; a reproducible release requires an immutable
-package snapshot. SDK versions and checksums are locked in `go.mod` and `go.sum`.
-
-`/healthz` reports process liveness. `/readyz` requires leadership, a scale-set
-session and successful latest reconciliation. These endpoints do not promise VM
-capacity or establish successful GitHub job execution.
-
-A runtime smoke test or emulator pass does not qualify live cloud behavior.
-Release acceptance requires the complete architecture/provider matrix and fresh
-image vulnerability results; dependency removal alone is not security acceptance.
+The chart exposes `/healthz` and `/readyz`; readiness requires a working scale-set
+session and reconciliation loop. A passing container check does not qualify live
+GitHub-to-VM execution, cloud credentials, image vulnerability acceptance or
+multiarchitecture execution. See [release requirements](releases.md).

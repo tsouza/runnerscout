@@ -7,7 +7,7 @@ requirements and ordinary `runs-on` targeting. It can run alongside
 with separate scale-set ownership.
 
 **Experimental; no qualified release.** Live GitHub-to-VM execution across all
-three providers remains unqualified. The The controller supports mounted
+three providers remains unqualified. The controller supports mounted
 configuration or a named RunnerScaleSet CRD. The Helm chart supports both modes; see the
 [complete CRD example](examples/multicloud/README.md).
 
