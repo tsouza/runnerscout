@@ -12,6 +12,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/githubjobs"
 	"github.com/tsouza/runnerscout/internal/operator"
 	"github.com/tsouza/runnerscout/internal/provider"
+	"github.com/tsouza/runnerscout/internal/version"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -89,7 +90,7 @@ func (r *Runtime) newWorker(resolved Resolved, credentials Credentials, mode Wor
 	var github *scaleset.Client
 	var err error
 	if mode == SessionMode {
-		system := scaleset.SystemInfo{System: "runnerscout", Version: "development"}
+		system := scaleset.SystemInfo{System: "runnerscout", Version: version.Version}
 		if resolved.Auth.Mode == "app" {
 			github, err = scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{GitHubConfigURL: resolved.Config.GitHubURL,
 				GitHubAppAuth: scaleset.GitHubAppAuth{ClientID: resolved.Auth.AppClientID, InstallationID: resolved.Auth.AppInstallationID, PrivateKey: string(credentials.GitHub)}, SystemInfo: system})

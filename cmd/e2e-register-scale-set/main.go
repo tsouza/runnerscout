@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/actions/scaleset"
+	"github.com/tsouza/runnerscout/internal/version"
 )
 
 type options struct {
@@ -80,7 +81,7 @@ func parseOptions(args []string) (options, error) {
 // mutually exclusive auth modes, same "read the mounted file, never accept a
 // credential value as a flag" discipline.
 func buildClient(o options) (*scaleset.Client, error) {
-	system := scaleset.SystemInfo{System: "runnerscout-e2e-register-scale-set", Version: "development"}
+	system := scaleset.SystemInfo{System: "runnerscout-e2e-register-scale-set", Version: version.Version}
 	if o.tokenPath != "" {
 		token, err := os.ReadFile(o.tokenPath)
 		if err != nil || strings.TrimSpace(string(token)) == "" {

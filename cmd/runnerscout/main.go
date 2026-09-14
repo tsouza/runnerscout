@@ -23,6 +23,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/operator"
 	"github.com/tsouza/runnerscout/internal/provider"
 	"github.com/tsouza/runnerscout/internal/state"
+	"github.com/tsouza/runnerscout/internal/version"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -93,7 +94,7 @@ func readConfig(path string) (operator.Config, error) {
 }
 
 func githubClient(o options, cfg operator.Config) (*scaleset.Client, error) {
-	system := scaleset.SystemInfo{System: "runnerscout", Version: "development"}
+	system := scaleset.SystemInfo{System: "runnerscout", Version: version.Version}
 	var client *scaleset.Client
 	var err error
 	if o.appID != "" || o.installationID != 0 || o.appKey != "" {

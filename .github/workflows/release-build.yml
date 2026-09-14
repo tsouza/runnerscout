@@ -114,6 +114,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           tags: runnerscout:release-build
+          build-args: VERSION=${{ inputs.release_tag != '' && inputs.release_tag || 'development' }}
           cache-from: type=gha,scope=runnerscout-release-build
           cache-to: type=gha,scope=runnerscout-release-build,mode=max
           outputs: type=oci,dest=release-artifacts/runnerscout-image-multiarch.oci.tar
@@ -122,6 +123,8 @@ jobs:
       # so an SBOM can be generated against a runnable image reference. It
       # reuses the layer cache from the multi-arch build above, so this is a
       # cache hit, not an independent rebuild. This image is never pushed.
+      # build-args must match the build above exactly, or this becomes a
+      # real second build instead of a cache hit.
       - name: Load linux/amd64 image for SBOM generation (not pushed)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -130,6 +133,7 @@ jobs:
           load: true
           push: false
           tags: runnerscout:release-build-amd64
+          build-args: VERSION=${{ inputs.release_tag != '' && inputs.release_tag || 'development' }}
           cache-from: type=gha,scope=runnerscout-release-build
 
       - name: Generate SBOM for the built image (linux/amd64)
@@ -216,18 +220,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # Rebuilds the exact same context/commit/Dockerfile as the `build`
-      # job above, reading (not writing) that job's `runnerscout-release-build`
-      # GHA cache scope. Because nothing about the inputs differs, this is a
-      # full cache hit that repackages the layers `build` already produced
-      # into a registry-push export, not an independent second build of
-      # different content. A single build step producing both the local OCI
-      # archive artifact and a registry push in one invocation was
-      # considered (buildx supports multiple simultaneous --output
-      # destinations) but rejected here: making that combination conditional
-      # on the workflow_call/workflow_dispatch gate inside one step's inputs
-      # is harder to verify by manual trace than gating a whole separate job,
-      # and the cache-hit cost of a second export is negligible.
+      # Rebuilds the exact same context/commit/Dockerfile/build-args as the
+      # `build` job above, reading (not writing) that job's
+      # `runnerscout-release-build` GHA cache scope. Because nothing about
+      # the inputs differs - including the VERSION build-arg, computed with
+      # the identical expression both jobs receive from the same
+      # workflow_call `inputs.release_tag` - this is a full cache hit that
+      # repackages the layers `build` already produced into a registry-push
+      # export, not an independent second build of different content. A
+      # single build step producing both the local OCI archive artifact and
+      # a registry push in one invocation was considered (buildx supports
+      # multiple simultaneous --output destinations) but rejected here:
+      # making that combination conditional on the workflow_call/
+      # workflow_dispatch gate inside one step's inputs is harder to verify
+      # by manual trace than gating a whole separate job, and the
+      # cache-hit cost of a second export is negligible.
       - name: Build and push multi-arch runtime image
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -238,6 +245,7 @@ jobs:
           tags: |
             ghcr.io/tsouza/runnerscout:${{ inputs.commit_sha }}
             ghcr.io/tsouza/runnerscout:${{ inputs.release_tag }}
+          build-args: VERSION=${{ inputs.release_tag != '' && inputs.release_tag || 'development' }}
           cache-from: type=gha,scope=runnerscout-release-build
 
       - name: Install cosign
