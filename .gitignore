@@ -11,3 +11,13 @@ __pycache__/
 *.pyc
 
 /outputs/
+
+# OpenTofu/Terraform local state (tools/tofu/**) - these modules deliberately
+# use local state, never a remote backend; the state file itself is
+# environment-specific and must never be committed. The provider dependency
+# cache is likewise local and reproducible from .terraform.lock.hcl (which
+# IS committed).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
