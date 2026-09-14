@@ -6,17 +6,12 @@ getting `cmd/runnerscout-wireguard-agent` actually running on a wireguard-mode
 runner VM at boot. It is example material to copy into your own runner image
 build, not something this repository installs for you.
 
-**This does not make wireguard mode usable end-to-end.** Overlay IP address
-allocation (`lifecycle.Allocation.WireGuardOverlayAddress`) is a separate,
-still-open gap tracked on
-[issue #16](https://github.com/tsouza/runnerscout/issues/16): no code path in
-this repository assigns it today, so every real allocation's cloud-init
-payload has an empty `OverlayAddress`, and the agent's `LoadPayload` step
-refuses to start on it (see `internal/wireguard/agent/agent.go`). Wiring up
-this systemd unit correctly gets the agent running and ready; it does not
-change that outcome until the overlay-allocation gap above is closed. See
-`docs/operations.md`'s wireguard-mode section for the authoritative statement
-of what is and is not usable today.
+Wireguard mode is functionally usable end-to-end: `internal/operator`
+assigns each new allocation a unique overlay IP address
+(`lifecycle.Allocation.WireGuardOverlayAddress`, issue #16, closed), so a
+correctly wired-up systemd unit gets the agent running successfully, not
+just ready. See `docs/operations.md`'s wireguard-mode section for the
+authoritative statement of what is and is not usable today.
 
 ## What's here
 
@@ -66,6 +61,7 @@ systemctl status runnerscout-wireguard-agent.service
 journalctl -u runnerscout-wireguard-agent.service
 ```
 
-Given the overlay-allocation gap above, expect to see the unit fail its
-`LoadPayload` step and retry (`Restart=on-failure`) rather than run
-successfully, until that gap is closed.
+A correctly wired-up unit should load its payload and start successfully.
+`Restart=on-failure` remains a sane default for transient failures (e.g. the
+payload file not yet written when the unit starts), not an expectation that
+it will loop indefinitely.

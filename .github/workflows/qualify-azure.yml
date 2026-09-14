@@ -195,11 +195,29 @@ jobs:
         # in their path, so this is not a guess - a subnet_id that does not
         # structurally nest under vnet_id's own path cannot possibly be a
         # child of it, regardless of what Azure's API would say.
+        env:
+          RUNNERSCOUT_QUALIFY_EXPECTED_SUBSCRIPTION_ID: ${{ vars.AZURE_QUALIFICATION_SUBSCRIPTION_ID }}
         run: |
           set -euo pipefail
           lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
           if ! [[ "$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
             echo "::error::subscription_id ('$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID') does not look like a subscription GUID"
+            exit 1
+          fi
+          # Mirrors qualify-gcp.yml's own vars.GCP_QUALIFICATION_PROJECT_ID
+          # check: the federated identity is only ever trusted to act in one
+          # subscription, so requiring subscription_id as its own input
+          # (rather than silently defaulting to the variable) keeps it an
+          # explicit, pinned, operator-supplied value per issue #3's "pinned
+          # images/networks" wording, while this check catches a
+          # pasted-wrong-subscription mistake before any credential is
+          # configured.
+          if [ -z "$RUNNERSCOUT_QUALIFY_EXPECTED_SUBSCRIPTION_ID" ]; then
+            echo "::error::vars.AZURE_QUALIFICATION_SUBSCRIPTION_ID is not set - this repository has no Azure qualification identity provisioned yet; see docs/qualification-real-cloud.md's Azure section for what an operator must provision first"
+            exit 1
+          fi
+          if [ "$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID" != "$RUNNERSCOUT_QUALIFY_EXPECTED_SUBSCRIPTION_ID" ]; then
+            echo "::error::subscription_id ('$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID') does not match the provisioned qualification identity's subscription (vars.AZURE_QUALIFICATION_SUBSCRIPTION_ID) - refusing to proceed"
             exit 1
           fi
           case "$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP" in

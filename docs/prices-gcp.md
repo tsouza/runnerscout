@@ -18,5 +18,5 @@ already assigned them.
 This is a deliberate, permanent product decision for this project, not a
 deferral: GCP catalog offerings stay on static pricing indefinitely, unless
 Google later publishes a structured field this package could key off
-without guessing. See [gcp.background.md](gcp.background.md) for the
-investigation and the reasoning behind that decision.
+without guessing. See [prices-gcp.background.md](prices-gcp.background.md)
+for the investigation and the reasoning behind that decision.

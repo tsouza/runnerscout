@@ -26,9 +26,10 @@
 // distinguisher below so this file can never collide with its AWS sibling),
 // workflow_dispatch-only, and this test itself additionally refuses to run
 // without an explicit confirmation phrase in its own process environment
-// (requireGCPRealCloudConfirmation) - a second, independent guard against
-// accidental invocation, in case this binary is ever built and run outside
-// that one intended workflow.
+// (requireRealCloudConfirmation, shared with aws_realcloud_test.go/
+// azure_realcloud_test.go) - a second, independent guard against accidental
+// invocation, in case this binary is ever built and run outside that one
+// intended workflow.
 //
 // What this test does NOT and honestly CANNOT qualify:
 //
@@ -86,20 +87,12 @@ import (
 	compute "google.golang.org/api/compute/v1"
 )
 
-// gcpRealCloudConfirmPhrase must be present, byte-for-byte, in
-// RUNNERSCOUT_QUALIFY_CONFIRM before this test does anything. This mirrors
-// (and is independent of) qualify-gcp.yml's own confirm_real_spend input
-// validation, and aws_realcloud_test.go's identical-in-spirit (but
-// separately named) realCloudConfirmPhrase check - a second guard so this
-// test refuses real spend even if ever invoked outside that one workflow.
-const gcpRealCloudConfirmPhrase = "I-UNDERSTAND-THIS-COSTS-REAL-MONEY"
-
-// gcpDedicatedTeardownBudget is a fixed, hard-coded deletion deadline,
-// deliberately independent of the create/observe budget (qualifyGCPEnv.maxRuntime,
-// derived from max_runtime_minutes). A run that spent its whole create/observe
-// budget just confirming the VM works must still be able to tear it down -
-// teardown is never shortened by running out of that earlier budget.
-const gcpDedicatedTeardownBudget = 5 * time.Minute
+// realCloudConfirmPhrase and dedicatedTeardownBudget (defined once, in
+// aws_realcloud_test.go, this package) are reused here unmodified - one
+// shared confirmation phrase and one shared teardown budget for every
+// real-cloud provider piece, exactly like azure_realcloud_test.go already
+// does, rather than a byte-identical GCP-prefixed copy that could silently
+// drift from the shared value if it were ever rotated.
 
 // gcpPollInterval bounds how often this file's own manual wait loops
 // (waitForGCPInstanceStatus/waitForGCPInstanceAbsent) re-query the
@@ -111,13 +104,6 @@ const gcpDedicatedTeardownBudget = 5 * time.Minute
 // simple, poll loop rather than pulling in a second, heavier GCP client
 // library just for a waiter.
 const gcpPollInterval = 3 * time.Second
-
-func requireGCPRealCloudConfirmation(t *testing.T) {
-	t.Helper()
-	if os.Getenv("RUNNERSCOUT_QUALIFY_CONFIRM") != gcpRealCloudConfirmPhrase {
-		t.Fatalf("real-cloud qualification requires RUNNERSCOUT_QUALIFY_CONFIRM=%s in the process environment; refusing to provision real billed GCP resources without it", gcpRealCloudConfirmPhrase)
-	}
-}
 
 type qualifyGCPEnv struct {
 	project, region, zone, image, subnetwork, machineType string
@@ -283,7 +269,7 @@ func (e *qualifyGCPEvidence) flush(t *testing.T) {
 }
 
 func TestQualifyRealGCPSpotLifecycle(t *testing.T) {
-	requireGCPRealCloudConfirmation(t)
+	requireRealCloudConfirmation(t)
 	env := loadQualifyGCPEnv(t)
 
 	evidence := newQualifyGCPEvidence(env.evidenceDir)
@@ -362,7 +348,7 @@ func TestQualifyRealGCPSpotLifecycle(t *testing.T) {
 	// authoritative backstop for the case where this process is killed
 	// (job timeout/cancellation) before this Cleanup func can even run.
 	t.Cleanup(func() {
-		teardownCtx, cancel := context.WithTimeout(context.Background(), gcpDedicatedTeardownBudget)
+		teardownCtx, cancel := context.WithTimeout(context.Background(), dedicatedTeardownBudget)
 		defer cancel()
 
 		deleteErr := p.Delete(teardownCtx, a)
@@ -371,7 +357,7 @@ func TestQualifyRealGCPSpotLifecycle(t *testing.T) {
 			t.Errorf("real GCP delete failed: %v", deleteErr)
 		}
 
-		absentErr := waitForGCPInstanceAbsent(teardownCtx, verify, env.project, env.zone, env.allocationID, gcpDedicatedTeardownBudget)
+		absentErr := waitForGCPInstanceAbsent(teardownCtx, verify, env.project, env.zone, env.allocationID, dedicatedTeardownBudget)
 		evidence.record("independent-instance-absent-wait", nil, absentErr)
 		if absentErr != nil {
 			t.Errorf("independent wait for instance deletion failed: %v", absentErr)

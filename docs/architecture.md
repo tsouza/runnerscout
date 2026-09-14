@@ -60,12 +60,11 @@ acknowledgment of repeated workflow effects; composition is tracked in
 [#4](https://github.com/tsouza/runnerscout/issues/4).
 
 Separate provider networks are the default. A single-mapping WireGuard overlay
-mode exists in the configuration surface, retaining each provider's native
-network boundary, and now has a reference VM-boot integration
-([examples/wireguard-agent](../examples/wireguard-agent)); see
-[operations.md](operations.md) for both. It is not yet functionally usable
-end-to-end: no allocation is ever assigned an overlay IP address, so a
-wireguard-mode VM's boot-time agent cannot start regardless of that
-integration. Overlay IP address allocation and cross-region/cross-provider
-overlay peering remain tracked in
-[#16](https://github.com/tsouza/runnerscout/issues/16).
+mode is also supported and functionally usable end-to-end, retaining each
+provider's native network boundary: each new allocation is assigned a unique
+overlay IP address, and a reference VM-boot integration
+([examples/wireguard-agent](../examples/wireguard-agent)) starts the
+boot-time agent; see [operations.md](operations.md) for both. Cross-region
+and cross-provider overlay peering remain unsupported by design (a
+wireguard-mode `NetworkProfile` accepts exactly one `NetworkMapping`), a
+permanent architectural limitation, not open work.
