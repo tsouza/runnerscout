@@ -148,8 +148,23 @@ jobs:
       # required release artifact.
       - name: Lint Helm chart
         run: helm lint charts/runnerscout --strict --kube-version 1.37.0 -f charts/runnerscout/tests/values.json
+      # `helm package --version`/`--app-version` override Chart.yaml's own
+      # values for this package only - no file in the source tree is
+      # mutated. Without this, every tagged release would ship the exact
+      # same packaged chart version (Chart.yaml's static development
+      # placeholder), regardless of which real release_tag it was built
+      # for. Only overridden when release_tag is actually set (the
+      # workflow_dispatch manual path leaves it empty and never runs
+      # publish/release anyway, per this workflow's own input docs above).
       - name: Package Helm chart
-        run: helm package charts/runnerscout --destination release-artifacts
+        run: |
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          if [ -n "$version" ]; then
+            helm package charts/runnerscout --destination release-artifacts --version "$version" --app-version "$version"
+          else
+            helm package charts/runnerscout --destination release-artifacts
+          fi
 
       - name: Generate SHA256 checksums for every artifact
         working-directory: release-artifacts

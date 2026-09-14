@@ -52,12 +52,11 @@ new admissions while accepted work retains its original deadlines. Recovery can
 reconcile cloud resources without GitHub credentials. Deletion drains allocations
 and removes the finalizer only after confirmed cleanup. Helm supports both configuration modes with a read-only CRD uninstall guard;
 [worked examples](../examples/multicloud/README.md) cover the full resource graph.
-Remaining lifecycle acceptance is tracked in [#15](https://github.com/tsouza/runnerscout/issues/15).
 
 Spot retries default to disabled. Execution requires confirmed interruption,
 unambiguous runner/run/attempt correlation, bounded fresh retries and explicit
-acknowledgment of repeated workflow effects; composition is tracked in
-[#4](https://github.com/tsouza/runnerscout/issues/4).
+acknowledgment of repeated workflow effects; all three cloud providers retry
+interrupted jobs end-to-end under this composition.
 
 Separate provider networks are the default. A single-mapping WireGuard overlay
 mode is also supported and functionally usable end-to-end, retaining each

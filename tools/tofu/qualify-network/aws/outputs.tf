@@ -1,15 +1,15 @@
 output "vpc_id" {
-  description = "ID of the qualification VPC. Copy straight into qualify.yml's `aws_vpc_id` workflow_dispatch input (and E2E_AWS_VPC_ID)."
+  description = "ID of the qualification VPC. Copy straight into tools/e2e/env.example's E2E_AWS_VPC_ID."
   value       = aws_vpc.qualify.id
 }
 
 output "subnet_id" {
-  description = "ID of the private subnet qualification/E2E instances actually launch into. Copy straight into qualify.yml's `aws_subnet_id` workflow_dispatch input (and E2E_AWS_SUBNET_ID)."
+  description = "ID of the private subnet qualification/E2E instances actually launch into. Copy straight into tools/e2e/env.example's E2E_AWS_SUBNET_ID."
   value       = aws_subnet.private.id
 }
 
 output "security_group_id" {
-  description = "ID of the qualification security group (no inbound, all outbound). Copy straight into qualify.yml's `aws_security_group_id` workflow_dispatch input (and E2E_AWS_SECURITY_GROUP_ID)."
+  description = "ID of the qualification security group (no inbound, all outbound). Copy straight into tools/e2e/env.example's E2E_AWS_SECURITY_GROUP_ID."
   value       = aws_security_group.qualify.id
 }
 
