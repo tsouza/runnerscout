@@ -78,6 +78,27 @@ func (p *Command) createAWS(ctx context.Context, a lifecycle.Allocation, script 
 		return lifecycle.Creation{}, errors.New("AWS create response ownership unconfirmed")
 	}
 	instance := response.Instances[0]
+	// RunInstances's own response can genuinely return before the new
+	// instance's BlockDeviceMappings are fully populated - the instance
+	// and its NetworkInterfaces show up immediately, but the EBS volume
+	// attachment record can lag by a couple of seconds (a real,
+	// intermittent EC2 API eventual-consistency race, found via an actual
+	// real-cloud dispatch - see docs/qualification-real-cloud.background.md's
+	// "What real dispatches found" section). Re-query a few times, still
+	// well within this function's own 30-second budget, before concluding
+	// the dependencies are genuinely missing.
+	for attempt := 0; attempt < 3 && len(instance.BlockDeviceMappings) == 0; attempt++ {
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+			described, derr := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{aws.ToString(instance.InstanceId)}})
+			if derr == nil && described != nil && len(described.Reservations) == 1 && len(described.Reservations[0].Instances) == 1 {
+				instance = described.Reservations[0].Instances[0]
+			}
+		}
+	}
 	receipt := lifecycle.Creation{ResourceID: aws.ToString(instance.InstanceId)}
 	observed := map[string]bool{}
 	for _, mapping := range instance.BlockDeviceMappings {

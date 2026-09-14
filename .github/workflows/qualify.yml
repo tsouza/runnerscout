@@ -803,6 +803,18 @@ jobs:
             echo "::warning::leftover AWS instance(s) not terminated by the qualification job: $instances - force-terminating now"
             # shellcheck disable=SC2086  # intentionally unquoted: --instance-ids takes one argument per id, and $instances is AWS CLI's own space-separated --output text list.
             aws ec2 terminate-instances --region "$region" --instance-ids $instances || true
+            # Wait for actual termination before touching volumes/ENIs
+            # below: both are created with DeleteOnTermination=true, so
+            # deleting them explicitly while the instance is still
+            # "shutting-down" races AWS's own automatic cleanup and fails
+            # with VolumeInUse (found via an actual real-cloud dispatch -
+            # see docs/qualification-real-cloud.background.md's "What real
+            # dispatches found" section). Bounded by this waiter's own
+            # default timeout; `|| true` since a slow/stuck termination
+            # shouldn't block the volume/ENI sweep below from at least
+            # trying.
+            # shellcheck disable=SC2086  # see above: intentionally unquoted.
+            aws ec2 wait instance-terminated --region "$region" --instance-ids $instances || true
           fi
 
           # shellcheck disable=SC2016  # see the describe-instances --query above: JMESPath literal, not shell expansion.
