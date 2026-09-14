@@ -676,6 +676,15 @@ jobs:
             echo "::error::gcp_image '$RUNNERSCOUT_QUALIFY_GCP_IMAGE' could not be resolved in project '$RUNNERSCOUT_QUALIFY_GCP_PROJECT' - refusing to proceed"
             exit 1
           fi
+          # Marker for the VM-level safety net below: this step only ever
+          # runs once the qualification identity's own auth step succeeded
+          # (implicit success() gating on its bare `if:`), unlike
+          # GOOGLE_APPLICATION_CREDENTIALS, which stays set to the
+          # NETWORK-PROVISIONER identity's credential file - never cleared
+          # - when the network apply fails and every qualification step
+          # after it is skipped. See the AWS safety-net step's own comment
+          # for the real dispatch that found this exact class of bug.
+          echo "RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED=true" >> "$GITHUB_ENV"
 
       - name: "[AWS] Real-provider qualification (creates ONE real billed Spot instance)"
         if: matrix.provider == 'aws'
@@ -761,8 +770,22 @@ jobs:
         # the network-level teardown below can succeed.
         run: |
           set -euo pipefail
-          if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-            echo "AWS credentials were never configured this run - nothing to independently verify or clean up."
+          # Deliberately NOT checking AWS_ACCESS_KEY_ID: that stays set to
+          # the NETWORK-PROVISIONER identity's credentials (from the apply
+          # step earlier in this job) even when the qualification identity
+          # was never configured - e.g. when the network apply itself
+          # failed and every qualification-credential step below it was
+          # skipped. Checking it produced a real failure (discovered via an
+          # actual dispatch): this step ran anyway, believed it had
+          # qualification credentials, and got UnauthorizedOperation trying
+          # to call ec2:DescribeInstances with the network-provisioner
+          # role, which has no EC2-instance permissions by design.
+          # RUNNERSCOUT_QUALIFY_ACCOUNT_ID is only ever set by "[AWS]
+          # Resolve account identity" above, itself gated behind the
+          # qualification credential steps having actually run - the right
+          # signal for "did the qualification phase get this far".
+          if [ -z "${RUNNERSCOUT_QUALIFY_ACCOUNT_ID:-}" ]; then
+            echo "AWS qualification credentials were never configured this run - nothing to independently verify or clean up."
             exit 0
           fi
           region="$RUNNERSCOUT_QUALIFY_AWS_REGION"
@@ -854,9 +877,10 @@ jobs:
           echo "Independent post-run inventory sweep for allocation $alloc in resource group $rg"
           # `az resource list` rejects combining --resource-group with
           # --tag (a real, hard CLI incompatibility, discovered via an
-          # actual dispatch - see docs/qualification-real-cloud.background.md)
-          # - so the tag match is done client-side via --query instead of
-          # the server-side --tag filter.
+          # actual dispatch - see docs/qualification-real-cloud.background.md's
+          # "What real dispatches found" section) - so the tag match is
+          # done client-side via --query instead of the server-side --tag
+          # filter.
           leftover_ids="$(az resource list --resource-group "$rg" --query "[?tags.\"runnerscout-operation\"=='$alloc'].id" -o tsv)"
           if [ -z "$leftover_ids" ]; then
             echo "Independent inventory confirms zero leftover billable resources for allocation $alloc."
@@ -914,8 +938,20 @@ jobs:
         if: always() && matrix.provider == 'gcp'
         run: |
           set -euo pipefail
-          if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
-            echo "GCP credentials were never configured this run - nothing to independently verify or clean up."
+          # Deliberately NOT checking GOOGLE_APPLICATION_CREDENTIALS: that
+          # stays set to the NETWORK-PROVISIONER identity's credential file
+          # (from the apply step earlier in this job) even when the
+          # qualification identity was never configured - e.g. when the
+          # network apply itself failed and every qualification step below
+          # it was skipped. RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED is only
+          # ever set by "[GCP] Cross-validate pinned zone/image against the
+          # project" above, itself gated behind the qualification identity
+          # having actually authenticated - the right signal for "did the
+          # qualification phase get this far" (see the AWS safety-net
+          # step's own comment for the real dispatch that found this exact
+          # class of bug for AWS).
+          if [ -z "${RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED:-}" ]; then
+            echo "GCP qualification credentials were never configured this run - nothing to independently verify or clean up."
             exit 0
           fi
           if ! command -v gcloud >/dev/null 2>&1; then

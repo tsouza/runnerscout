@@ -634,6 +634,74 @@ pinned private subnet, for the WireGuard peer network — so none is ever
 expected here; the sweep exists as a defensive, always-run assertion of
 that fact, not because one has ever appeared).
 
+## What real dispatches found
+
+Every design decision above was reasoned through and reviewed without ever
+running this workflow for real - issue #3's own qualification purpose is
+precisely to find what that kind of review cannot. The first real
+dispatches against all three clouds (2026-09-14, after issue #89 folded
+network provisioning into this same workflow) found three real bugs, none
+caught by any prior review:
+
+- **A GCP test bug, not a production bug** (fixed separately - see that
+  fix's own PR/commit for the full diagnosis): `TestQualifyRealGCPSpotLifecycle`
+  called `p.Observe` on a virgin allocation ID as a pre-create sanity
+  check, which always failed - `observeGCP` unconditionally requires
+  evidence of an already-committed create operation, a precondition that
+  is correct for how the real controller actually calls `Observe` (only
+  ever after a create has already been attempted) but makes it unusable as
+  a "does this ID already have leftover resources" check before one.
+- **A real Azure CLI incompatibility**: the VM-level safety-net step's `az
+  resource list --resource-group "$rg" --tag runnerscout-operation="$alloc"`
+  calls error outright - `az resource list` does not accept `--resource-group`
+  and `--tag` together. This had never been hit before because every
+  earlier dispatch attempt failed even earlier in the job (see the next
+  finding, and the one after it) - this specific step had simply never
+  run yet. Fixed by moving the tag match into the `--query` JMESPath
+  expression instead of the server-side `--tag` filter.
+- **A stale-credential bug in the AWS and GCP VM-level safety-net steps**,
+  found because a real AWS network-provisioner IAM policy was initially
+  missing `ec2:DescribeVpcAttribute` (needed for `aws_vpc`'s own
+  `enable_dns_hostnames` reconciliation - since fixed) and a real Azure
+  federated-credential subject mismatch (this repository has GitHub's
+  "immutable subject claims" org policy enforced, so the actual presented
+  `sub` claim is `repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:...`, not
+  the plain `repo:<owner>/<repo>:ref:...` every identity was originally
+  provisioned with - fixed by updating each federated credential's/IAM
+  role's trust condition to the immutable form) each caused a network
+  `tofu apply` failure partway through this workflow's job. When that
+  happens, every qualification-identity credential step after it is
+  correctly skipped (implicit `success()` gating) - but `AWS_ACCESS_KEY_ID`/
+  `GOOGLE_APPLICATION_CREDENTIALS` are left set to whatever the
+  NETWORK-PROVISIONER identity's credentials were, since nothing overwrote
+  them. The AWS and GCP VM-level safety-net steps both originally checked
+  only "is this env var non-empty" to decide whether qualification
+  credentials were ever configured - which is true here, just for the
+  wrong identity - so both steps ran anyway and failed with
+  `UnauthorizedOperation`/equivalent trying to query EC2 instances or GCE
+  resources with an identity that was never granted those permissions,
+  instead of cleanly recognizing "the qualification phase never got this
+  far." Fixed by checking a marker instead
+  (`RUNNERSCOUT_QUALIFY_ACCOUNT_ID` for AWS, a new
+  `RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED` for GCP) that is only ever set
+  by a step gated behind the qualification identity's own auth having
+  actually succeeded - not by the mere presence of *some* AWS/GCP
+  credential in the job environment. Azure's equivalent safety-net step
+  never had this bug: it checks `az account show` succeeding, a live call
+  against whichever identity is *currently* active, not a static env-var
+  presence check - so it already, correctly, would have reported "Azure
+  credentials were never configured this run" had the qualification
+  `azure/login` step been skipped.
+
+None of these three bugs cost any real money: in every case, the failure
+happened before any billable VM was ever created (or, for the orphaned
+NIC left behind by a separately-diagnosed Azure VM-creation failure, on a
+resource type that does not bill by itself). Each was found, diagnosed
+against the real cloud APIs, and fixed as its own focused PR rather than
+folded silently into a larger change - matching this workflow's own
+one-focused-unit-per-provider review discipline from when it was first
+built.
+
 ## Provenance
 
 AWS piece written 2026-09-13/14 for the AWS piece of issue #3's remaining
