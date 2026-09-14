@@ -85,7 +85,17 @@ func (c *AWSSpotClient) Observe(ctx context.Context, region, zone, instanceType 
 	if err != nil {
 		return Quote{}, err
 	}
-	return Quote{PriceMicros: micros, Currency: "USD", ObservedAt: *entry.Timestamp}, nil
+	// entry.Timestamp marks when this spot price last changed, not when it
+	// was observed - most spot pools go long stretches with an unchanged
+	// price, so using it here would let a routinely-stale-looking
+	// timestamp mark a just-fetched, fully current price as stale to
+	// placement.Choose's freshness check. See Observe's own doc comment;
+	// Azure's Observe documents the identical reasoning for
+	// effectiveStartDate. ObservedAt is therefore this successful
+	// request's own completion time, not entry.Timestamp - which is still
+	// validated as non-zero above, since that check is a genuine
+	// malformed-response guard, independent of which timestamp gets used.
+	return Quote{PriceMicros: micros, Currency: "USD", ObservedAt: time.Now()}, nil
 }
 
 func awsSpotResponseKnown(metadata smithymiddleware.Metadata) bool {

@@ -27,15 +27,19 @@ type azurePriceObserver interface {
 	Observe(ctx context.Context, region, zone, instanceType string) (prices.Quote, error)
 }
 
-// refreshAWSPrices replaces every AWS offering's price and freshness with a
-// live observation immediately before the catalog is used for admission.
-// A failed observation zeroes that offering's ObservedAt so
+// refreshAWSPrices replaces every AWS Spot offering's price and freshness
+// with a live observation immediately before the catalog is used for
+// admission. A failed observation zeroes that offering's ObservedAt so
 // placement.Choose's freshness check deterministically excludes it this
 // cycle - a failed live refresh must never silently keep the static
 // catalog's stale-but-technically-valid timestamp usable. One offering's
-// failure never affects any other AWS offering, and non-AWS offerings are
-// never touched at all. When AWSPrices is nil the feature is fully inert:
-// catalog is returned completely unmodified.
+// failure never affects any other AWS offering, non-AWS offerings are
+// never touched at all, and neither is an on-demand (Spot: false) AWS
+// offering - AWSSpotClient.Observe only ever returns a Spot price, so
+// overwriting an on-demand offering's price with it would corrupt the one
+// price placement.Choose's MaxPriceMicros ceiling actually compares
+// against. When AWSPrices is nil the feature is fully inert: catalog is
+// returned completely unmodified.
 func (o *Operator) refreshAWSPrices(ctx context.Context, catalog placement.Catalog) placement.Catalog {
 	if o.AWSPrices == nil {
 		return catalog
@@ -45,7 +49,7 @@ func (o *Operator) refreshAWSPrices(ctx context.Context, catalog placement.Catal
 	// directly), and refreshing must never corrupt that static source.
 	offerings := slices.Clone(catalog.Offerings)
 	for i := range offerings {
-		if offerings[i].Provider != "aws" {
+		if offerings[i].Provider != "aws" || !offerings[i].Spot {
 			continue
 		}
 		quote, err := o.AWSPrices.Observe(ctx, offerings[i].Region, offerings[i].Zone, offerings[i].Machine)
@@ -78,7 +82,7 @@ func (o *Operator) refreshAzurePrices(ctx context.Context, catalog placement.Cat
 	// Clone before mutating: see refreshAWSPrices's identical comment above.
 	offerings := slices.Clone(catalog.Offerings)
 	for i := range offerings {
-		if offerings[i].Provider != "azure" {
+		if offerings[i].Provider != "azure" || !offerings[i].Spot {
 			continue
 		}
 		quote, err := o.AzurePrices.Observe(ctx, offerings[i].Region, offerings[i].Zone, offerings[i].Machine)

@@ -68,7 +68,9 @@ const spotItem = `<item><instanceType>m5.large</instanceType><productDescription
 func TestObserveMapsSuccessfulSpotPrice(t *testing.T) {
 	f := newFixtureAWS(t)
 	f.setResponse(http.StatusOK, spotItem)
+	before := time.Now()
 	quote, err := testClient(f).Observe(context.Background(), "us-east-1", "us-east-1a", "m5.large")
+	after := time.Now()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +80,17 @@ func TestObserveMapsSuccessfulSpotPrice(t *testing.T) {
 	if quote.Currency != "USD" {
 		t.Errorf("Currency = %q, want USD", quote.Currency)
 	}
-	want := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
-	if !quote.ObservedAt.Equal(want) {
-		t.Errorf("ObservedAt = %v, want %v", quote.ObservedAt, want)
+	// The fixture's <timestamp> (2026-09-13T12:00:00Z) marks when this spot
+	// price last changed, not when it was observed - AWS's own DescribeSpotPriceHistory
+	// doc never calls it a freshness/observation timestamp, and most spot
+	// pools go long stretches with an unchanged price. Using it as
+	// ObservedAt would let a routinely-stale-looking timestamp mark a
+	// just-fetched, fully current price as stale to placement.Choose's
+	// freshness check - exactly the reasoning Azure's own Observe already
+	// documents for the identical problem with effectiveStartDate.
+	// ObservedAt must be this successful request's own completion time.
+	if quote.ObservedAt.Before(before) || quote.ObservedAt.After(after) {
+		t.Errorf("ObservedAt = %v, want between %v and %v (request time, not the price's own last-changed timestamp)", quote.ObservedAt, before, after)
 	}
 }
 
