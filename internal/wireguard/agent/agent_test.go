@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,9 +55,12 @@ func TestInitialConfigBuildsTunnelConfigAndCurrentSet(t *testing.T) {
 		OverlayAddress: "10.60.0.9",
 		Peers:          []wireguard.Peer{peerFixture("rs-a", pubA, "10.60.0.1", "10.0.0.1:51820")},
 	}
-	cfg, current, err := InitialConfig(payload)
+	cfg, current, skipped, err := InitialConfig(payload)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if skipped != nil {
+		t.Fatal(skipped)
 	}
 	if cfg.ListenPort != wireguard.DefaultListenPort {
 		t.Fatalf("expected the fixed default listen port, got %d", cfg.ListenPort)
@@ -79,12 +84,54 @@ func TestInitialConfigSkipsMalformedPeerButKeepsOthers(t *testing.T) {
 		OverlayAddress: "10.60.0.9",
 		Peers:          []wireguard.Peer{malformed, peerFixture("rs-a", pubA, "10.60.0.1", "")},
 	}
-	cfg, current, err := InitialConfig(payload)
-	if err == nil {
-		t.Fatal("expected an error describing the malformed peer")
+	cfg, current, skipped, err := InitialConfig(payload)
+	if err != nil {
+		t.Fatal("fatal error for a merely-malformed peer", err)
+	}
+	if skipped == nil {
+		t.Fatal("expected a skipped-peer error describing the malformed peer")
 	}
 	if len(cfg.Peers) != 1 || len(current) != 1 {
 		t.Fatalf("well-formed peer was not still included: cfg=%+v current=%+v", cfg.Peers, current)
+	}
+}
+
+// TestRunFailsFastOnCorruptTopLevelPayloadInsteadOfMaskingItAsSkippedPeers
+// proves a fatal, top-level payload defect (a malformed private key or
+// overlay address - InitialConfig's error, not a per-peer DecodePeer
+// error) makes Run return that real cause directly, without ever calling
+// bringUp with the resulting zero-value tunnel.Config and without logging
+// the misleading "some initial peers were skipped" message a reviewer
+// found this exact defect produced: InitialConfig returned the same kind
+// of error for both a garbage top-level field and a garbage individual
+// peer entry, and Run treated every InitialConfig error as the latter.
+func TestRunFailsFastOnCorruptTopLevelPayloadInsteadOfMaskingItAsSkippedPeers(t *testing.T) {
+	path := writePayload(t, wireguard.CloudInitPayload{
+		PrivateKey:     base64.StdEncoding.EncodeToString(make([]byte, wireguard.KeySize)),
+		AllocationID:   "rs-self",
+		ControllerURL:  "https://controller.internal",
+		PollToken:      "fixture-token",
+		OverlayAddress: "not-a-valid-address",
+	})
+	bringUpCalled := false
+	var logged []string
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Run(ctx, Options{
+		PayloadPath: path,
+		BringUp:     func(tunnel.Config) (Closer, error) { bringUpCalled = true; return fakeCloser{&fakeTunnel{}}, nil },
+		Logf:        func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
+	})
+	if err == nil || !strings.Contains(err.Error(), "overlay address") {
+		t.Fatalf("expected the real overlay-address failure, got %v", err)
+	}
+	if bringUpCalled {
+		t.Fatal("bringUp was called with a config built from a corrupt top-level payload")
+	}
+	for _, line := range logged {
+		if strings.Contains(line, "skipped") {
+			t.Fatalf("fatal top-level payload defect was misreported as skipped peers: %q", line)
+		}
 	}
 }
 
