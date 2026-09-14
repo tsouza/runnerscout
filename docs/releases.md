@@ -128,17 +128,18 @@ separately authorized bounded allocation. Compare subsequent releases against
 accepted contracts and migration paths. Never rewrite expected results or remove
 required tests automatically to accept a regression.
 
-The AWS and GCP pieces of the "Real GitHub-to-VM execution" line above are
-`.github/workflows/qualify-aws.yml` and `.github/workflows/qualify-gcp.yml`,
-both `workflow_dispatch`-only, numerically bounded workflows that exercise
-the real AWS/GCP provider adapters against real EC2/Compute Engine - see
-[qualification-real-cloud.md](qualification-real-cloud.md). Both workflows'
-qualification identities (AWS's `AWS_QUALIFICATION_ROLE_ARN`; GCP's
-`GCP_QUALIFICATION_PROJECT_ID`/`GCP_QUALIFICATION_SERVICE_ACCOUNT`/
-`GCP_QUALIFICATION_WORKLOAD_IDENTITY_PROVIDER`) are provisioned in this
-repository today, but neither workflow has ever actually been dispatched;
-the Azure equivalent remains a separate, later, not-yet-built piece of the
-same required coverage line.
+The AWS, Azure and GCP pieces of the "Real GitHub-to-VM execution" line above
+are `.github/workflows/qualify-aws.yml`, `.github/workflows/qualify-azure.yml`
+and `.github/workflows/qualify-gcp.yml`, all `workflow_dispatch`-only,
+numerically bounded workflows that exercise the real AWS/Azure/GCP provider
+adapters against real EC2/Azure Compute/Compute Engine - see
+[qualification-real-cloud.md](qualification-real-cloud.md). All three
+workflows' qualification identities (AWS's `AWS_QUALIFICATION_ROLE_ARN`;
+Azure's `AZURE_QUALIFICATION_CLIENT_ID`/`AZURE_QUALIFICATION_TENANT_ID`/
+`AZURE_QUALIFICATION_SUBSCRIPTION_ID`; GCP's `GCP_QUALIFICATION_PROJECT_ID`/
+`GCP_QUALIFICATION_SERVICE_ACCOUNT`/`GCP_QUALIFICATION_WORKLOAD_IDENTITY_PROVIDER`)
+are provisioned in this repository today, but none of the three workflows has
+ever actually been dispatched.
 
 ## Artifacts and promotion
 

@@ -1,0 +1,381 @@
+# Real-cloud Azure provider qualification (issue #3's remaining "Final real-cloud
+# qualification" scope, Azure piece only - GCP remains separate, later, not
+# built here; see docs/qualification-real-cloud.md). This is the Azure
+# sibling of qualify-aws.yml, following the exact same safety philosophy,
+# adapted to Azure's real API shapes (see docs/qualification-real-cloud.background.md's
+# Azure section for what differs from AWS, and why).
+#
+# This workflow provisions ONE real, billed Azure Spot Virtual Machine (plus
+# its dependent NIC and OS disk) through the production internal/provider
+# Azure adapter (azure.go/azure_sdk.go/azure_inventory.go/azure_image.go/
+# azure_binding.go/internal/prices/azure.go - none of which this workflow or
+# its accompanying test file modifies) and independently verifies it is
+# fully torn down afterward. Like qualify-aws.yml, it is the only other
+# piece of automation in this repository that spends real money when it
+# runs, so every design choice here is biased toward "impossible to trigger
+# by accident" over convenience:
+#
+#   - workflow_dispatch is the ONLY trigger. No schedule, no push, no
+#     pull_request. A human must explicitly run this, every time.
+#   - A required `confirm_real_spend` input must match an exact literal
+#     phrase, checked before anything else runs (including before any Azure
+#     credential is ever configured) - the same second, deliberate speed
+#     bump qualify-aws.yml uses, for the same reason (see that workflow's
+#     own header comment).
+#   - `max_runtime_minutes` is a required, explicit numeric VM-time bound,
+#     validated against a hard-coded workflow ceiling
+#     (RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES below) that no input
+#     value can exceed - independently re-validated inside the Go test too,
+#     never trusting this workflow's own check alone. The job's own
+#     `timeout-minutes:` is a second, independent, non-input-derived
+#     ceiling on the whole job.
+#   - Every network identifier (resource group, VNet, subnet, network
+#     security group) and the managed-image resource ID are required
+#     operator-supplied inputs - this workflow never discovers or selects
+#     any of them dynamically. A pre-flight step independently
+#     cross-validates that the given subnet and NSG actually belong to the
+#     given resource group, and that the given subnet is actually a child
+#     of the given VNet, before any Azure create call - all read-only reads.
+#   - Teardown/independent-verification runs via `if: always()` (the final
+#     job step) - a failed or killed run must never leave a running,
+#     billable VM (or its disk/NIC) behind. This is the authoritative
+#     backstop: it survives even a job-level timeout or cancellation that
+#     would kill the Go test process (and therefore skip its own in-process
+#     t.Cleanup) before it could finish tearing down.
+#
+# Credentials: Azure Workload Identity Federation (OIDC) is the ONLY
+# supported path - no client-secret fallback, unlike qualify-aws.yml's AWS
+# static-key fallback (see docs/qualification-real-cloud.background.md's
+# Azure section for why Azure gets no fallback here). Two independent
+# consumers of the same GitHub Actions OIDC token / Azure AD app
+# registration federated-credential trust relationship are used side by
+# side: azure/login authenticates the `az` CLI used by this workflow's own
+# pre-flight and cleanup steps, and a separately-fetched GitHub OIDC token
+# is written to its own file and exposed as AZURE_FEDERATED_TOKEN_FILE/
+# AZURE_CLIENT_ID/AZURE_TENANT_ID for the Go test step - the exact
+# environment variable shape internal/provider/credentials.go's
+# azureCredential already resolves via azidentity.NewWorkloadIdentityCredential
+# when NewCommand is given a nil environment map.
+#
+# AZURE_QUALIFICATION_CLIENT_ID/AZURE_QUALIFICATION_TENANT_ID are repository
+# VARIABLES, not secrets - a client ID and tenant ID are not sensitive on
+# their own (they authenticate nothing without this repo's own OIDC
+# federated-credential trust relationship, exactly like
+# AWS_QUALIFICATION_ROLE_ARN and the GCP_QUALIFICATION_* identifiers), so
+# they're provisioned the same way those are. If neither is provisioned yet,
+# this workflow fails cleanly at its own explicit credential-presence check
+# below, before any Azure interaction.
+name: Qualify Azure (real cloud)
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_real_spend:
+        description: >-
+          Must be exactly: I-UNDERSTAND-THIS-COSTS-REAL-MONEY - this run
+          provisions one real, billed Azure Spot Virtual Machine.
+        required: true
+        type: string
+      azure_region:
+        description: Pinned Azure region to qualify against (e.g. eastus).
+        required: true
+        type: string
+      subscription_id:
+        description: Pinned Azure subscription GUID to qualify against.
+        required: true
+        type: string
+      resource_group:
+        description: Pinned, pre-provisioned, dedicated qualification resource group name (never a production resource group).
+        required: true
+        type: string
+      vnet_id:
+        description: Pinned, pre-provisioned isolated VNet resource ID that subnet_id must belong to.
+        required: true
+        type: string
+      subnet_id:
+        description: Pinned, pre-provisioned subnet resource ID (a /subnets/ child of vnet_id) to attach the VM's NIC to.
+        required: true
+        type: string
+      nsg_id:
+        description: Pinned, pre-provisioned network security group resource ID to attach.
+        required: true
+        type: string
+      image_id:
+        description: Pinned managed-image resource ID (Microsoft.Compute/images/...). Must be an available, generalized Linux image with only an OS disk.
+        required: true
+        type: string
+      vm_size:
+        description: Azure VM size (e.g. Standard_D2s_v3). Keep this cheap - it directly bounds real spend alongside max_runtime_minutes.
+        required: true
+        type: string
+      availability_zone:
+        description: Pinned Azure Availability Zone for the VM. Must be supported by both azure_region and vm_size.
+        required: true
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+      max_runtime_minutes:
+        description: Hard VM-time bound for the create/observe/price phase, as a plain integer. Must be between 1 and 20 (workflow-enforced ceiling) - see this workflow's own header comment.
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  # Only one real-cloud qualification run at a time, ever. A second dispatch
+  # while one is in flight queues behind it rather than racing it for the
+  # same pinned network resources - and cancel-in-progress is deliberately
+  # false: cancelling a run that is mid-teardown of a real billed VM is
+  # strictly worse than making the next run wait.
+  group: qualify-azure
+  cancel-in-progress: false
+jobs:
+  qualify:
+    name: qualify
+    runs-on: ubuntu-24.04
+    # Hard-coded, independent of max_runtime_minutes: setup/build (~5m) +
+    # the go test step's own worst-case -timeout below (max_runtime_minutes's
+    # 20m ceiling + 10m, i.e. 30m, which already includes the test's own
+    # fixed 5m teardown budget) + margin for the remaining steps. No input
+    # can raise this. Mirrors qualify-aws.yml's identical 40.
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      # Consumed twice: by the azure/login step below (az CLI authentication
+      # for this workflow's own pre-flight/cleanup steps) and by the
+      # separate GitHub OIDC token this workflow fetches directly for the Go
+      # test step's own Azure Workload Identity Federation credential. Both
+      # exchange a token against the same Azure AD app registration's
+      # federated-credential trust relationship; granting this once covers
+      # both.
+      id-token: write
+    env:
+      RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES: "20"
+      RUNNERSCOUT_QUALIFY_CONFIRM: ${{ inputs.confirm_real_spend }}
+      RUNNERSCOUT_QUALIFY_REGION: ${{ inputs.azure_region }}
+      RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
+      RUNNERSCOUT_QUALIFY_RESOURCE_GROUP: ${{ inputs.resource_group }}
+      RUNNERSCOUT_QUALIFY_VNET_ID: ${{ inputs.vnet_id }}
+      RUNNERSCOUT_QUALIFY_SUBNET_ID: ${{ inputs.subnet_id }}
+      RUNNERSCOUT_QUALIFY_NSG_ID: ${{ inputs.nsg_id }}
+      RUNNERSCOUT_QUALIFY_IMAGE_ID: ${{ inputs.image_id }}
+      RUNNERSCOUT_QUALIFY_VM_SIZE: ${{ inputs.vm_size }}
+      RUNNERSCOUT_QUALIFY_ZONE: ${{ inputs.availability_zone }}
+      RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
+      RUNNERSCOUT_QUALIFY_ALLOCATION_ID: qualify-${{ github.run_id }}
+      RUNNERSCOUT_QUALIFY_EVIDENCE_DIR: evidence/qualify-azure-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate explicit confirmation and numeric runtime ceiling
+        # Deliberately the very first step, before Go setup and before any
+        # Azure credential is configured: an invalid confirmation phrase or
+        # an out-of-bound runtime request must fail with zero Azure
+        # interaction of any kind, not even a read-only one.
+        run: |
+          set -euo pipefail
+          expected='I-UNDERSTAND-THIS-COSTS-REAL-MONEY'
+          if [ "$RUNNERSCOUT_QUALIFY_CONFIRM" != "$expected" ]; then
+            echo "::error::confirm_real_spend must be exactly '$expected' - refusing to provision real, billed Azure resources without this exact literal confirmation"
+            exit 1
+          fi
+          max="$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES"
+          ceiling="$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES"
+          if ! [[ "$max" =~ ^[0-9]+$ ]] || [ "$max" -lt 1 ] || [ "$max" -gt "$ceiling" ]; then
+            echo "::error::max_runtime_minutes must be a plain integer between 1 and $ceiling (hard-coded workflow ceiling); got '$max'"
+            exit 1
+          fi
+
+      - name: Validate pinned identifier shapes
+        # Cheap, local, no Azure call: catches an obviously-wrong paste
+        # before even resolving credentials. Azure ARM resource IDs
+        # self-describe their own subscription/resource group/provider/type
+        # in their path, so this is not a guess - a subnet_id that does not
+        # structurally nest under vnet_id's own path cannot possibly be a
+        # child of it, regardless of what Azure's API would say.
+        run: |
+          set -euo pipefail
+          lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+          if ! [[ "$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "::error::subscription_id ('$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID') does not look like a subscription GUID"
+            exit 1
+          fi
+          case "$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP" in
+            "" | */*) echo "::error::resource_group ('$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP') must be a non-empty name with no '/'"; exit 1 ;;
+          esac
+          check_arm_id() {
+            name="$1"; value="$2"; want_type="$3"
+            prefix="$(lc "/subscriptions/$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID/resourcegroups/$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP/providers/$want_type/")"
+            case "$(lc "$value")" in
+              "$prefix"*) ;;
+              *) echo "::error::$name ('$value') does not look like a $want_type resource ID under subscription $RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID, resource group $RUNNERSCOUT_QUALIFY_RESOURCE_GROUP"; exit 1 ;;
+            esac
+          }
+          check_arm_id vnet_id "$RUNNERSCOUT_QUALIFY_VNET_ID" "microsoft.network/virtualnetworks"
+          check_arm_id nsg_id "$RUNNERSCOUT_QUALIFY_NSG_ID" "microsoft.network/networksecuritygroups"
+          check_arm_id image_id "$RUNNERSCOUT_QUALIFY_IMAGE_ID" "microsoft.compute/images"
+          case "$(lc "$RUNNERSCOUT_QUALIFY_SUBNET_ID")" in
+            "$(lc "$RUNNERSCOUT_QUALIFY_VNET_ID")/subnets/"*) ;;
+            *) echo "::error::subnet_id ('$RUNNERSCOUT_QUALIFY_SUBNET_ID') is not a /subnets/* child of vnet_id ('$RUNNERSCOUT_QUALIFY_VNET_ID')"; exit 1 ;;
+          esac
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: Reuse Go compiler output
+        uses: ./.github/actions/go-build-cache
+        with:
+          go-version: ${{ steps.go.outputs.go-version }}
+
+      - name: Confirm Azure OIDC credentials are provisioned
+        # Explicit, clear failure before any Azure interaction - Azure
+        # Workload Identity Federation is the ONLY supported credential path
+        # here (see this workflow's own header comment), so there is no
+        # fallback branch to fall through to the way qualify-aws.yml has one.
+        env:
+          RUNNERSCOUT_QUALIFY_AZURE_CLIENT_ID: ${{ vars.AZURE_QUALIFICATION_CLIENT_ID }}
+          RUNNERSCOUT_QUALIFY_AZURE_TENANT_ID: ${{ vars.AZURE_QUALIFICATION_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_QUALIFY_AZURE_CLIENT_ID" ] || [ -z "$RUNNERSCOUT_QUALIFY_AZURE_TENANT_ID" ]; then
+            echo "::error::AZURE_QUALIFICATION_CLIENT_ID and AZURE_QUALIFICATION_TENANT_ID repository variables must both be set - see docs/qualification-real-cloud.md's Azure section for what to provision (an Azure AD app registration with a federated credential trusting this repository's GitHub Actions OIDC issuer) before dispatching this workflow"
+            exit 1
+          fi
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_QUALIFICATION_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_QUALIFICATION_TENANT_ID }}
+          subscription-id: ${{ inputs.subscription_id }}
+          allow-no-subscriptions: false
+
+      - name: Resolve subscription identity and cross-validate pinned network identifiers
+        # All read-only `az resource show`/`az account show` calls - no
+        # resource is created by this step. Confirms the logged-in identity
+        # really is the pinned subscription, and that vnet_id/subnet_id/
+        # nsg_id/image_id all genuinely exist and belong to the pinned
+        # resource group (Azure's own authoritative answer, not just the
+        # structural ARM-ID-nesting check the prior step already did).
+        run: |
+          set -euo pipefail
+          account_id="$(az account show --query id -o tsv)"
+          if [ "$account_id" != "$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID" ]; then
+            echo "::error::az login resolved subscription '$account_id', expected '$RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID'"
+            exit 1
+          fi
+          for id in "$RUNNERSCOUT_QUALIFY_VNET_ID" "$RUNNERSCOUT_QUALIFY_SUBNET_ID" "$RUNNERSCOUT_QUALIFY_NSG_ID" "$RUNNERSCOUT_QUALIFY_IMAGE_ID"; do
+            rg="$(az resource show --ids "$id" --query resourceGroup -o tsv)"
+            if [ "$(printf '%s' "$rg" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP" | tr '[:upper:]' '[:lower:]')" ]; then
+              echo "::error::resource '$id' belongs to resource group '$rg', not the pinned resource_group '$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP' - refusing to proceed"
+              exit 1
+            fi
+          done
+
+      - name: Fetch GitHub OIDC token for the Go test's Azure Workload Identity Federation
+        # Independent of azure/login above: that action only authenticates
+        # the `az` CLI session used by this workflow's own steps, and does
+        # not export any token or file a downstream Go SDK could reuse. This
+        # step performs its own, separate GitHub OIDC token exchange, using
+        # the exact "api://AzureADTokenExchange" audience an Azure AD app
+        # registration's federated credential expects from GitHub Actions,
+        # and writes it to a file so it matches the shape
+        # internal/provider/credentials.go's azureCredential already
+        # resolves via AZURE_FEDERATED_TOKEN_FILE (WorkloadIdentityCredential)
+        # - the exact env vars NewCommand(cfg, nil) reads directly from this
+        # job's own process environment for the Go test step below.
+        # ACTIONS_ID_TOKEN_REQUEST_URL/ACTIONS_ID_TOKEN_REQUEST_TOKEN are
+        # ambient runner-provided variables (from the id-token: write
+        # permission above), not operator-supplied input, so referencing
+        # them directly in this script is not an injection concern.
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::no GitHub OIDC token endpoint available - id-token: write permission missing"
+            exit 1
+          fi
+          token_file="${RUNNER_TEMP}/azure-federated-token.jwt"
+          curl -sS -f -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" \
+            | jq -r '.value' > "$token_file"
+          if [ ! -s "$token_file" ] || grep -qx null "$token_file"; then
+            echo "::error::failed to obtain a GitHub OIDC token for Azure Workload Identity Federation"
+            exit 1
+          fi
+          {
+            echo "AZURE_CLIENT_ID=$RUNNERSCOUT_QUALIFY_AZURE_CLIENT_ID"
+            echo "AZURE_TENANT_ID=$RUNNERSCOUT_QUALIFY_AZURE_TENANT_ID"
+            echo "AZURE_FEDERATED_TOKEN_FILE=$token_file"
+          } >> "$GITHUB_ENV"
+        env:
+          RUNNERSCOUT_QUALIFY_AZURE_CLIENT_ID: ${{ vars.AZURE_QUALIFICATION_CLIENT_ID }}
+          RUNNERSCOUT_QUALIFY_AZURE_TENANT_ID: ${{ vars.AZURE_QUALIFICATION_TENANT_ID }}
+
+      - name: Real-Azure provider qualification (creates ONE real billed Spot VM)
+        # -tags realcloud selects internal/provider/azure_realcloud_test.go,
+        # kept out of every other build/test path (see that file's own
+        # header). -timeout is deliberately larger than the create/observe/
+        # price budget above: that file's own teardown runs on a separate,
+        # fixed 5-minute deadline that must not be preempted by go test's
+        # own timeout while cleanup is still in progress.
+        run: |
+          # 10#... forces base-10 arithmetic regardless of leading zeros in
+          # the input (bash's $(( )) otherwise treats a leading 0 as octal).
+          go test -tags realcloud -run '^TestQualifyRealAzureSpotLifecycle$' -v -count=1 \
+            -timeout "$((10#$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES + 10))m" \
+            ./internal/provider/
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualify-azure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RUNNERSCOUT_QUALIFY_EVIDENCE_DIR }}/
+          # warn, not error: a run that fails before the qualification test
+          # ever starts (e.g. bad confirm_real_spend, bad runtime ceiling)
+          # legitimately produces no evidence directory at all - that is a
+          # correct outcome for this workflow, not a bug to surface loudly.
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Independent post-run cleanup safety net
+        # THE authoritative teardown guarantee: runs via if: always(), so it
+        # executes even if the step above was killed by the job timeout or
+        # cancelled, in which case the Go test's own in-process t.Cleanup
+        # teardown (azure_realcloud_test.go) may never have run at all. This
+        # step re-derives everything it needs from job env/inputs directly
+        # (never from a prior step's output), so it works even when every
+        # earlier step failed or was skipped - including the case where
+        # credentials were never configured, handled by the guard below. It
+        # reuses the `az` CLI session azure/login already established
+        # earlier in this same job (that login persists for the whole job,
+        # not just its own step) rather than re-deriving Go SDK credentials.
+        if: always()
+        run: |
+          set -euo pipefail
+          if ! az account show >/dev/null 2>&1; then
+            echo "Azure credentials were never configured this run - nothing to independently verify or clean up."
+            exit 0
+          fi
+          rg="$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP"
+          alloc="$RUNNERSCOUT_QUALIFY_ALLOCATION_ID"
+          echo "Independent post-run inventory sweep for allocation $alloc in resource group $rg"
+          leftover_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --query '[].id' -o tsv)"
+          if [ -z "$leftover_ids" ]; then
+            echo "Independent inventory confirms zero leftover billable resources for allocation $alloc."
+            exit 0
+          fi
+          echo "::warning::leftover Azure resource(s) not deleted by the qualification job: $leftover_ids - force-cleaning now"
+          # Delete VMs first: a NIC or disk still attached to a VM refuses
+          # deletion until the VM itself is gone, mirroring deleteAzure's
+          # own VM-then-NIC-then-disk priority order (azure.go).
+          vm_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --resource-type Microsoft.Compute/virtualMachines --query '[].id' -o tsv)"
+          for id in $vm_ids; do az resource delete --ids "$id" --verbose || true; done
+          remaining_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --query '[].id' -o tsv)"
+          for id in $remaining_ids; do az resource delete --ids "$id" --verbose || true; done
+          echo "::error::the qualification job's own cleanup left billable resources behind; this safety net has force-cleaned them, but this indicates a real bug in the create/observe/delete path above and must not be treated as a normal outcome"
+          exit 1
