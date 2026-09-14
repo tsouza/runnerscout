@@ -12,6 +12,92 @@ func azureSupportedImage() map[string]any {
 		"properties": map[string]any{"provisioningState": "Succeeded", "storageProfile": map[string]any{"osDisk": map[string]any{"osType": "Linux", "osState": "Generalized"}}}}
 }
 
+const (
+	azureFixtureGalleryDefinition = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/galleries/gal/images/imgdef"
+	azureFixtureGalleryVersion    = azureFixtureGalleryDefinition + "/versions/1.0.0"
+)
+
+func azureSupportedGalleryVersion() map[string]any {
+	return map[string]any{"id": azureFixtureGalleryVersion, "name": "1.0.0", "type": "Microsoft.Compute/galleries/images/versions", "location": allocation().Offering.Region,
+		"properties": map[string]any{"provisioningState": "Succeeded", "storageProfile": map[string]any{}}}
+}
+
+func azureSupportedGalleryDefinition() map[string]any {
+	return map[string]any{"id": azureFixtureGalleryDefinition, "name": "imgdef", "type": "Microsoft.Compute/galleries/images",
+		"properties": map[string]any{"osType": "Linux", "osState": "Generalized"}}
+}
+
+// TestAzureGalleryImageVersionValidation confirms validateAzureImage
+// correctly handles a Compute Gallery image version resource ID
+// (Microsoft.Compute/galleries/<gallery>/images/<definition>/versions/<version>)
+// - the second image resource shape it accepts, alongside a classic
+// managed image - including that osType/osState are read from the PARENT
+// image definition, never the version resource itself.
+func TestAzureGalleryImageVersionValidation(t *testing.T) {
+	for _, mode := range []string{"valid", "data-disks", "windows", "specialized", "wrong-region", "unavailable-version", "unavailable-definition", "wrong-parent-type"} {
+		t.Run(mode, func(t *testing.T) {
+			version := azureSupportedGalleryVersion()
+			definition := azureSupportedGalleryDefinition()
+			a := allocation()
+			a.Offering.Image = azureFixtureGalleryVersion
+			switch mode {
+			case "data-disks":
+				version["properties"].(map[string]any)["storageProfile"].(map[string]any)["dataDiskImages"] = []any{map[string]any{"lun": 0}}
+			case "windows":
+				definition["properties"].(map[string]any)["osType"] = "Windows"
+			case "specialized":
+				definition["properties"].(map[string]any)["osState"] = "Specialized"
+			case "wrong-region":
+				version["location"] = "other-region"
+			case "wrong-parent-type":
+				definition["type"] = "Microsoft.Compute/disks"
+			}
+			versionCalls, definitionCalls := 0, 0
+			p, _ := sdkFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" {
+					t.Error("unexpected non-GET request", r.Method, r.URL.Path)
+				}
+				if strings.EqualFold(r.URL.Path, azureFixtureGalleryVersion) {
+					versionCalls++
+					if mode == "unavailable-version" {
+						w.WriteHeader(403)
+						writeJSON(w, map[string]any{"error": map[string]string{"code": "AuthorizationFailed"}})
+						return
+					}
+					writeJSON(w, version)
+					return
+				}
+				if strings.EqualFold(r.URL.Path, azureFixtureGalleryDefinition) {
+					definitionCalls++
+					if mode == "unavailable-definition" {
+						w.WriteHeader(403)
+						writeJSON(w, map[string]any{"error": map[string]string{"code": "AuthorizationFailed"}})
+						return
+					}
+					writeJSON(w, definition)
+					return
+				}
+				t.Error("unexpected request path", r.URL.Path)
+			})
+			err := p.validateAzureImage(context.Background(), a)
+			valid := mode == "valid"
+			if (err == nil) != valid {
+				t.Fatal("gallery image version verdict differs", mode, err)
+			}
+			if versionCalls != 1 {
+				t.Fatal("expected exactly one version GET", versionCalls)
+			}
+			wantDefinitionCalls := 1
+			if mode == "wrong-region" || mode == "unavailable-version" || mode == "data-disks" {
+				wantDefinitionCalls = 0
+			}
+			if definitionCalls != wantDefinitionCalls {
+				t.Fatal("unexpected definition GET count", definitionCalls, mode)
+			}
+		})
+	}
+}
+
 func TestAzureManagedImageContractPrecedesDeployment(t *testing.T) {
 	for _, mode := range []string{"data-disks", "windows", "specialized", "wrong-region", "missing-properties", "unavailable"} {
 		t.Run(mode, func(t *testing.T) {

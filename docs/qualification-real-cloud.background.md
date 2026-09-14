@@ -907,14 +907,38 @@ own logic, surfacing the bugs below:
   or ARM-architected (`Dpxx`-class, incompatible with this qualification's
   `amd64` image regardless of controller type), this subscription
   genuinely has no compatible, cheap, `x86_64`, non-confidential VM size
-  for a classic managed image at all. The two real remaining fixes -
-  teaching `validateAzureImage` (`azure_image.go`) to also accept a
-  Compute Gallery image version's resource type (gallery images *do*
-  support declaring `NVMe` support at the image-definition level,
-  correctly, unlike a classic managed image), or adding
-  `securityProfile.securityType` support for confidential computing - are
-  each a materially larger, riskier adapter change than this opt-in field,
-  not attempted in this pass.
+  for a classic managed image at all. Two real fixes remained: teaching
+  `validateAzureImage` (`azure_image.go`) to also accept a Compute Gallery
+  image version's resource type (gallery images *do* support declaring
+  `NVMe` support at the image-definition level, correctly, unlike a
+  classic managed image), or adding `securityProfile.securityType` support
+  for confidential computing. Compute Gallery support was built (below);
+  confidential-computing support was not attempted, being a materially
+  larger, riskier, and less broadly useful adapter change for the same
+  underlying problem.
+
+- **Compute Gallery image version support, added to resolve the above**:
+  `validateAzureImage` now branches on the image resource's parsed
+  `ResourceType` (`Microsoft.Compute/images` vs.
+  `Microsoft.Compute/galleries/images/versions`, both confirmed directly
+  against `arm.ParseResourceID`'s real output shape - a 3-level nested
+  resource ID's `ResourceType.String()` returns the full nested path
+  joined by `/`, not just the leaf segment) rather than hard-requiring the
+  classic shape. The two validation paths genuinely differ, not just in
+  resource type string: a gallery image version's own properties
+  (`storageProfile.dataDiskImages`, `provisioningState`) say nothing about
+  `osType`/`osState` - those live on the *parent* image definition
+  (`Microsoft.Compute/galleries/images`) instead, requiring a second GET
+  the classic-image path never needs. Both API calls use API version
+  `2024-03-03`, confirmed directly against the real Azure API (via `az
+  rest`) to carry every property either validation path reads, rather than
+  assumed from the classic image path's own (different, newer) pinned
+  version. A real gallery, image definition (with `DiskControllerTypes:
+  SCSI, NVMe` declared explicitly) and image version were built from the
+  already-captured classic image as its source (`az sig image-version
+  create --managed-image <classic-image-id>` - no VM rebuild needed),
+  confirming the whole chain end-to-end against real Azure resources, not
+  just unit-test fixtures.
 
 Three of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
