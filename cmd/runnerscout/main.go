@@ -36,6 +36,7 @@ type options struct {
 	tokenPath, appID, appKey                       string
 	installationID                                 int64
 	validate                                       bool
+	printVersion                                   bool
 }
 
 func parseOptions(args []string) (options, error) {
@@ -52,11 +53,17 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&o.appKey, "github-app-key-file", "", "mounted GitHub App private-key file")
 	flags.BoolVar(&o.checkCRD, "check-crd", false, "check a CRD snapshot through Kubernetes without GitHub or cloud operations")
 	flags.BoolVar(&o.checkUninstall, "check-uninstall", false, "check that CRD deletion and durable cleanup are complete before uninstall")
+	flags.BoolVar(&o.printVersion, "version", false, "print the build version and exit")
 	if err := flags.Parse(args); err != nil {
 		return o, err
 	}
 	if flags.NArg() != 0 {
 		return o, errors.New("unexpected positional arguments")
+	}
+	// -version is a pure query: it needs none of the configuration/mode
+	// flags below and must not be rejected for lacking them.
+	if o.printVersion {
+		return o, nil
 	}
 	if (o.checkCRD || o.checkUninstall) && o.scaleSet == "" || o.checkCRD && o.checkUninstall {
 		return o, errors.New("select only one CRD check and provide -scale-set and -namespace")
@@ -251,6 +258,10 @@ func run(args []string) error {
 	o, err := parseOptions(args)
 	if err != nil {
 		return err
+	}
+	if o.printVersion {
+		fmt.Println(version.Version)
+		return nil
 	}
 	var cfg operator.Config
 	if o.configPath != "" {
