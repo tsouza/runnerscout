@@ -403,6 +403,7 @@ resource group, if narrower):
 `Microsoft.Resources/deployments/write`,
 `Microsoft.Resources/deployments/delete`,
 `Microsoft.Resources/deployments/operations/read`,
+`Microsoft.Resources/deployments/operationStatuses/read`,
 `Microsoft.Resources/deployments/exportTemplate/action`;
 `Microsoft.Compute/virtualMachines/read`,
 `Microsoft.Compute/virtualMachines/write`,
