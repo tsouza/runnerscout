@@ -1,4 +1,24 @@
-# RunnerScout
+```
+   ____                              _____                  __
+  / __ \__  ______  ____  ___  _____/ ___/_________  __  __/ /_
+ / /_/ / / / / __ \/ __ \/ _ \/ ___/\__ \/ ___/ __ \/ / / / __/
+/ _, _/ /_/ / / / / / / /  __/ /   ___/ / /__/ /_/ / /_/ / /_
+/_/ |_|\__,_/_/ /_/_/ /_/\___/_/   /____/\___/\____/\__,_/\__/
+```
+
+<p align="center">
+  <em>ephemeral GitHub Actions runners on real cloud spot capacity</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/tsouza/runnerscout/actions/workflows/ci.yml"><img src="https://github.com/tsouza/runnerscout/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/tsouza/runnerscout/releases/latest"><img src="https://img.shields.io/github/v/release/tsouza/runnerscout?include_prereleases" alt="Latest release"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/tsouza/runnerscout" alt="Go version"></a>
+  <a href="https://goreportcard.com/report/github.com/tsouza/runnerscout"><img src="https://goreportcard.com/badge/github.com/tsouza/runnerscout" alt="Go Report Card"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/tsouza/runnerscout" alt="License"></a>
+</p>
+
+---
 
 A Kubernetes controller for ephemeral GitHub Actions runners on standalone cloud
 VMs. RunnerScout searches AWS, Azure and GCP spot capacity using portable resource
@@ -6,10 +26,12 @@ requirements and ordinary `runs-on` targeting. It can run alongside
 [Actions Runner Controller](https://github.com/actions/actions-runner-controller)
 with separate scale-set ownership.
 
-**Experimental; no qualified release.** Live GitHub-to-VM execution across all
-three providers remains unqualified. The controller supports mounted
-configuration or a named RunnerScaleSet CRD. The Helm chart supports both modes; see the
-[complete CRD example](examples/multicloud/README.md).
+**Pre-1.0; APIs remain experimental.** Real GitHub-to-VM execution, interruption
+and cleanup have each been independently qualified against live AWS, Azure and
+GCP spot capacity - see [qualification-real-cloud.md](docs/qualification-real-cloud.md)
+for what that qualification covers and how to re-run it. The controller supports
+mounted configuration or a named RunnerScaleSet CRD. The Helm chart supports both
+modes; see the [complete CRD example](examples/multicloud/README.md).
 
 - Hard resource, region and price limits remain enforced during placement.
 - On-demand fallback is opt-in and requires definitive spot exhaustion.
