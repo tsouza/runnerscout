@@ -83,7 +83,7 @@ directly from that freshly-created subnet's own AZ output.
 - `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
   **20** before anything else runs (before Go setup, before AWS credentials
   are even configured). No input can raise this ceiling.
-- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+- The job's own `timeout-minutes: 45` is a second, independent ceiling that
   does not derive from the input at all.
 - Deletion runs on its own fixed 5-minute budget, independent of
   `max_runtime_minutes` — a run that spent its whole create/observe/price
@@ -283,7 +283,7 @@ provisioning" below).
   **20** before anything else runs (before Go setup, before any Azure
   credential is even configured) — the same ceiling AWS uses. No input can
   raise this ceiling.
-- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+- The job's own `timeout-minutes: 45` is a second, independent ceiling that
   does not derive from the input at all.
 - Deletion runs on its own fixed 5-minute budget, independent of
   `max_runtime_minutes`.
@@ -524,7 +524,7 @@ for why this is named as a real adapter-level gap rather than papered over.
 - `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
   **20** before anything else runs (before Go setup, before GCP credentials
   are even configured). No input can raise this ceiling.
-- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+- The job's own `timeout-minutes: 45` is a second, independent ceiling that
   does not derive from the input at all.
 - Deletion runs on its own fixed 5-minute budget, independent of
   `max_runtime_minutes` — a run that spent its whole create/observe budget
