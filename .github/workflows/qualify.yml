@@ -354,9 +354,18 @@ jobs:
           fi
           lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
           prefix="$(lc "/subscriptions/$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID/resourcegroups/")"
+          # Accepts either resource shape validateAzureImage (azure_image.go)
+          # accepts: a classic managed image, or a Compute Gallery image
+          # version (.../galleries/<gallery>/images/<definition>/versions/<version>)
+          # - this bash pre-flight check and the Go-level validation must
+          # be kept in sync, since a mismatch here (like the one that
+          # shipped without this second case, discovered via an actual
+          # dispatch) rejects a genuinely valid image before the Go test
+          # ever gets a chance to.
           case "$(lc "$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID")" in
             "$prefix"*"/providers/microsoft.compute/images/"*) ;;
-            *) echo "::error::azure_image_id ('$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID') does not look like a Microsoft.Compute/images resource ID under subscription $RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID"; exit 1 ;;
+            "$prefix"*"/providers/microsoft.compute/galleries/"*"/images/"*"/versions/"*) ;;
+            *) echo "::error::azure_image_id ('$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID') does not look like a Microsoft.Compute/images or Microsoft.Compute/galleries image-version resource ID under subscription $RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID"; exit 1 ;;
           esac
 
       - name: "[GCP] Validate pinned compute inputs and project"
