@@ -774,7 +774,17 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: qualify-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.RUNNERSCOUT_QUALIFY_EVIDENCE_DIR }}/
+          # RUNNERSCOUT_QUALIFY_EVIDENCE_DIR is a path relative to the Go
+          # test BINARY's own working directory - which `go test` sets to
+          # the package directory it's testing (./internal/provider/),
+          # never the repo root this step's own `path:` resolves against
+          # (GITHUB_WORKSPACE). Without the internal/provider/ prefix here,
+          # this step silently found nothing to upload on every single
+          # dispatch this repository has ever run, real successes
+          # included - caught only by a human actually reading a run's log
+          # ("No files were found...") rather than by any test or review,
+          # since every run treated the resulting warning as cosmetic.
+          path: internal/provider/${{ env.RUNNERSCOUT_QUALIFY_EVIDENCE_DIR }}/
           # warn, not error: a run that fails before the qualification test
           # ever starts (e.g. bad runtime ceiling, bad compute input)
           # legitimately produces no evidence directory at all - that is a
