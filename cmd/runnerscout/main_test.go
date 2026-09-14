@@ -291,6 +291,31 @@ func TestShutdownExitPreservesCleanupFailures(t *testing.T) {
 	}
 }
 
+// TestVersionFlagBypassesConfigRequirement proves -version is a pure query:
+// it parses successfully alone, with neither -config nor -scale-set/-namespace
+// present, unlike every other mode this binary supports.
+func TestVersionFlagBypassesConfigRequirement(t *testing.T) {
+	o, err := parseOptions([]string{"-version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !o.printVersion {
+		t.Fatal("printVersion not set from -version flag")
+	}
+}
+
+// TestVersionFlagRunExitsBeforeAnyClusterOrConfigAccess proves run() itself
+// - not just parseOptions - honors -version as an immediate, side-effect-free
+// exit: no in-cluster Kubernetes config is required (unlike every other
+// mode, which fails without one).
+func TestVersionFlagRunExitsBeforeAnyClusterOrConfigAccess(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+	if err := run([]string{"-version"}); err != nil {
+		t.Fatal("-version required Kubernetes or configuration", err)
+	}
+}
+
 func TestCRDChecksRequireOneExplicitMode(t *testing.T) {
 	for _, args := range [][]string{
 		{"-check-crd"}, {"-config=config.json", "-check-uninstall"},
