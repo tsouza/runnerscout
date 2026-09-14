@@ -245,10 +245,14 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 		creation.WireGuardPollTokenHash = wireGuardPollTokenHash
 	}
 	// Unlike the two fields above (only ever computed above when
-	// a.NetworkProfile != ""), a create* helper captures WireGuardEndpoint
-	// unconditionally from its own cloud response - it costs no extra API
-	// call regardless of wireguard intent. Clearing it here for every other
-	// allocation preserves this task's "zero effect until wired" guarantee
+	// a.NetworkProfile != ""), a create* helper always populates
+	// WireGuardEndpoint when it can, regardless of wireguard intent -
+	// AWS's and Azure's own create responses already carry the private IP
+	// at no extra API cost, so those two capture it unconditionally; GCP's
+	// capture is the one exception and does cost one extra Instances.Get
+	// call, made only when a.NetworkProfile != "" (see gcp_sdk.go's
+	// createGCP comment). Clearing it here for every other allocation
+	// preserves this task's "zero effect until wired" guarantee
 	// (TestCreateWithResourcesZeroEffectWithoutNetworkProfile): no allocation
 	// without wireguard intent should gain a new persisted checkpoint field.
 	if a.NetworkProfile == "" {

@@ -147,7 +147,7 @@ func TestGCPSDKLostResponseAndResidualDiskCleanup(t *testing.T) {
 		if r.Method == "POST" {
 			vm, disk = true, true
 			w.WriteHeader(503)
-			writeJSON(w, map[string]any{"error": map[string]any{"code": 503, "message": "lost response secret diagnostic"}})
+			writeJSON(w, map[string]any{"error": map[string]any{"code": 503, "message": "lost response diagnostic detail"}})
 			return
 		}
 		if r.Method == "DELETE" {
@@ -172,8 +172,8 @@ func TestGCPSDKLostResponseAndResidualDiskCleanup(t *testing.T) {
 		writeJSON(w, gcpOwned(kind))
 	})
 	a := gcpAllocation()
-	if _, err := p.Create(context.Background(), a); err == nil || strings.Contains(err.Error(), "secret") {
-		t.Fatal("ambiguous response accepted or diagnostic leaked", err)
+	if _, err := p.Create(context.Background(), a); err == nil || !strings.Contains(err.Error(), "lost response diagnostic detail") {
+		t.Fatal("ambiguous response accepted, or the real GCP diagnostic was discarded", err)
 	}
 	restarted := &Command{Config: p.Config, GCP: p.GCP}
 	ob, err := restarted.Observe(context.Background(), a)
@@ -249,7 +249,7 @@ func TestGCPSDKUnknownOperationsAndInventoryRetainOwnership(t *testing.T) {
 				}
 				if mode == "forbidden" {
 					w.WriteHeader(403)
-					writeJSON(w, map[string]any{"error": map[string]any{"code": 403, "message": "secret diagnostic"}})
+					writeJSON(w, map[string]any{"error": map[string]any{"code": 403, "message": "forbidden diagnostic detail"}})
 					return
 				}
 				if strings.Contains(r.URL.Path, "/instances/") {
@@ -277,8 +277,11 @@ func TestGCPSDKUnknownOperationsAndInventoryRetainOwnership(t *testing.T) {
 				a.ResourceID = "another-vm"
 			}
 			ob, err := p.Observe(context.Background(), a)
-			if err == nil || ob.Known || strings.Contains(err.Error(), "secret") {
+			if err == nil || ob.Known {
 				t.Fatal("unknown inventory became authoritative", ob, err)
+			}
+			if mode == "forbidden" && !strings.Contains(err.Error(), "forbidden diagnostic detail") {
+				t.Fatal("real GCP diagnostic was discarded instead of surfaced", err)
 			}
 			if err := p.Delete(context.Background(), a); err == nil || mutations != 0 {
 				t.Fatal("unsafe cleanup", err, mutations)

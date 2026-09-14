@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/tsouza/runnerscout/internal/lifecycle"
@@ -177,6 +178,23 @@ func TestAWSSDKDefinitiveCapacityRejectionHasNoReceipt(t *testing.T) {
 	receipt, err := p.createAWS(context.Background(), a, Bootstrap("fixture-jit"))
 	if !errors.Is(err, lifecycle.ErrCapacity) || receipt.ResourceID != "" || len(receipt.Resources) != 0 {
 		t.Fatal("definitive capacity rejection misclassified", receipt, err)
+	}
+}
+
+// TestAWSSDKCreateRequestFailurePreservesUnderlyingCause proves a generic
+// (non-capacity) RunInstances failure's real AWS error code survives
+// createAWS's own error return instead of being discarded behind the fixed
+// "AWS create commitment unknown" string - the same class of bug already
+// found and fixed once for Azure's deploy() (PR #108), after which two real
+// dispatches had each needed a CloudTrail/Cloud Logging dive to find an IAM
+// gap that createAWS's own error had actively hidden (see
+// docs/qualification-real-cloud.background.md).
+func TestAWSSDKCreateRequestFailurePreservesUnderlyingCause(t *testing.T) {
+	p, f, a := nativeAWSFixture(t)
+	f.RejectCreate("UnauthorizedOperation")
+	_, err := p.createAWS(context.Background(), a, Bootstrap("fixture-jit"))
+	if err == nil || !strings.Contains(err.Error(), "UnauthorizedOperation") {
+		t.Fatal("real RunInstances failure detail was discarded instead of wrapped", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -72,7 +73,7 @@ func (p *Command) createAWS(ctx context.Context, a lifecycle.Allocation, script 
 		if errors.As(err, &api) && api.ErrorCode() == "InsufficientInstanceCapacity" {
 			return lifecycle.Creation{}, lifecycle.ErrCapacity
 		}
-		return lifecycle.Creation{}, errors.New("AWS create commitment unknown")
+		return lifecycle.Creation{}, fmt.Errorf("AWS create commitment unknown: %w", err)
 	}
 	if response == nil || aws.ToString(response.OwnerId) != p.Config.AccountID || len(response.Instances) != 1 || !p.awsInstanceOwned(a, response.Instances[0]) {
 		return lifecycle.Creation{}, errors.New("AWS create response ownership unconfirmed")
@@ -177,7 +178,10 @@ func (p *Command) deleteAWS(ctx context.Context, a lifecycle.Allocation) error {
 			return nil
 		}
 		response, err := client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{InstanceIds: []string{observed.ResourceID}})
-		if err != nil || response == nil || len(response.TerminatingInstances) != 1 {
+		if err != nil {
+			return fmt.Errorf("AWS termination commitment unknown: %w", err)
+		}
+		if response == nil || len(response.TerminatingInstances) != 1 {
 			return errors.New("AWS termination commitment unknown")
 		}
 		change := response.TerminatingInstances[0]
@@ -200,7 +204,7 @@ func (p *Command) deleteAWS(ctx context.Context, a lifecycle.Allocation) error {
 		case "available":
 			_, err := client.DeleteVolume(ctx, &ec2.DeleteVolumeInput{VolumeId: aws.String(id)})
 			if err != nil && !awsMissing(err, "InvalidVolume.NotFound") {
-				return errors.New("AWS volume deletion commitment unknown")
+				return fmt.Errorf("AWS volume deletion commitment unknown: %w", err)
 			}
 			return nil
 		case "creating", "in-use", "deleting", "deleted":
@@ -222,7 +226,7 @@ func (p *Command) deleteAWS(ctx context.Context, a lifecycle.Allocation) error {
 		case "available":
 			_, err := client.DeleteNetworkInterface(ctx, &ec2.DeleteNetworkInterfaceInput{NetworkInterfaceId: aws.String(id)})
 			if err != nil && !awsMissing(err, "InvalidNetworkInterfaceID.NotFound") {
-				return errors.New("AWS network interface deletion commitment unknown")
+				return fmt.Errorf("AWS network interface deletion commitment unknown: %w", err)
 			}
 			return nil
 		case "in-use":

@@ -29,6 +29,7 @@ type AWS struct {
 	loseCreate, capacity, spotInterrupted             bool
 	account, allocation, zone, subnet, machine, image string
 	owners                                            map[string]string
+	rejectCreateCode                                  string
 }
 
 func NewAWS(t *testing.T) *AWS {
@@ -40,6 +41,12 @@ func NewAWS(t *testing.T) *AWS {
 }
 func (f *AWS) LoseNextCreate() { f.mu.Lock(); defer f.mu.Unlock(); f.loseCreate = true }
 func (f *AWS) RejectCapacity() { f.mu.Lock(); defer f.mu.Unlock(); f.capacity = true }
+
+// RejectCreate makes the next RunInstances call fail with an arbitrary EC2
+// error code (never InsufficientInstanceCapacity - use RejectCapacity for
+// that definitive-rejection path instead), for proving a generic RunInstances
+// failure's real cause survives instead of being discarded.
+func (f *AWS) RejectCreate(code string) { f.mu.Lock(); defer f.mu.Unlock(); f.rejectCreateCode = code }
 
 // SpotInterrupt models the settled state some time after AWS itself (not any
 // TerminateInstances call the controller made) terminates the instance with
@@ -88,6 +95,10 @@ func (f *AWS) serve(w http.ResponseWriter, r *http.Request) {
 	case "RunInstances":
 		if f.capacity {
 			failure("InsufficientInstanceCapacity")
+			return
+		}
+		if f.rejectCreateCode != "" {
+			failure(f.rejectCreateCode)
 			return
 		}
 		f.instance, f.volume, f.network = true, true, true
