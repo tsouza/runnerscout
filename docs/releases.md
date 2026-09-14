@@ -128,13 +128,17 @@ separately authorized bounded allocation. Compare subsequent releases against
 accepted contracts and migration paths. Never rewrite expected results or remove
 required tests automatically to accept a regression.
 
-The AWS piece of the "Real GitHub-to-VM execution" line above is
-`.github/workflows/qualify-aws.yml`, a `workflow_dispatch`-only, numerically
-bounded workflow that exercises the real AWS provider adapter against real
-EC2 - see [qualification-real-cloud.md](qualification-real-cloud.md). It
-requires operator-provisioned AWS credentials this repository does not yet
-have and has never been run; Azure and GCP equivalents remain separate,
-later, not-yet-built pieces of the same required coverage line.
+The AWS and GCP pieces of the "Real GitHub-to-VM execution" line above are
+`.github/workflows/qualify-aws.yml` and `.github/workflows/qualify-gcp.yml`,
+both `workflow_dispatch`-only, numerically bounded workflows that exercise
+the real AWS/GCP provider adapters against real EC2/Compute Engine - see
+[qualification-real-cloud.md](qualification-real-cloud.md). Both workflows'
+qualification identities (AWS's `AWS_QUALIFICATION_ROLE_ARN`; GCP's
+`GCP_QUALIFICATION_PROJECT_ID`/`GCP_QUALIFICATION_SERVICE_ACCOUNT`/
+`GCP_QUALIFICATION_WORKLOAD_IDENTITY_PROVIDER`) are provisioned in this
+repository today, but neither workflow has ever actually been dispatched;
+the Azure equivalent remains a separate, later, not-yet-built piece of the
+same required coverage line.
 
 ## Artifacts and promotion
 
