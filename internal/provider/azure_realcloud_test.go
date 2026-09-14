@@ -342,6 +342,39 @@ func azureIndependentLeftovers(ctx context.Context, client *armresources.Client,
 	return ids, nil
 }
 
+// waitForAzureLeftoversAbsent polls azureIndependentLeftovers until it
+// reports none, mirroring waitForAzureVMAbsent's own retry shape - necessary
+// because ARM's generic, tag-indexed resource list (what
+// azureIndependentLeftovers queries) lags behind a resource's own
+// type-specific API (what waitForAzureVMAbsent and the adapter's Observe
+// both use) by up to some tens of seconds after a delete. A real dispatch
+// (34864841602) hit exactly this: driveAzureTeardown and
+// waitForAzureVMAbsent both independently confirmed deletion with no error,
+// yet a single immediate azureIndependentLeftovers call still listed the
+// VM/NIC/disk - all three were independently confirmed gone (including via
+// this same allocation's resource group itself later tearing down cleanly,
+// which a genuine leftover would have blocked) moments later. Shares the
+// caller's teardownCtx budget rather than its own - this is the last of
+// three sequential checks already drawn from that one fixed budget.
+func waitForAzureLeftoversAbsent(ctx context.Context, client *armresources.Client, resourceGroup, allocationID string) ([]string, error) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		leftovers, err := azureIndependentLeftovers(ctx, client, resourceGroup, allocationID)
+		if err != nil {
+			return nil, err
+		}
+		if len(leftovers) == 0 {
+			return nil, nil
+		}
+		select {
+		case <-ctx.Done():
+			return leftovers, fmt.Errorf("independent inventory still reports leftover resource(s) %v: %w", leftovers, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 // driveAzureTeardown repeatedly calls the adapter's own public Observe and
 // Delete - never any unexported adapter internal - until Observe reports no
 // tracked resource still exists, or ctx's deadline (the caller's
@@ -490,14 +523,10 @@ func TestQualifyRealAzureSpotLifecycle(t *testing.T) {
 			t.Errorf("independent wait for VM absence failed: %v", vmAbsentErr)
 		}
 
-		leftovers, leftoverErr := azureIndependentLeftovers(teardownCtx, verifyResources, env.resourceGroup, env.allocationID)
+		leftovers, leftoverErr := waitForAzureLeftoversAbsent(teardownCtx, verifyResources, env.resourceGroup, env.allocationID)
 		evidence.record("independent-post-delete-leftovers", leftovers, leftoverErr)
 		if leftoverErr != nil {
-			t.Errorf("independent post-delete inventory query failed: %v", leftoverErr)
-			return
-		}
-		if len(leftovers) != 0 {
-			t.Errorf("independent inventory found leftover billable Azure resource(s) after delete: %v", leftovers)
+			t.Errorf("independent inventory found leftover billable Azure resource(s) after delete: %v", leftoverErr)
 		}
 	})
 
