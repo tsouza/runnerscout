@@ -156,19 +156,19 @@ func (c Config) Validate() error {
 }
 
 type fleet struct {
-	BindingVersion int                             `json:"bindingVersion,omitempty"`
-	Condition      string                          `json:"condition,omitempty"`
-	Binding        string                          `json:"binding"`
-	Released       map[string]bool                 `json:"released"`
-	Admission      admission.State                 `json:"admission"`
-	Created        map[string]time.Time            `json:"created"`
+	BindingVersion int                  `json:"bindingVersion,omitempty"`
+	Condition      string               `json:"condition,omitempty"`
+	Binding        string               `json:"binding"`
+	Released       map[string]bool      `json:"released"`
+	Admission      admission.State      `json:"admission"`
+	Created        map[string]time.Time `json:"created"`
 	// Reserved is a worst-case reservation in USD micros per allocation ID,
 	// keyed and populated at the same moment as Created (see
 	// HandleDesiredRunnerCount). Entries are never removed, matching
 	// Created's own lifetime - spentToday sums these, filtered by Created's
 	// date and each allocation's current Phase.
-	Reserved       map[string]int64                `json:"reserved,omitempty"`
-	Pending        map[string]lifecycle.Allocation `json:"pending"`
+	Reserved map[string]int64                `json:"reserved,omitempty"`
+	Pending  map[string]lifecycle.Allocation `json:"pending"`
 	// RetriesUsedByRun is keyed by GitHub workflow run ID, not allocation ID -
 	// a rerun keeps the same run ID but is reassigned as a brand new,
 	// otherwise unrelated allocation.
