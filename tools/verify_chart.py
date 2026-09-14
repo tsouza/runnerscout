@@ -134,12 +134,12 @@ class ChartContracts(unittest.TestCase):
 
     def test_packaged_crds_match_generated_schemas(self):
         schemas = sorted((ROOT / "config/crd/bases").glob("*.yaml"))
-        self.assertEqual(len(schemas), 5)
+        self.assertEqual(len(schemas), 6)
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(["helm", "package", str(CHART), "--destination", tmp], check=True, capture_output=True)
             with tarfile.open(next(Path(tmp).glob("*.tgz"))) as package:
                 members = [name for name in package.getnames() if "/crds/" in name and name.endswith(".yaml")]
-                self.assertEqual(len(members), 5)
+                self.assertEqual(len(members), 6)
                 for schema in schemas:
                     self.assertEqual((CHART / "crds" / schema.name).read_bytes(), schema.read_bytes())
                     self.assertEqual(package.extractfile("runnerscout/crds/" + schema.name).read(), schema.read_bytes())
