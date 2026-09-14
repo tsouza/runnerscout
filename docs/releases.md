@@ -128,6 +128,14 @@ separately authorized bounded allocation. Compare subsequent releases against
 accepted contracts and migration paths. Never rewrite expected results or remove
 required tests automatically to accept a regression.
 
+The AWS piece of the "Real GitHub-to-VM execution" line above is
+`.github/workflows/qualify-aws.yml`, a `workflow_dispatch`-only, numerically
+bounded workflow that exercises the real AWS provider adapter against real
+EC2 - see [qualification-real-cloud.md](qualification-real-cloud.md). It
+requires operator-provisioned AWS credentials this repository does not yet
+have and has never been run; Azure and GCP equivalents remain separate,
+later, not-yet-built pieces of the same required coverage line.
+
 ## Artifacts and promotion
 
 Build versioned images, a Helm package, checksums, SBOMs, signatures and provenance
