@@ -75,14 +75,13 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
    own statement that pre-1.0 APIs remain experimental; a `v1.0.0` or later
    tag is never marked prerelease.
 
-Publishing has one required one-time manual step outside this automation:
-GHCR creates a package as **private** on its first-ever push, regardless of
-the pushing repository's own visibility, and GitHub does not expose an
-endpoint the workflow's `GITHUB_TOKEN` can call to change that — a repository
-admin must open the new package's settings on GitHub once, after the first
-tag release, and change its visibility to public (and confirm it's linked to
-this repository) before downstream consumers can pull or verify it without
-authentication. Every push after that stays public.
+Publishing requires no manual step: `ghcr.io/tsouza/runnerscout`'s first-ever
+push (v0.1.0) was public immediately, and both the image signature and SBOM
+attestation verify with an anonymous, unauthenticated pull. If a future
+GitHub account or organization default ever creates the package private
+instead, a repository admin can open the package's own settings and change
+its visibility to public — GitHub does not expose an endpoint the workflow's
+`GITHUB_TOKEN` can call to do this itself.
 
 The pipeline runs `preflight` → `build` → `publish`/sign → `release` end to
 end, every stage gated on the same non-bypassable
