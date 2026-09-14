@@ -70,6 +70,27 @@ func TestRefreshAWSPricesUpdatesSuccessfulAWSOffering(t *testing.T) {
 	}
 }
 
+// TestRefreshAWSPricesNeverOverwritesOnDemandOffering proves an on-demand
+// (Spot: false) AWS offering's catalog price survives refreshAWSPrices
+// untouched. AWSSpotClient.Observe only ever returns a Spot price (see its
+// own doc comment), so overwriting an on-demand offering's price with it
+// would silently corrupt the one price placement.Choose's MaxPriceMicros
+// ceiling actually compares against - an ACPR finding, not a case this
+// feature was ever exercised against before.
+func TestRefreshAWSPricesNeverOverwritesOnDemandOffering(t *testing.T) {
+	o := &Operator{AWSPrices: &fakeAWSPrices{observe: func(ctx context.Context, region, zone, instanceType string) (prices.Quote, error) {
+		return prices.Quote{PriceMicros: 1, Currency: "USD", ObservedAt: time.Now()}, nil
+	}}}
+	onDemand := awsOffering("a")
+	onDemand.Spot = false
+	before := onDemand
+	catalog := placement.Catalog{Offerings: []placement.Offering{onDemand}}
+	got := o.refreshAWSPrices(context.Background(), catalog)
+	if !reflect.DeepEqual(got.Offerings[0], before) {
+		t.Fatalf("on-demand offering was overwritten by a Spot quote: %+v", got.Offerings[0])
+	}
+}
+
 func TestRefreshAWSPricesIsolatesFailurePerOffering(t *testing.T) {
 	staleObservedAt := time.Now().Add(-time.Hour)
 	failing := awsOffering("fails")
@@ -150,6 +171,23 @@ func TestRefreshAzurePricesUpdatesSuccessfulAzureOffering(t *testing.T) {
 	offering := got.Offerings[0]
 	if offering.PriceMicros != want.PriceMicros || offering.Currency != want.Currency || !offering.ObservedAt.Equal(want.ObservedAt) {
 		t.Fatalf("offering not refreshed from quote: %+v", offering)
+	}
+}
+
+// TestRefreshAzurePricesNeverOverwritesOnDemandOffering is
+// TestRefreshAWSPricesNeverOverwritesOnDemandOffering's exact Azure
+// counterpart: AzureSpotClient.Observe only ever returns a Spot price too.
+func TestRefreshAzurePricesNeverOverwritesOnDemandOffering(t *testing.T) {
+	o := &Operator{AzurePrices: &fakeAzurePrices{observe: func(ctx context.Context, region, zone, instanceType string) (prices.Quote, error) {
+		return prices.Quote{PriceMicros: 1, Currency: "USD", ObservedAt: time.Now()}, nil
+	}}}
+	onDemand := azureOffering("a")
+	onDemand.Spot = false
+	before := onDemand
+	catalog := placement.Catalog{Offerings: []placement.Offering{onDemand}}
+	got := o.refreshAzurePrices(context.Background(), catalog)
+	if !reflect.DeepEqual(got.Offerings[0], before) {
+		t.Fatalf("on-demand offering was overwritten by a Spot quote: %+v", got.Offerings[0])
 	}
 }
 
