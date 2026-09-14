@@ -727,6 +727,48 @@ own logic, surfacing the bugs below:
   run once, directly, with the account's own root/administrator
   credentials - after which every identity in the account can request Spot
   Instances normally, this qualification identity included.
+- **A real EC2 API eventual-consistency race, in production code**: with
+  the service-linked role bootstrapped, a dispatch's `RunInstances` call
+  finally succeeded - and `createAWS`'s own post-create validation still
+  failed, with `"AWS create commitment unknown"` this time wrapping a
+  different real condition: the response's `Instances[0].BlockDeviceMappings`
+  came back empty (`observed` stayed empty against a non-empty `expected`),
+  even though the instance and its network interface were both genuinely
+  present in that same response. EC2's `RunInstances` response can
+  legitimately return before the new instance's EBS volume attachment
+  record is fully populated - a real, intermittent API race, not a
+  four-oh-something error to catch and branch on. Unlike GCP's analogous
+  delete-timeout finding, this one **does** help production: `createAWS`'s
+  own 30-second budget has ample room for a short, bounded retry (three
+  attempts, two seconds apart, re-querying `DescribeInstances` for the
+  same instance ID) before concluding the dependencies are genuinely
+  missing, and `internal/operator/operator.go`'s own per-`Step` timeout
+  (also 30 seconds) is the same budget the unfixed code already ran
+  under - this fix does not need a wider parent budget to matter, unlike
+  `deleteGCP`'s timeout. The safety-net step force-terminated the real
+  (billed, but briefly-lived) instance this race caused - see the next
+  finding for a real bug that surfaced in that same cleanup.
+- **A second AWS VM-level safety-net race, exposed by the instance the
+  finding above actually created**: after force-terminating a leftover
+  instance, the safety net immediately tried to delete its EBS volume -
+  racing AWS's own automatic `DeleteOnTermination` cleanup and failing
+  with `VolumeInUse` (the instance was still `shutting-down`, not yet
+  `terminated`, when the delete-volume call landed). The volume and its
+  network interface both carry `DeleteOnTermination = true` already (see
+  `createAWS`'s own `RunInstancesInput` construction), so once the
+  instance genuinely finishes terminating, both disappear on their own -
+  the safety net's own explicit delete calls exist only to catch the case
+  where `DeleteOnTermination` itself doesn't fire (a create that never
+  even reached instance-launch, for example), not to race an
+  already-firing one. Fixed by waiting for `aws ec2 wait
+  instance-terminated` right after `terminate-instances`, before touching
+  volumes or ENIs at all - bounded by that waiter's own default timeout,
+  with `|| true` so a slow/stuck termination still lets the sweep below
+  attempt its own cleanup rather than aborting outright. In this
+  particular run, real end state was confirmed safe regardless (the
+  instance, its volume, and its ENI were all independently verified gone
+  within a minute of the run finishing) - this fix removes a spurious job
+  failure and a confusing `VolumeInUse` error, not a real leak.
 - **A stale-credential bug in the AWS VM-level safety-net step**,
   surfaced by the AWS IAM gap above: when a network `tofu apply` failure
   causes every qualification-identity credential step after it to be
@@ -807,20 +849,26 @@ own logic, surfacing the bugs below:
   bounds every provider call in every phase, not just GCP's delete) - out
   of scope for this fix.
 
-Two of these bugs actually resulted in a real, billed resource being
+Three of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
 (existed for well under two minutes, cleanly deleted, real cost a
-fraction of a cent), and the AWS Elastic IP left briefly unassociated by
-the second AWS IAM gap (released within minutes, real cost negligible).
-Every other bug's failure happened before any billable resource was ever
-created, or left behind only a resource type that does not bill by itself
-(a bare VPC/subnet/internet-gateway/security-group; an Azure
-NIC/VNet/NSG/subnet). Each was found, diagnosed against the real cloud
-APIs (Cloud Logging, in GCP's case, since the adapter's own errors are
-deliberately generic), and fixed as its own focused PR rather than folded
-silently into a larger change - matching this workflow's own
-one-focused-unit-per-provider review
-discipline from when it was first built.
+fraction of a cent); the AWS Elastic IP left briefly unassociated by the
+second AWS IAM gap (released within minutes, real cost negligible); and
+the AWS Spot instance created by the `BlockDeviceMappings` race, force-
+terminated by the safety net moments later (real cost a fraction of a
+cent). GCP's own real dispatch (once every fix above landed) completed
+the full lifecycle cleanly end to end - `TestQualifyRealGCPSpotLifecycle`
+PASS, zero leftover resources - the first fully successful real-cloud
+qualification this repository has run. Every other bug's failure
+happened before any billable resource was ever created, or left behind
+only a resource type that does not bill by itself (a bare
+VPC/subnet/internet-gateway/security-group; an Azure NIC/VNet/NSG/subnet).
+Each was found, diagnosed against the real cloud APIs (Cloud Logging, in
+GCP's case, and Azure's Activity Log, since both adapters' own errors are
+deliberately generic; AWS's own CloudTrail for the service-linked-role
+gap), and fixed as its own focused PR rather than folded silently into a
+larger change - matching this workflow's own one-focused-unit-per-provider
+review discipline from when it was first built.
 
 ## Provenance
 
