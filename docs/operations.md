@@ -150,33 +150,37 @@ A wireguard-mode runner VM image must include the
 `cmd/runnerscout-wireguard-agent`. It is a separate binary from the
 `runnerscout` controller, never imported by it, so that its netstack
 (gVisor) dependency tree never reaches the controller binary's own
-dependency graph or size. This repository does not ship a systemd unit,
-any other init-system integration, or a reference runner image build
-recipe that includes this binary. An operator must build their own
-boot-time integration into their own runner image today — for example a
-systemd unit that invokes `runnerscout-wireguard-agent -payload
-/run/runnerscout/wireguard.json`. The binary also accepts `-poll-interval`,
-which defaults to 30 seconds.
+dependency graph or size. `examples/wireguard-agent/` now provides a
+reference systemd unit and README for building this binary into a runner
+image and starting it at boot from the cloud-init-delivered payload at
+`/run/runnerscout/wireguard.json` — see that directory instead of building
+this integration from scratch. It is example material to copy and adapt,
+not something this repository installs automatically. The binary also
+accepts `-poll-interval`, which defaults to 30 seconds.
 
 The controller needs no additional configuration to serve wireguard mode's
 existing configuration surface (see "Known limitations" below for what does
-not work yet). The WireGuard peer-poll endpoint and the `NetworkPeers` hook it depends on
-are wired unconditionally at startup, for both the CRD-driven and
-mounted-config entry points; no new Helm chart value, flag, environment
+not work yet). The WireGuard peer-poll endpoint and the `NetworkPeers` hook
+it depends on are wired unconditionally at startup, for both the CRD-driven
+and mounted-config entry points; no new Helm chart value, flag, environment
 variable or Secret name exists for this mode. It costs nothing extra when
 no `NetworkProfile` uses `wireguard` mode.
 
-Known limitations: no code path assigns `lifecycle.Allocation.WireGuardOverlayAddress`
-today, so a real wireguard-mode allocation's cloud-init payload carries an
-empty overlay address, which `runnerscout-wireguard-agent` refuses to load —
-wireguard mode is not yet functionally usable end-to-end, only its
-configuration surface (CRD gate, poll endpoint, per-allocation keys) is live.
-Overlay IP address allocation is tracked in
+Known limitations: no code path assigns
+`lifecycle.Allocation.WireGuardOverlayAddress` today, so a real
+wireguard-mode allocation's cloud-init payload carries an empty overlay
+address, which `runnerscout-wireguard-agent`'s `LoadPayload` refuses to
+load — even with `examples/wireguard-agent/`'s reference boot integration
+installed and running, wireguard mode is not yet functionally usable
+end-to-end. Only its configuration surface (CRD gate, poll endpoint,
+per-allocation keys) and now its boot-time integration reference are in
+place; the VM-side agent itself cannot successfully start until overlay IP
+address allocation is implemented. That allocation is tracked in
 [#16](https://github.com/tsouza/runnerscout/issues/16) as a design decision
 (CIDR pool source, exhaustion handling, persistence), not yet made. A
-wireguard-mode `NetworkProfile` also supports exactly one
-`NetworkMapping` — a single directly-routable subnet. Cross-region or
-cross-provider WireGuard peering is not supported. On GCP, capturing a VM's
+wireguard-mode `NetworkProfile` also supports exactly one `NetworkMapping`
+— a single directly-routable subnet. Cross-region or cross-provider
+WireGuard peering is not supported. On GCP, capturing a VM's
 WireGuard endpoint costs one additional API call per VM creation when
 wireguard mode is used; AWS and Azure capture it from data their create
 paths already fetch, at no extra cost. The VM-side peer-poll endpoint has
