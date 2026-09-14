@@ -7,7 +7,14 @@
 > (a `provider` input selects `all` or one of `aws`/`azure`/`gcp`) — see
 > [qualification-real-cloud.md](qualification-real-cloud.md) for the current
 > file layout. The reasoning below is unaffected: only where each check
-> lives changed, not why it exists.
+> lives changed, not why it exists. A later change (issue #89, see "Network
+> provisioning" below) removed `vpc_id`/`vnet_id`/`gcp_network` and their
+> sibling subnet/security-group/NSG inputs entirely — the "Why `vpc_id`/
+> `vnet_id`/`gcp_network` are inputs at all" section below describes a
+> cross-validation design that no longer exists; it is kept for why
+> operator-pinned network identifiers were once cross-checked at all, which
+> still explains why the network is provisioned per-run today rather than
+> left entirely unvalidated.
 
 ## Why this exists now, and why AWS first
 
@@ -344,6 +351,93 @@ runners, and Azure's cleanup step reuses the `az` CLI session `azure/login`
 already established earlier in the same job (guarded instead on `az
 account show` succeeding, which fails the same way if credentials were
 never configured).
+
+## Network provisioning (issue #89)
+
+Every provider's network identifiers (`aws_vpc_id`/`aws_subnet_id`/
+`aws_security_group_id`, `azure_resource_group`/`azure_subnet_id`/
+`azure_nsg_id`, `gcp_network`/`gcp_subnetwork`) were originally
+operator-pinned inputs, cross-validated before any create call (see "Why
+`vpc_id`/`vnet_id`/`gcp_network` are inputs at all" above). Issue #89
+replaced all six with a per-run OpenTofu apply/destroy
+(`tools/tofu/qualify-network/{aws,azure,gcp}/`) instead, for a reason that
+has nothing to do with safety and everything to do with what an
+operator-pinned network actually costs to keep around: AWS's NAT Gateway
+bills hourly whether anything uses it or not, so a qualification network
+left standing between runs is an unbounded, ongoing cost for a workflow
+that is dispatched rarely — provisioning it fresh per run and destroying it
+immediately after turns that into a few cents per run instead. Azure's and
+GCP's equivalents don't bill hourly, but were changed to match for
+consistency across all three providers (an operator reading one provider's
+lifecycle should not have to learn a second one for the others), and
+because a network cross-validated once and reused indefinitely can also
+silently drift from what the workflow's own pre-flight checks last
+verified (an out-of-band change to a shared, long-lived VPC/VNet), whereas
+one created and destroyed by the same job every run cannot drift at all.
+
+### Why a separate network-provisioner identity per cloud, not the qualification identity reused
+
+The qualification identity (`AWS_QUALIFICATION_ROLE_ARN`,
+`AZURE_QUALIFICATION_*`, `GCP_QUALIFICATION_*`) exists to create/observe/
+delete a VM inside a network it is handed — nothing about that task needs
+permission to create or delete the network itself. Granting it that
+permission anyway, purely so one identity could do both jobs, would widen
+the blast radius of a single compromised or misused credential to include
+being able to stand up or tear down arbitrary VPCs/VNets/VPC networks, not
+just the one this workflow's own VM lifecycle needs. A second, disjoint
+identity per cloud (`AWS_NETWORK_PROVISIONER_ROLE_ARN`,
+`AZURE_NETWORK_PROVISIONER_*`, `GCP_NETWORK_PROVISIONER_*`) keeps each
+identity's permissions scoped to exactly the resource types it actually
+touches — verified directly against each cloud's real provisioned
+role/policy (Azure's custom role has no `Microsoft.Compute/*` action at
+all; AWS's policy has no `iam:*` or VPC-unrelated `ec2:*` action; GCP's
+custom role has no `compute.instances.*`/`compute.disks.*` action) — and
+means a bug or scope-creep in one identity's usage cannot reach the other
+identity's resources even within the same job.
+
+### Why no remote OpenTofu state backend
+
+`tools/tofu/qualify-network/*/README.md`'s "State" sections cover this in
+full; the short version is that a remote backend (S3+DynamoDB, an Azure
+Storage container, a GCS bucket) solves a problem this workflow does not
+have. Remote state exists to let multiple, independent `apply`/`destroy`
+invocations — from different machines, different times, different actors —
+agree on one shared source of truth for what currently exists. This
+workflow's own `apply` and `destroy` for a given run are two steps of the
+*same* job, on the *same* runner filesystem, always in that order, always
+paired — the state file simply never needs to leave the one machine that
+created it. Adding a remote backend here would be provisioning
+infrastructure (a bucket, a lock table, credentials to reach them) to solve
+a coordination problem that literally cannot occur in this workflow's own
+usage pattern. The by-hand usage documented in each module's own README
+(preparing `tools/e2e/*`'s pinned inputs) is the one case where state
+genuinely could need to move between machines — and that path is
+explicitly out of scope for what `qualify.yml` itself needs, so it was
+left as an operator's own responsibility rather than built out speculatively.
+
+### Provenance: a separately-exposed provision/destroy workflow, tried and reverted
+
+This was first built as a fourth, independently-dispatchable workflow
+(`qualify-network.yml`, PRs #90–95) with its own `provision`/`destroy`
+`workflow_dispatch` inputs, its own cross-run state handoff (an
+`apply_run_id` input pinning which prior run's uploaded-artifact state a
+`destroy` dispatch should download and act on), and its own docs
+(`docs/qualify-network.md`/`.background.md`). This was built without being
+asked for — the actual instruction never asked for network provisioning to
+be its own dispatchable surface, only for the compute-side qualification
+workflows to stop requiring an operator to pin a pre-existing network.
+Once flagged, it was retired outright rather than kept alongside the
+simpler design: `qualify-network.yml`, its docs, and its cross-run
+artifact-handoff machinery were all deleted, and the same
+`tools/tofu/qualify-network/*` modules were instead applied and destroyed
+as ordinary steps inside `qualify.yml`'s own existing per-provider matrix
+job — apply, run the real-cloud test, destroy, all in one dispatch, one
+job, no separate exposure. This also deleted an entire category of
+complexity that a dedicated workflow required and the folded-in version
+does not: no remote state backend, no artifact upload/download, no
+`apply_run_id` pinning, no window in which a network could be left
+standing (billing) between a `provision` dispatch and someone remembering
+to `destroy` it later.
 
 ## Azure
 

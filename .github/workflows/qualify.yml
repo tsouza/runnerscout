@@ -1,33 +1,40 @@
 # Real-cloud provider qualification (issue #3's "Final real-cloud
-# qualification" scope). This is the single, matrixed successor to what were
-# previously three separate workflows - qualify-aws.yml, qualify-azure.yml
-# and qualify-gcp.yml - consolidated into one file per-provider fan-out via
-# a job matrix, with a `provider` input to run all three or just one. The
-# safety philosophy, the per-provider validation/credential/cleanup logic,
-# and every literal check below are carried over unchanged from those three
-# workflows; only the mechanism for selecting which provider(s) run changed.
-# See docs/qualification-real-cloud.md for the current procedural
-# description and docs/qualification-real-cloud.background.md for why each
-# provider's checks look the way they do (still accurate: only the file
-# layout changed, not the reasoning).
+# qualification" scope, plus issue #89's network-provisioning fold-in). One
+# matrixed workflow, one dispatch per provider (or `all` for every
+# provider), that for each selected provider: provisions a fresh, isolated
+# qualification network via OpenTofu, runs the real-cloud Go test against
+# it, and destroys that network again - all within the same job run. See
+# docs/qualification-real-cloud.md for the current procedural description
+# and docs/qualification-real-cloud.background.md for why each provider's
+# checks look the way they do.
 #
-# This workflow provisions ONE real, billed compute instance per selected
-# provider through the production internal/provider adapter for that cloud
-# (never modified by this workflow or its accompanying *_realcloud_test.go
-# files) and independently verifies it is fully torn down afterward. It is
-# the only automation in this repository that spends real money when it
-# runs, so every design choice is biased toward "impossible to trigger by
-# accident" over convenience:
+# This workflow provisions ONE real, billed compute instance (plus, for
+# AWS, a real, billed NAT Gateway for the duration of this same run) per
+# selected provider through the production internal/provider adapter for
+# that cloud (never modified by this workflow or its accompanying
+# *_realcloud_test.go files) and independently verifies both the instance
+# and its network are fully torn down afterward. It is the only automation
+# in this repository that spends real money when it runs, so every design
+# choice is biased toward "impossible to trigger by accident" over
+# convenience:
 #
 #   - workflow_dispatch is the ONLY trigger. No schedule, no push, no
-#     pull_request. A human must explicitly run this, every time.
+#     pull_request. A human must explicitly run this, every time - that
+#     act, with these specific inputs, is itself the confirmation for the
+#     network-provisioning half of this workflow (see issue #89's own
+#     history: a separately-exposed provision/destroy workflow was tried
+#     first and rejected as unnecessary indirection - a human should not
+#     have to sequence two separate dispatches by hand to get one real
+#     qualification result).
 #   - A required `confirm_real_spend` input must match an exact literal
 #     phrase, checked before anything else runs for a given provider
 #     (including before that provider's credentials are ever configured) -
 #     a second, deliberate speed bump beyond workflow_dispatch's own
 #     "someone had to click Run workflow" protection, so a scripted
 #     `gh workflow run` with stale/default arguments cannot silently
-#     provision real resources either.
+#     provision real resources either. This one gate remains because this
+#     workflow's own real-cloud VM spend is larger and less tightly bounded
+#     per run than the network's own few-cents-per-run cost.
 #   - `max_runtime_minutes` is a required, explicit numeric VM-time bound -
 #     issue #3's own "numeric spend/VM-time allocation" wording - validated
 #     against a hard-coded workflow ceiling
@@ -35,38 +42,63 @@
 #     value can exceed, shared across all three providers. The job's own
 #     `timeout-minutes:` is a second, independent, non-input-derived
 #     ceiling on the whole job.
-#   - Every network identifier and pinned image (per provider - see each
-#     input's own description below) is a required-for-that-provider
-#     operator-supplied input - this workflow never discovers or selects
-#     any of them dynamically. Because a single workflow_dispatch form
-#     cannot make an input conditionally required on another input's value,
-#     every per-provider input is declared `required: false` at the trigger
-#     level and instead validated as required by that provider's own
-#     "Validate pinned identifier shapes" step below - the same
-#     fail-cleanly-with-zero-cloud-interaction property the original three
-#     workflows had, just enforced one step later. A pre-flight step per
-#     provider independently cross-checks that its network identifiers
-#     actually belong together before any create call, catching a
-#     pasted-wrong-ID mistake with zero cost (all read-only calls).
+#   - The pinned image and compute shape (AMI/instance type/architecture;
+#     managed image/VM size/availability zone; boot image/machine type) are
+#     required-for-that-provider operator-supplied inputs - this workflow
+#     never discovers or selects any of them dynamically. The NETWORK
+#     itself is no longer an operator-pinned input (see "Network
+#     provisioning" below) - only the compute side stays pinned, since
+#     issue #3's "pinned images/networks" wording was about avoiding
+#     accidentally reusing a wrong or shared pre-existing resource, and a
+#     network this workflow creates fresh and owns exclusively for the
+#     duration of one run cannot be an ambiguous, possibly-shared resource
+#     the way a pre-existing pasted-in identifier could be.
 #   - Teardown/independent-verification runs via `if: always()` (the final
-#     step of each provider's steps), exactly like this repo's other CI
+#     steps of each provider's steps), exactly like this repo's other CI
 #     jobs already do for evidence upload - a failed or killed run must
-#     never leave a running, billable VM behind. This is the authoritative
-#     backstop: it survives even a job-level timeout or cancellation that
-#     would kill the Go test process (and therefore skip its own in-process
-#     t.Cleanup) before it could finish tearing down.
+#     never leave a running, billable VM or network behind. This is the
+#     authoritative backstop: it survives even a job-level timeout or
+#     cancellation that would kill the Go test process (and therefore skip
+#     its own in-process t.Cleanup) before it could finish tearing down.
+#     Network teardown runs after VM-level teardown, in the same order they
+#     were created, since a NAT Gateway/VPC/VNet/network cannot be deleted
+#     while a VM or NIC still sits inside it.
 #   - `provider: all` (the default) fans out to all three providers as
 #     independent matrix jobs (fail-fast: false, so one provider's failure
 #     never cancels another's in-flight teardown); `provider: aws` (etc.)
-#     runs only that one. Each provider keeps its own concurrency group
-#     (qualify-aws/qualify-azure/qualify-gcp), unchanged from the original
-#     three workflows, so a second dispatch against the same provider still
-#     queues behind an in-flight one instead of racing it for the same
-#     pinned network resources - but the three providers themselves remain
-#     independent and can run concurrently within a single `provider: all`
-#     dispatch, exactly as they could as separate workflows before.
+#     runs only that one. Each provider keeps its own concurrency group, so
+#     a second dispatch against the same provider queues behind an
+#     in-flight one instead of racing it for the same OpenTofu state file -
+#     but the three providers themselves remain independent and can run
+#     concurrently within a single `provider: all` dispatch.
 #
-# Credentials, per provider (unchanged from the original three workflows):
+# Network provisioning (issue #89): each provider's qualification network
+# (AWS VPC/subnet/NAT Gateway/security group; Azure resource group/VNet/
+# subnet/NSG; GCP VPC network/subnetwork) is created via
+# `tools/tofu/qualify-network/<provider>/` at the start of that provider's
+# job and destroyed at the end of the SAME job - never left standing
+# between runs, never provisioned by a separate workflow dispatch an
+# operator would have to sequence by hand. OpenTofu's local state for this
+# never needs to leave the job's own filesystem, since apply and destroy
+# both run in the same job: no remote backend, no cross-run artifact
+# handoff, is needed. See docs/qualification-real-cloud.background.md for
+# the fuller history (why a separate provision/destroy workflow was tried
+# first and reverted).
+#
+# A DELIBERATELY SEPARATE, least-privilege identity per cloud provisions
+# and destroys the network - never `AWS_QUALIFICATION_ROLE_ARN`/
+# `AZURE_QUALIFICATION_CLIENT_ID`+`AZURE_QUALIFICATION_TENANT_ID`/
+# `GCP_QUALIFICATION_*`, which are scoped to launch/observe/delete a VM
+# into a *pre-existing* network only (confirmed against the actual
+# provisioned Azure custom role, which has no
+# `Microsoft.Network/virtualNetworks/write`) - widening those identities to
+# also create/delete networks would permanently grow a purpose-built
+# least-privilege identity's blast radius. See
+# docs/qualification-real-cloud.background.md for what each
+# `NETWORK_PROVISIONER_*` identity's minimum required permissions are.
+#
+# Credentials, per provider, for the QUALIFICATION identity (unchanged from
+# before issue #89):
 #   - AWS: OIDC role assumption (aws-actions/configure-aws-credentials with
 #     role-to-assume) is preferred; a static-key fallback
 #     (AWS_QUALIFICATION_ACCESS_KEY_ID/AWS_QUALIFICATION_SECRET_ACCESS_KEY
@@ -81,6 +113,12 @@
 #     (google-github-actions/auth with workload_identity_provider +
 #     service_account) - deliberately no service account key JSON fallback
 #     (see docs/qualification-real-cloud.background.md's GCP section).
+# The NETWORK_PROVISIONER identity for each cloud uses the equivalent OIDC/
+# WIF mechanism, under `AWS_NETWORK_PROVISIONER_ROLE_ARN` (secret) /
+# `AZURE_NETWORK_PROVISIONER_CLIENT_ID`+`AZURE_NETWORK_PROVISIONER_TENANT_ID`+
+# `AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID` (variables) /
+# `GCP_NETWORK_PROVISIONER_PROJECT_ID`+`GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT`+
+# `GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER` (variables).
 name: Qualify (real cloud)
 on:
   workflow_dispatch:
@@ -98,8 +136,8 @@ on:
       confirm_real_spend:
         description: >-
           Must be exactly: I-UNDERSTAND-THIS-COSTS-REAL-MONEY - this run
-          provisions one real, billed compute instance per selected
-          provider.
+          provisions a qualification network and one real, billed compute
+          instance per selected provider.
         required: true
         type: string
       max_runtime_minutes:
@@ -107,19 +145,7 @@ on:
         required: true
         type: string
       aws_region:
-        description: "[AWS] Pinned AWS region to qualify against (e.g. us-east-1). Required only when provider is aws or all."
-        required: false
-        type: string
-      aws_vpc_id:
-        description: "[AWS] Pinned, pre-provisioned isolated VPC id (vpc-...) that aws_subnet_id and aws_security_group_id must both belong to."
-        required: false
-        type: string
-      aws_subnet_id:
-        description: "[AWS] Pinned, pre-provisioned subnet id (subnet-...) to launch into."
-        required: false
-        type: string
-      aws_security_group_id:
-        description: "[AWS] Pinned, pre-provisioned security group id (sg-...) to attach."
+        description: "[AWS] Pinned AWS region to qualify against (e.g. us-east-1) - also where the qualification network is created/destroyed. Required only when provider is aws or all."
         required: false
         type: string
       aws_ami_id:
@@ -140,27 +166,11 @@ on:
           - amd64
           - arm64
       azure_region:
-        description: "[Azure] Pinned Azure region to qualify against (e.g. eastus). Required only when provider is azure or all."
+        description: "[Azure] Pinned Azure region to qualify against (e.g. eastus) - also where the qualification network is created/destroyed. Required only when provider is azure or all."
         required: false
         type: string
       azure_subscription_id:
         description: "[Azure] Pinned Azure subscription GUID to qualify against."
-        required: false
-        type: string
-      azure_resource_group:
-        description: "[Azure] Pinned, pre-provisioned, dedicated qualification resource group name (never a production resource group)."
-        required: false
-        type: string
-      azure_subnet_id:
-        description: >-
-          [Azure] Pinned, pre-provisioned subnet resource ID (a full ARM ID
-          ending in /subnets/<name>). Its own /subnets/ prefix IS the VNet
-          resource ID - no separate VNet input is needed since one is always
-          fully reconstructible from the other.
-        required: false
-        type: string
-      azure_nsg_id:
-        description: "[Azure] Pinned, pre-provisioned network security group resource ID to attach."
         required: false
         type: string
       azure_image_id:
@@ -182,23 +192,15 @@ on:
           - "2"
           - "3"
       gcp_project:
-        description: "[GCP] Pinned GCP project id to qualify against. Must equal the vars.GCP_QUALIFICATION_PROJECT_ID this identity is provisioned for. Required only when provider is gcp or all."
+        description: "[GCP] Pinned GCP project id to qualify against. Must equal both vars.GCP_QUALIFICATION_PROJECT_ID and vars.GCP_NETWORK_PROVISIONER_PROJECT_ID. Required only when provider is gcp or all."
         required: false
         type: string
       gcp_region:
-        description: "[GCP] Pinned GCP region to qualify against (e.g. us-central1)."
+        description: "[GCP] Pinned GCP region to qualify against (e.g. us-central1) - also where the qualification network is created/destroyed."
         required: false
         type: string
       gcp_zone:
         description: "[GCP] Pinned GCP zone (e.g. us-central1-a). Must belong to gcp_region."
-        required: false
-        type: string
-      gcp_network:
-        description: "[GCP] Pinned, pre-provisioned isolated VPC network name that gcp_subnetwork must belong to."
-        required: false
-        type: string
-      gcp_subnetwork:
-        description: "[GCP] Pinned, pre-provisioned subnetwork name (in gcp_region) to launch into."
         required: false
         type: string
       gcp_image:
@@ -240,30 +242,26 @@ jobs:
       matrix:
         provider: ${{ fromJSON(needs.plan.outputs.providers) }}
     concurrency:
-      # Unchanged per-provider serialization from the original three
-      # workflows: a second dispatch against the same provider queues
-      # behind an in-flight one rather than racing it for the same pinned
-      # network resources. cancel-in-progress is deliberately false -
-      # cancelling a run that is mid-teardown of a real billed instance is
-      # strictly worse than making the next run wait. Providers remain
-      # independent of each other.
+      # A second dispatch against the same provider queues behind an
+      # in-flight one rather than racing it for the same OpenTofu state
+      # file. cancel-in-progress is deliberately false - cancelling a run
+      # that is mid-teardown of a real billed instance/network is strictly
+      # worse than making the next run wait. Providers remain independent.
       group: qualify-${{ matrix.provider }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     # Hard-coded, independent of max_runtime_minutes: setup/build (~5m) +
-    # the go test step's own worst-case -timeout below (max_runtime_minutes's
-    # 20m ceiling + 10m, i.e. 30m, which already includes the test's own
-    # fixed 5m teardown budget) + margin for the remaining steps. No input
-    # can raise this. Unchanged from all three original workflows.
-    timeout-minutes: 40
+    # network apply/destroy (~5m, mostly AWS's NAT Gateway provisioning
+    # time) + the go test step's own worst-case -timeout below
+    # (max_runtime_minutes's 20m ceiling + 10m, i.e. 30m, which already
+    # includes the test's own fixed 5m teardown budget) + margin. No input
+    # can raise this.
+    timeout-minutes: 45
     permissions:
       contents: read
-      # Consumed by whichever provider's credential step actually runs for
-      # this matrix job: AWS's OIDC path (when AWS_QUALIFICATION_ROLE_ARN is
-      # set), Azure's azure/login + separately-fetched OIDC token, and GCP's
-      # google-github-actions/auth all need this. Granting it once here
-      # covers all three; each provider's steps only ever consume it when
-      # matrix.provider selects that provider.
+      # Consumed by both identities' credential steps for this matrix job
+      # (qualification and network-provisioner OIDC/WIF, whichever
+      # provider's steps actually run).
       id-token: write
     env:
       RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES: "20"
@@ -273,24 +271,12 @@ jobs:
       RUNNERSCOUT_QUALIFY_EVIDENCE_DIR: evidence/qualify-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
       # AWS
       RUNNERSCOUT_QUALIFY_AWS_REGION: ${{ inputs.aws_region }}
-      RUNNERSCOUT_QUALIFY_AWS_VPC: ${{ inputs.aws_vpc_id }}
-      RUNNERSCOUT_QUALIFY_AWS_SUBNET: ${{ inputs.aws_subnet_id }}
-      RUNNERSCOUT_QUALIFY_AWS_SECURITY_GROUP: ${{ inputs.aws_security_group_id }}
       RUNNERSCOUT_QUALIFY_AWS_AMI: ${{ inputs.aws_ami_id }}
       RUNNERSCOUT_QUALIFY_AWS_INSTANCE_TYPE: ${{ inputs.aws_instance_type }}
       RUNNERSCOUT_QUALIFY_AWS_ARCHITECTURE: ${{ inputs.aws_architecture }}
       # Azure
       RUNNERSCOUT_QUALIFY_AZURE_REGION: ${{ inputs.azure_region }}
       RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
-      RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP: ${{ inputs.azure_resource_group }}
-      # RUNNERSCOUT_QUALIFY_AZURE_VNET_ID is not a workflow_dispatch input
-      # (workflow_dispatch has a hard 25-input cap, already reached without
-      # it) - it is derived from azure_subnet_id's own /subnets/ prefix by
-      # the "[Azure] Validate pinned identifier shapes" step below and
-      # exported via GITHUB_ENV, since one is always fully reconstructible
-      # from the other.
-      RUNNERSCOUT_QUALIFY_AZURE_SUBNET_ID: ${{ inputs.azure_subnet_id }}
-      RUNNERSCOUT_QUALIFY_AZURE_NSG_ID: ${{ inputs.azure_nsg_id }}
       RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID: ${{ inputs.azure_image_id }}
       RUNNERSCOUT_QUALIFY_AZURE_VM_SIZE: ${{ inputs.azure_vm_size }}
       RUNNERSCOUT_QUALIFY_AZURE_ZONE: ${{ inputs.azure_availability_zone }}
@@ -298,8 +284,6 @@ jobs:
       RUNNERSCOUT_QUALIFY_GCP_PROJECT: ${{ inputs.gcp_project }}
       RUNNERSCOUT_QUALIFY_GCP_REGION: ${{ inputs.gcp_region }}
       RUNNERSCOUT_QUALIFY_GCP_ZONE: ${{ inputs.gcp_zone }}
-      RUNNERSCOUT_QUALIFY_GCP_NETWORK: ${{ inputs.gcp_network }}
-      RUNNERSCOUT_QUALIFY_GCP_SUBNETWORK: ${{ inputs.gcp_subnetwork }}
       RUNNERSCOUT_QUALIFY_GCP_IMAGE: ${{ inputs.gcp_image }}
       RUNNERSCOUT_QUALIFY_GCP_MACHINE_TYPE: ${{ inputs.gcp_machine_type }}
     steps:
@@ -312,8 +296,7 @@ jobs:
         # cloud credential is configured: an invalid confirmation phrase or
         # an out-of-bound runtime request must fail with zero cloud
         # interaction of any kind, not even a read-only one. Shared across
-        # all three providers - unchanged literal check from the original
-        # three workflows.
+        # all three providers.
         run: |
           set -euo pipefail
           expected='I-UNDERSTAND-THIS-COSTS-REAL-MONEY'
@@ -328,13 +311,14 @@ jobs:
             exit 1
           fi
 
-      - name: "[AWS] Validate pinned identifier shapes"
+      - name: "[AWS] Validate pinned compute inputs"
         if: matrix.provider == 'aws'
-        # Cheap, local, no AWS call: catches an obviously-wrong paste (e.g. a
-        # subnet id in the aws_vpc_id field), and enforces that every
-        # AWS-specific input is actually present - workflow_dispatch cannot
-        # make an input conditionally required on provider's value, so this
-        # step is where "required for AWS" is actually enforced.
+        # Cheap, local, no AWS call: enforces that every AWS-specific input
+        # is actually present - workflow_dispatch cannot make an input
+        # conditionally required on provider's value, so this step is
+        # where "required for AWS" is actually enforced. Network
+        # identifiers are no longer inputs here (see this workflow's own
+        # header comment) - only the compute shape stays pinned.
         run: |
           set -euo pipefail
           # "unset" is aws_architecture's own sentinel default (choice
@@ -342,33 +326,21 @@ jobs:
           # as genuinely empty.
           require() { [ -n "$2" ] && [ "$2" != "unset" ] || { echo "::error::$1 is required when provider is aws or all"; exit 1; }; }
           require aws_region "$RUNNERSCOUT_QUALIFY_AWS_REGION"
-          require aws_vpc_id "$RUNNERSCOUT_QUALIFY_AWS_VPC"
-          require aws_subnet_id "$RUNNERSCOUT_QUALIFY_AWS_SUBNET"
-          require aws_security_group_id "$RUNNERSCOUT_QUALIFY_AWS_SECURITY_GROUP"
           require aws_ami_id "$RUNNERSCOUT_QUALIFY_AWS_AMI"
           require aws_instance_type "$RUNNERSCOUT_QUALIFY_AWS_INSTANCE_TYPE"
           require aws_architecture "$RUNNERSCOUT_QUALIFY_AWS_ARCHITECTURE"
-          check() {
-            case "$2" in
-              "$3"*) ;;
-              *) echo "::error::$1 ('$2') does not look like a $3* id"; exit 1 ;;
-            esac
-          }
-          check aws_vpc_id "$RUNNERSCOUT_QUALIFY_AWS_VPC" vpc-
-          check aws_subnet_id "$RUNNERSCOUT_QUALIFY_AWS_SUBNET" subnet-
-          check aws_security_group_id "$RUNNERSCOUT_QUALIFY_AWS_SECURITY_GROUP" sg-
-          check aws_ami_id "$RUNNERSCOUT_QUALIFY_AWS_AMI" ami-
+          case "$RUNNERSCOUT_QUALIFY_AWS_AMI" in
+            ami-*) ;;
+            *) echo "::error::aws_ami_id ('$RUNNERSCOUT_QUALIFY_AWS_AMI') does not look like an ami-* id"; exit 1 ;;
+          esac
 
-      - name: "[Azure] Validate pinned identifier shapes"
+      - name: "[Azure] Validate pinned compute inputs"
         if: matrix.provider == 'azure'
-        # Cheap, local, no Azure call: catches an obviously-wrong paste
-        # before even resolving credentials, and enforces that every
-        # Azure-specific input is actually present (see the AWS step's own
-        # comment on why this is where "required for Azure" is enforced).
-        # Azure ARM resource IDs self-describe their own
-        # subscription/resource group/provider/type in their path.
-        env:
-          RUNNERSCOUT_QUALIFY_EXPECTED_SUBSCRIPTION_ID: ${{ vars.AZURE_QUALIFICATION_SUBSCRIPTION_ID }}
+        # Cheap, local, no Azure call: enforces that every Azure-specific
+        # input is actually present (see the AWS step's own comment on why
+        # this is where "required for Azure" is enforced). Network
+        # identifiers are no longer inputs here - only the compute shape
+        # (image/VM size/zone) stays pinned.
         run: |
           set -euo pipefail
           # "unset" is azure_availability_zone's own sentinel default
@@ -377,80 +349,41 @@ jobs:
           require() { [ -n "$2" ] && [ "$2" != "unset" ] || { echo "::error::$1 is required when provider is azure or all"; exit 1; }; }
           require azure_region "$RUNNERSCOUT_QUALIFY_AZURE_REGION"
           require azure_subscription_id "$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID"
-          require azure_resource_group "$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP"
-          require azure_subnet_id "$RUNNERSCOUT_QUALIFY_AZURE_SUBNET_ID"
-          require azure_nsg_id "$RUNNERSCOUT_QUALIFY_AZURE_NSG_ID"
           require azure_image_id "$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID"
           require azure_vm_size "$RUNNERSCOUT_QUALIFY_AZURE_VM_SIZE"
           require azure_availability_zone "$RUNNERSCOUT_QUALIFY_AZURE_ZONE"
-          lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
           if ! [[ "$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
             echo "::error::azure_subscription_id ('$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID') does not look like a subscription GUID"
             exit 1
           fi
-          # Mirrors the GCP step's own vars.GCP_QUALIFICATION_PROJECT_ID
-          # check: the federated identity is only ever trusted to act in one
-          # subscription, so requiring azure_subscription_id as its own
-          # input (rather than silently defaulting to the variable) keeps it
-          # an explicit, pinned, operator-supplied value per issue #3's
-          # "pinned images/networks" wording, while this check catches a
-          # pasted-wrong-subscription mistake before any credential is
-          # configured.
-          if [ -z "$RUNNERSCOUT_QUALIFY_EXPECTED_SUBSCRIPTION_ID" ]; then
-            echo "::error::vars.AZURE_QUALIFICATION_SUBSCRIPTION_ID is not set - this repository has no Azure qualification identity provisioned yet; see docs/qualification-real-cloud.md's Azure section for what an operator must provision first"
-            exit 1
-          fi
-          if [ "$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID" != "$RUNNERSCOUT_QUALIFY_EXPECTED_SUBSCRIPTION_ID" ]; then
-            echo "::error::azure_subscription_id ('$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID') does not match the provisioned qualification identity's subscription (vars.AZURE_QUALIFICATION_SUBSCRIPTION_ID) - refusing to proceed"
-            exit 1
-          fi
-          case "$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP" in
-            "" | */*) echo "::error::azure_resource_group ('$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP') must be a non-empty name with no '/'"; exit 1 ;;
+          lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+          prefix="$(lc "/subscriptions/$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID/resourcegroups/")"
+          case "$(lc "$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID")" in
+            "$prefix"*"/providers/microsoft.compute/images/"*) ;;
+            *) echo "::error::azure_image_id ('$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID') does not look like a Microsoft.Compute/images resource ID under subscription $RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID"; exit 1 ;;
           esac
-          check_arm_id() {
-            name="$1"; value="$2"; want_type="$3"
-            prefix="$(lc "/subscriptions/$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID/resourcegroups/$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP/providers/$want_type/")"
-            case "$(lc "$value")" in
-              "$prefix"*) ;;
-              *) echo "::error::$name ('$value') does not look like a $want_type resource ID under subscription $RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID, resource group $RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP"; exit 1 ;;
-            esac
-          }
-          check_arm_id azure_nsg_id "$RUNNERSCOUT_QUALIFY_AZURE_NSG_ID" "microsoft.network/networksecuritygroups"
-          check_arm_id azure_image_id "$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID" "microsoft.compute/images"
-          # azure_vnet_id is not its own input (see the job env comment
-          # above) - it is exactly azure_subnet_id's own path up to and
-          # excluding "/subnets/<name>", so derive it here rather than
-          # trusting a second, separately-pasted value that could
-          # structurally mismatch.
-          case "$RUNNERSCOUT_QUALIFY_AZURE_SUBNET_ID" in
-            */subnets/*) ;;
-            *) echo "::error::azure_subnet_id ('$RUNNERSCOUT_QUALIFY_AZURE_SUBNET_ID') does not contain '/subnets/' - cannot derive its parent VNet resource ID"; exit 1 ;;
-          esac
-          derived_vnet_id="${RUNNERSCOUT_QUALIFY_AZURE_SUBNET_ID%/subnets/*}"
-          check_arm_id azure_vnet_id "$derived_vnet_id" "microsoft.network/virtualnetworks"
-          echo "RUNNERSCOUT_QUALIFY_AZURE_VNET_ID=$derived_vnet_id" >> "$GITHUB_ENV"
 
-      - name: "[GCP] Validate pinned project against the provisioned qualification identity"
+      - name: "[GCP] Validate pinned compute inputs and project"
         if: matrix.provider == 'gcp'
-        # Cheap, local, no GCP call: the WIF service account is only ever
-        # trusted to act in one project. Requiring gcp_project as its own
-        # input (rather than silently defaulting to the variable) keeps it
-        # an explicit, pinned, operator-supplied value per issue #3's
-        # "pinned images/networks" wording, while this check catches a
-        # pasted-wrong-project mistake before any credential is configured.
-        # Also enforces that every GCP-specific input is actually present
-        # (see the AWS step's own comment on why this is where "required
-        # for GCP" is enforced).
+        # Cheap, local, no GCP call: both the qualification and
+        # network-provisioner WIF service accounts are only ever trusted to
+        # act in one project each - requiring gcp_project as its own input
+        # (rather than silently defaulting to a variable) keeps it an
+        # explicit, pinned, operator-supplied value, while this check
+        # catches a pasted-wrong-project mistake before any credential is
+        # configured. Also enforces that every GCP-specific compute input
+        # is actually present (see the AWS step's own comment on why this
+        # is where "required for GCP" is enforced). Network identifiers are
+        # no longer inputs here - only the compute shape stays pinned.
         env:
           RUNNERSCOUT_QUALIFY_EXPECTED_PROJECT: ${{ vars.GCP_QUALIFICATION_PROJECT_ID }}
+          RUNNERSCOUT_NETWORK_EXPECTED_PROJECT: ${{ vars.GCP_NETWORK_PROVISIONER_PROJECT_ID }}
         run: |
           set -euo pipefail
           require() { [ -n "$2" ] || { echo "::error::$1 is required when provider is gcp or all"; exit 1; }; }
           require gcp_project "$RUNNERSCOUT_QUALIFY_GCP_PROJECT"
           require gcp_region "$RUNNERSCOUT_QUALIFY_GCP_REGION"
           require gcp_zone "$RUNNERSCOUT_QUALIFY_GCP_ZONE"
-          require gcp_network "$RUNNERSCOUT_QUALIFY_GCP_NETWORK"
-          require gcp_subnetwork "$RUNNERSCOUT_QUALIFY_GCP_SUBNETWORK"
           require gcp_image "$RUNNERSCOUT_QUALIFY_GCP_IMAGE"
           require gcp_machine_type "$RUNNERSCOUT_QUALIFY_GCP_MACHINE_TYPE"
           if [ -z "$RUNNERSCOUT_QUALIFY_EXPECTED_PROJECT" ]; then
@@ -459,6 +392,14 @@ jobs:
           fi
           if [ "$RUNNERSCOUT_QUALIFY_GCP_PROJECT" != "$RUNNERSCOUT_QUALIFY_EXPECTED_PROJECT" ]; then
             echo "::error::gcp_project ('$RUNNERSCOUT_QUALIFY_GCP_PROJECT') does not match the provisioned qualification identity's project (vars.GCP_QUALIFICATION_PROJECT_ID) - refusing to proceed"
+            exit 1
+          fi
+          if [ -z "$RUNNERSCOUT_NETWORK_EXPECTED_PROJECT" ]; then
+            echo "::error::vars.GCP_NETWORK_PROVISIONER_PROJECT_ID is not set - this repository has no GCP network-provisioner identity provisioned yet; see docs/qualification-real-cloud.md's GCP section for what an operator must provision first"
+            exit 1
+          fi
+          if [ "$RUNNERSCOUT_QUALIFY_GCP_PROJECT" != "$RUNNERSCOUT_NETWORK_EXPECTED_PROJECT" ]; then
+            echo "::error::gcp_project ('$RUNNERSCOUT_QUALIFY_GCP_PROJECT') does not match the provisioned network-provisioner identity's project (vars.GCP_NETWORK_PROVISIONER_PROJECT_ID) - refusing to proceed"
             exit 1
           fi
 
@@ -473,13 +414,140 @@ jobs:
         with:
           go-version: ${{ steps.go.outputs.go-version }}
 
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.11.4"
+          tofu_wrapper: false
+
+      # --- Network provisioning (network-provisioner identity) ----------
+
+      - name: "[AWS] Confirm network-provisioner role is provisioned"
+        if: matrix.provider == 'aws'
+        env:
+          RUNNERSCOUT_NETWORK_AWS_ROLE_ARN: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_NETWORK_AWS_ROLE_ARN" ]; then
+            echo "::error::AWS_NETWORK_PROVISIONER_ROLE_ARN repository secret is not set - this repository has no AWS network-provisioner identity provisioned yet; see docs/qualification-real-cloud.md's AWS section for what to provision before dispatching this workflow"
+            exit 1
+          fi
+      - name: "[AWS] Authenticate network provisioner (OIDC role assumption)"
+        if: matrix.provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
+          role-session-name: runnerscout-network-provisioner-${{ github.run_id }}
+          aws-region: ${{ inputs.aws_region }}
+      - name: "[AWS] Provision qualification network (tofu apply)"
+        if: matrix.provider == 'aws'
+        working-directory: tools/tofu/qualify-network/aws
+        run: |
+          set -euo pipefail
+          tofu init -input=false
+          tofu apply -auto-approve -input=false -var region="$RUNNERSCOUT_QUALIFY_AWS_REGION"
+          {
+            echo "RUNNERSCOUT_QUALIFY_VPC=$(tofu output -raw vpc_id)"
+            echo "RUNNERSCOUT_QUALIFY_SUBNET=$(tofu output -raw subnet_id)"
+            echo "RUNNERSCOUT_QUALIFY_SECURITY_GROUP=$(tofu output -raw security_group_id)"
+            echo "RUNNERSCOUT_QUALIFY_ZONE=$(tofu output -raw availability_zone)"
+          } >> "$GITHUB_ENV"
+
+      - name: "[Azure] Confirm network-provisioner credentials are provisioned"
+        if: matrix.provider == 'azure'
+        env:
+          RUNNERSCOUT_NETWORK_AZURE_CLIENT_ID: ${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}
+          RUNNERSCOUT_NETWORK_AZURE_TENANT_ID: ${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}
+          RUNNERSCOUT_NETWORK_AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_NETWORK_AZURE_CLIENT_ID" ] || [ -z "$RUNNERSCOUT_NETWORK_AZURE_TENANT_ID" ] || [ -z "$RUNNERSCOUT_NETWORK_AZURE_SUBSCRIPTION_ID" ]; then
+            echo "::error::AZURE_NETWORK_PROVISIONER_CLIENT_ID, AZURE_NETWORK_PROVISIONER_TENANT_ID and AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID repository variables must all be set - see docs/qualification-real-cloud.md's Azure section for what to provision before dispatching this workflow"
+            exit 1
+          fi
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: matrix.provider == 'azure'
+        with:
+          client-id: ${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: false
+      - name: "[Azure] Export ARM_* environment for the azurerm OpenTofu provider"
+        if: matrix.provider == 'azure'
+        # The azurerm OpenTofu provider reads credentials from ARM_*
+        # environment variables (distinct from the AZURE_CLIENT_ID/
+        # AZURE_TENANT_ID/AZURE_FEDERATED_TOKEN_FILE the Go SDK's
+        # WorkloadIdentityCredential reads later in this same job for the
+        # qualification identity - no collision between the two). It
+        # auto-detects GitHub Actions OIDC (via the ambient
+        # ACTIONS_ID_TOKEN_REQUEST_* variables from the id-token: write
+        # permission above) once ARM_USE_OIDC and the three IDs below are
+        # present.
+        run: |
+          {
+            echo "ARM_CLIENT_ID=${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}"
+            echo "ARM_TENANT_ID=${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}"
+            echo "ARM_SUBSCRIPTION_ID=${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}"
+            echo "ARM_USE_OIDC=true"
+          } >> "$GITHUB_ENV"
+      - name: "[Azure] Provision qualification network (tofu apply)"
+        if: matrix.provider == 'azure'
+        working-directory: tools/tofu/qualify-network/azure
+        run: |
+          set -euo pipefail
+          tofu init -input=false
+          tofu apply -auto-approve -input=false -var location="$RUNNERSCOUT_QUALIFY_AZURE_REGION"
+          {
+            echo "RUNNERSCOUT_QUALIFY_RESOURCE_GROUP=$(tofu output -raw resource_group_name)"
+            echo "RUNNERSCOUT_QUALIFY_SUBNET_ID=$(tofu output -raw subnet_id)"
+            echo "RUNNERSCOUT_QUALIFY_NSG_ID=$(tofu output -raw nsg_id)"
+          } >> "$GITHUB_ENV"
+
+      - name: "[GCP] Confirm network-provisioner credentials are provisioned"
+        if: matrix.provider == 'gcp'
+        env:
+          RUNNERSCOUT_NETWORK_GCP_SA: ${{ vars.GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT }}
+          RUNNERSCOUT_NETWORK_GCP_WIP: ${{ vars.GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_NETWORK_GCP_SA" ] || [ -z "$RUNNERSCOUT_NETWORK_GCP_WIP" ]; then
+            echo "::error::GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT and GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER repository variables must both be set - see docs/qualification-real-cloud.md's GCP section for what to provision before dispatching this workflow"
+            exit 1
+          fi
+      - name: "[GCP] Authenticate network provisioner (Workload Identity Federation)"
+        if: matrix.provider == 'gcp'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ vars.GCP_NETWORK_PROVISIONER_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        if: matrix.provider == 'gcp'
+        with:
+          version: ">= 480.0.0"
+      - name: "[GCP] Provision qualification network (tofu apply)"
+        if: matrix.provider == 'gcp'
+        working-directory: tools/tofu/qualify-network/gcp
+        run: |
+          set -euo pipefail
+          tofu init -input=false
+          tofu apply -auto-approve -input=false -var project_id="$RUNNERSCOUT_QUALIFY_GCP_PROJECT" -var region="$RUNNERSCOUT_QUALIFY_GCP_REGION"
+          {
+            echo "RUNNERSCOUT_QUALIFY_NETWORK=$(tofu output -raw network_name)"
+            echo "RUNNERSCOUT_QUALIFY_SUBNETWORK=$(tofu output -raw subnetwork_name)"
+          } >> "$GITHUB_ENV"
+
+      # --- Qualification identity: launch/observe/delete the real VM ----
+
       - name: "[AWS] Determine credential mode"
         if: matrix.provider == 'aws'
         id: aws_credmode
         # OIDC-preferred: if the operator has set the AWS_QUALIFICATION_ROLE_ARN
         # repository secret, assume that role via OIDC. Otherwise fall back
         # to the static-key secrets. Exactly one of the two
-        # configure-aws-credentials steps below runs.
+        # configure-aws-credentials steps below runs. This overwrites the
+        # network-provisioner AWS session established above - both cannot
+        # be active at once, and the network apply already completed.
         env:
           RUNNERSCOUT_QUALIFY_ROLE_ARN: ${{ secrets.AWS_QUALIFICATION_ROLE_ARN }}
         run: |
@@ -502,11 +570,14 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_QUALIFICATION_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_QUALIFICATION_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
-
-      - name: "[AWS] Resolve account identity and cross-validate pinned network identifiers"
+      - name: "[AWS] Resolve account identity"
         if: matrix.provider == 'aws'
-        # All read-only DescribeX/GetCallerIdentity calls - no resource is
-        # created by this step.
+        # Read-only GetCallerIdentity call. No cross-validation of network
+        # identifiers is needed here anymore - the network was just
+        # created by the tofu apply step above, in this same job, so its
+        # subnet/security-group/VPC relationship is structurally
+        # guaranteed correct rather than something a pasted-in identifier
+        # could get wrong.
         run: |
           set -euo pipefail
           account_id="$(aws sts get-caller-identity --query Account --output text)"
@@ -514,27 +585,12 @@ jobs:
             echo "::error::unexpected AWS account id shape from STS: '$account_id'"
             exit 1
           fi
-          subnet_vpc="$(aws ec2 describe-subnets --region "$RUNNERSCOUT_QUALIFY_AWS_REGION" --subnet-ids "$RUNNERSCOUT_QUALIFY_AWS_SUBNET" --query 'Subnets[0].VpcId' --output text)"
-          zone="$(aws ec2 describe-subnets --region "$RUNNERSCOUT_QUALIFY_AWS_REGION" --subnet-ids "$RUNNERSCOUT_QUALIFY_AWS_SUBNET" --query 'Subnets[0].AvailabilityZone' --output text)"
-          sg_vpc="$(aws ec2 describe-security-groups --region "$RUNNERSCOUT_QUALIFY_AWS_REGION" --group-ids "$RUNNERSCOUT_QUALIFY_AWS_SECURITY_GROUP" --query 'SecurityGroups[0].VpcId' --output text)"
-          if [ "$subnet_vpc" != "$RUNNERSCOUT_QUALIFY_AWS_VPC" ] || [ "$sg_vpc" != "$RUNNERSCOUT_QUALIFY_AWS_VPC" ]; then
-            echo "::error::subnet $RUNNERSCOUT_QUALIFY_AWS_SUBNET (vpc $subnet_vpc) and/or security group $RUNNERSCOUT_QUALIFY_AWS_SECURITY_GROUP (vpc $sg_vpc) do not both belong to the pinned aws_vpc_id $RUNNERSCOUT_QUALIFY_AWS_VPC - refusing to proceed"
-            exit 1
-          fi
-          # Unprefixed names: these are exactly what
-          # internal/provider/aws_realcloud_test.go's loadQualifyAWSEnv
-          # reads via os.Getenv, matching the original qualify-aws.yml.
-          {
-            echo "RUNNERSCOUT_QUALIFY_ACCOUNT_ID=$account_id"
-            echo "RUNNERSCOUT_QUALIFY_ZONE=$zone"
-          } >> "$GITHUB_ENV"
+          # Unprefixed: exactly what internal/provider/aws_realcloud_test.go's
+          # loadQualifyAWSEnv reads via os.Getenv.
+          echo "RUNNERSCOUT_QUALIFY_ACCOUNT_ID=$account_id" >> "$GITHUB_ENV"
 
-      - name: "[Azure] Confirm OIDC credentials are provisioned"
+      - name: "[Azure] Confirm qualification OIDC credentials are provisioned"
         if: matrix.provider == 'azure'
-        # Explicit, clear failure before any Azure interaction - Azure
-        # Workload Identity Federation is the ONLY supported credential path
-        # here, so there is no fallback branch to fall through to the way
-        # AWS has one.
         env:
           RUNNERSCOUT_QUALIFY_AZURE_CLIENT_ID: ${{ vars.AZURE_QUALIFICATION_CLIENT_ID }}
           RUNNERSCOUT_QUALIFY_AZURE_TENANT_ID: ${{ vars.AZURE_QUALIFICATION_TENANT_ID }}
@@ -544,19 +600,24 @@ jobs:
             echo "::error::AZURE_QUALIFICATION_CLIENT_ID and AZURE_QUALIFICATION_TENANT_ID repository variables must both be set - see docs/qualification-real-cloud.md's Azure section for what to provision (an Azure AD app registration with a federated credential trusting this repository's GitHub Actions OIDC issuer) before dispatching this workflow"
             exit 1
           fi
-
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         if: matrix.provider == 'azure'
+        # Overwrites the network-provisioner `az` CLI session established
+        # above - both cannot be active at once, and the network apply
+        # already completed. ARM_* env vars from the network-provisioner
+        # phase are left in place but unused from here on (the azurerm
+        # OpenTofu provider isn't invoked again until teardown, which
+        # re-authenticates as network-provisioner again first).
         with:
           client-id: ${{ vars.AZURE_QUALIFICATION_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_QUALIFICATION_TENANT_ID }}
           subscription-id: ${{ inputs.azure_subscription_id }}
           allow-no-subscriptions: false
-
-      - name: "[Azure] Resolve subscription identity and cross-validate pinned network identifiers"
+      - name: "[Azure] Resolve subscription identity"
         if: matrix.provider == 'azure'
-        # All read-only `az resource show`/`az account show` calls - no
-        # resource is created by this step.
+        # Read-only `az account show` call. No cross-validation of network
+        # identifiers is needed here anymore - the network was just
+        # created by the tofu apply step above, in this same job.
         run: |
           set -euo pipefail
           account_id="$(az account show --query id -o tsv)"
@@ -564,14 +625,6 @@ jobs:
             echo "::error::az login resolved subscription '$account_id', expected '$RUNNERSCOUT_QUALIFY_AZURE_SUBSCRIPTION_ID'"
             exit 1
           fi
-          for id in "$RUNNERSCOUT_QUALIFY_AZURE_VNET_ID" "$RUNNERSCOUT_QUALIFY_AZURE_SUBNET_ID" "$RUNNERSCOUT_QUALIFY_AZURE_NSG_ID" "$RUNNERSCOUT_QUALIFY_AZURE_IMAGE_ID"; do
-            rg="$(az resource show --ids "$id" --query resourceGroup -o tsv)"
-            if [ "$(printf '%s' "$rg" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP" | tr '[:upper:]' '[:lower:]')" ]; then
-              echo "::error::resource '$id' belongs to resource group '$rg', not the pinned azure_resource_group '$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP' - refusing to proceed"
-              exit 1
-            fi
-          done
-
       - name: "[Azure] Fetch GitHub OIDC token for the Go test's Workload Identity Federation"
         if: matrix.provider == 'azure'
         # Independent of azure/login above: that action only authenticates
@@ -606,8 +659,11 @@ jobs:
           RUNNERSCOUT_QUALIFY_AZURE_CLIENT_ID: ${{ vars.AZURE_QUALIFICATION_CLIENT_ID }}
           RUNNERSCOUT_QUALIFY_AZURE_TENANT_ID: ${{ vars.AZURE_QUALIFICATION_TENANT_ID }}
 
-      - name: "[GCP] Authenticate (Workload Identity Federation)"
+      - name: "[GCP] Authenticate qualification identity (Workload Identity Federation)"
         if: matrix.provider == 'gcp'
+        # Overwrites GOOGLE_APPLICATION_CREDENTIALS from the
+        # network-provisioner phase above - both cannot be active at once,
+        # and the network apply already completed.
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           project_id: ${{ vars.GCP_QUALIFICATION_PROJECT_ID }}
@@ -619,25 +675,19 @@ jobs:
           # environment shape internal/provider/gcp_credentials.go's
           # gcpCredential already reads from a nil environment map.
 
-      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: "[GCP] Cross-validate pinned zone/image against the project"
         if: matrix.provider == 'gcp'
-        with:
-          version: ">= 480.0.0"
-
-      - name: "[GCP] Cross-validate pinned network identifiers and image"
-        if: matrix.provider == 'gcp'
-        # All read-only `gcloud ... describe` calls - no resource is created
-        # by this step.
+        # Read-only `gcloud compute zones describe`/`images describe` calls.
+        # No network-identifier cross-validation is needed here anymore -
+        # the network was just created by the tofu apply step above, in
+        # this same job. The zone-belongs-to-region check is unrelated to
+        # that (gcp_zone/gcp_region are still real, independent operator
+        # inputs, never derived from the network) and stays.
         run: |
           set -euo pipefail
           zone_region="$(gcloud compute zones describe "$RUNNERSCOUT_QUALIFY_GCP_ZONE" --project "$RUNNERSCOUT_QUALIFY_GCP_PROJECT" --format='value(region.basename())')"
           if [ "$zone_region" != "$RUNNERSCOUT_QUALIFY_GCP_REGION" ]; then
             echo "::error::gcp_zone '$RUNNERSCOUT_QUALIFY_GCP_ZONE' belongs to region '$zone_region', not the pinned gcp_region '$RUNNERSCOUT_QUALIFY_GCP_REGION' - refusing to proceed"
-            exit 1
-          fi
-          subnet_network="$(gcloud compute networks subnets describe "$RUNNERSCOUT_QUALIFY_GCP_SUBNETWORK" --project "$RUNNERSCOUT_QUALIFY_GCP_PROJECT" --region "$RUNNERSCOUT_QUALIFY_GCP_REGION" --format='value(network.basename())')"
-          if [ "$subnet_network" != "$RUNNERSCOUT_QUALIFY_GCP_NETWORK" ]; then
-            echo "::error::gcp_subnetwork '$RUNNERSCOUT_QUALIFY_GCP_SUBNETWORK' (region $RUNNERSCOUT_QUALIFY_GCP_REGION) belongs to network '$subnet_network', not the pinned gcp_network '$RUNNERSCOUT_QUALIFY_GCP_NETWORK' - refusing to proceed"
             exit 1
           fi
           if ! gcloud compute images describe "$RUNNERSCOUT_QUALIFY_GCP_IMAGE" --project "$RUNNERSCOUT_QUALIFY_GCP_PROJECT" >/dev/null 2>&1; then
@@ -652,7 +702,8 @@ jobs:
         # larger than the create/observe/price budget above: that file's own
         # teardown runs on a separate, fixed 5-minute deadline that must not
         # be preempted by go test's own timeout while cleanup is still in
-        # progress.
+        # progress. RUNNERSCOUT_QUALIFY_VPC/SUBNET/SECURITY_GROUP/ZONE are
+        # already set via GITHUB_ENV from the network apply step above.
         run: |
           # 10#... forces base-10 arithmetic regardless of leading zeros in
           # the input (bash's $(( )) otherwise treats a leading 0 as octal).
@@ -661,16 +712,15 @@ jobs:
             ./internal/provider/
         env:
           RUNNERSCOUT_QUALIFY_REGION: ${{ inputs.aws_region }}
-          RUNNERSCOUT_QUALIFY_VPC: ${{ inputs.aws_vpc_id }}
           RUNNERSCOUT_QUALIFY_AMI: ${{ inputs.aws_ami_id }}
-          RUNNERSCOUT_QUALIFY_SUBNET: ${{ inputs.aws_subnet_id }}
-          RUNNERSCOUT_QUALIFY_SECURITY_GROUP: ${{ inputs.aws_security_group_id }}
           RUNNERSCOUT_QUALIFY_INSTANCE_TYPE: ${{ inputs.aws_instance_type }}
           RUNNERSCOUT_QUALIFY_ARCHITECTURE: ${{ inputs.aws_architecture }}
 
       - name: "[Azure] Real-provider qualification (creates ONE real billed Spot VM)"
         if: matrix.provider == 'azure'
         # -tags realcloud selects internal/provider/azure_realcloud_test.go.
+        # RUNNERSCOUT_QUALIFY_RESOURCE_GROUP/SUBNET_ID/NSG_ID are already
+        # set via GITHUB_ENV from the network apply step above.
         run: |
           go test -tags realcloud -run '^TestQualifyRealAzureSpotLifecycle$' -v -count=1 \
             -timeout "$((10#$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES + 10))m" \
@@ -678,12 +728,6 @@ jobs:
         env:
           RUNNERSCOUT_QUALIFY_REGION: ${{ inputs.azure_region }}
           RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
-          RUNNERSCOUT_QUALIFY_RESOURCE_GROUP: ${{ inputs.azure_resource_group }}
-          # No RUNNERSCOUT_QUALIFY_VNET_ID here: azure_realcloud_test.go
-          # never reads it (only RUNNERSCOUT_QUALIFY_SUBNET_ID) - it was
-          # unused dead plumbing even in the original qualify-azure.yml.
-          RUNNERSCOUT_QUALIFY_SUBNET_ID: ${{ inputs.azure_subnet_id }}
-          RUNNERSCOUT_QUALIFY_NSG_ID: ${{ inputs.azure_nsg_id }}
           RUNNERSCOUT_QUALIFY_IMAGE_ID: ${{ inputs.azure_image_id }}
           RUNNERSCOUT_QUALIFY_VM_SIZE: ${{ inputs.azure_vm_size }}
           RUNNERSCOUT_QUALIFY_ZONE: ${{ inputs.azure_availability_zone }}
@@ -692,7 +736,8 @@ jobs:
         if: matrix.provider == 'gcp'
         # -tags realcloud selects internal/provider/gcp_realcloud_test.go,
         # living alongside, not replacing, aws_realcloud_test.go/
-        # azure_realcloud_test.go.
+        # azure_realcloud_test.go. RUNNERSCOUT_QUALIFY_NETWORK/SUBNETWORK
+        # are already set via GITHUB_ENV from the network apply step above.
         run: |
           go test -tags realcloud -run '^TestQualifyRealGCPSpotLifecycle$' -v -count=1 \
             -timeout "$((10#$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES + 10))m" \
@@ -701,8 +746,6 @@ jobs:
           RUNNERSCOUT_QUALIFY_PROJECT: ${{ inputs.gcp_project }}
           RUNNERSCOUT_QUALIFY_REGION: ${{ inputs.gcp_region }}
           RUNNERSCOUT_QUALIFY_ZONE: ${{ inputs.gcp_zone }}
-          RUNNERSCOUT_QUALIFY_NETWORK: ${{ inputs.gcp_network }}
-          RUNNERSCOUT_QUALIFY_SUBNETWORK: ${{ inputs.gcp_subnetwork }}
           RUNNERSCOUT_QUALIFY_IMAGE: ${{ inputs.gcp_image }}
           RUNNERSCOUT_QUALIFY_MACHINE_TYPE: ${{ inputs.gcp_machine_type }}
 
@@ -719,7 +762,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: "[AWS] Independent post-run cleanup safety net"
+      # --- Teardown: VM-level first, then the network it sat in ---------
+
+      - name: "[AWS] Independent post-run cleanup safety net (VM-level)"
         if: always() && matrix.provider == 'aws'
         # THE authoritative teardown guarantee: runs via if: always(), so it
         # executes even if the step above was killed by the job timeout or
@@ -728,7 +773,10 @@ jobs:
         # everything it needs from job env/inputs directly (never from a
         # prior step's output), so it works even when every earlier step
         # failed or was skipped - including the case where credentials were
-        # never configured, handled by the guard below.
+        # never configured, handled by the guard below. Runs under whatever
+        # AWS credentials are currently active (the qualification identity,
+        # if its own steps ran) - VM-level resources must be gone before
+        # the network-level teardown below can succeed.
         run: |
           set -euo pipefail
           if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
@@ -777,19 +825,50 @@ jobs:
           fi
           echo "Independent inventory confirms zero leftover billable resources for allocation $allocation."
 
-      - name: "[Azure] Independent post-run cleanup safety net"
+      - name: "[AWS] Destroy qualification network (tofu destroy)"
+        if: always() && matrix.provider == 'aws'
+        # Re-authenticates as the network-provisioner identity - the
+        # qualification identity used just above has no permission to
+        # delete VPC/subnet/NAT Gateway/security-group resources by design.
+        # Runs via if: always() so the network is torn down even if an
+        # earlier step failed - OpenTofu's local state (written
+        # incrementally during apply, never left this job's filesystem)
+        # still reflects whatever was actually created, so this correctly
+        # tears down a partial apply too.
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
+          role-session-name: runnerscout-network-provisioner-destroy-${{ github.run_id }}
+          aws-region: ${{ inputs.aws_region }}
+      - name: "[AWS] tofu destroy"
+        if: always() && matrix.provider == 'aws'
+        working-directory: tools/tofu/qualify-network/aws
+        run: |
+          set -euo pipefail
+          if [ ! -f terraform.tfstate ]; then
+            echo "No OpenTofu state file present (apply never ran or never created anything) - nothing to destroy."
+            exit 0
+          fi
+          tofu destroy -auto-approve -input=false -var region="$RUNNERSCOUT_QUALIFY_AWS_REGION"
+
+      - name: "[Azure] Independent post-run cleanup safety net (VM-level)"
         if: always() && matrix.provider == 'azure'
-        # Reuses the `az` CLI session azure/login already established
-        # earlier in this same job (that login persists for the whole job,
-        # not just its own step) rather than re-deriving Go SDK credentials.
+        # Reuses the `az` CLI session the qualification azure/login step
+        # already established earlier in this same job (that login
+        # persists for the whole job, not just its own step) rather than
+        # re-deriving Go SDK credentials.
         run: |
           set -euo pipefail
           if ! az account show >/dev/null 2>&1; then
             echo "Azure credentials were never configured this run - nothing to independently verify or clean up."
             exit 0
           fi
-          rg="$RUNNERSCOUT_QUALIFY_AZURE_RESOURCE_GROUP"
           alloc="$RUNNERSCOUT_QUALIFY_ALLOCATION_ID"
+          rg="$RUNNERSCOUT_QUALIFY_RESOURCE_GROUP"
+          if [ -z "$rg" ]; then
+            echo "Qualification network was never provisioned this run (no resource group recorded) - nothing to independently verify or clean up."
+            exit 0
+          fi
           echo "Independent post-run inventory sweep for allocation $alloc in resource group $rg"
           leftover_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --query '[].id' -o tsv)"
           if [ -z "$leftover_ids" ]; then
@@ -807,7 +886,44 @@ jobs:
           echo "::error::the qualification job's own cleanup left billable resources behind; this safety net has force-cleaned them, but this indicates a real bug in the create/observe/delete path above and must not be treated as a normal outcome"
           exit 1
 
-      - name: "[GCP] Independent post-run cleanup safety net"
+      - name: "[Azure] Re-authenticate network provisioner for teardown"
+        if: always() && matrix.provider == 'azure'
+        # Overwrites the qualification `az` CLI session and ARM_* env -
+        # the qualification identity used just above has no permission to
+        # delete resource-group/VNet/subnet/NSG resources by design. Runs
+        # via if: always() so the network is torn down even if an earlier
+        # step failed.
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: false
+      - name: "[Azure] Re-export ARM_* environment for teardown"
+        if: always() && matrix.provider == 'azure'
+        run: |
+          {
+            echo "ARM_CLIENT_ID=${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}"
+            echo "ARM_TENANT_ID=${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}"
+            echo "ARM_SUBSCRIPTION_ID=${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}"
+            echo "ARM_USE_OIDC=true"
+          } >> "$GITHUB_ENV"
+      - name: "[Azure] Destroy qualification network (tofu destroy)"
+        if: always() && matrix.provider == 'azure'
+        # OpenTofu's local state (written incrementally during apply,
+        # never left this job's filesystem) still reflects whatever was
+        # actually created, so this correctly tears down a partial apply
+        # too.
+        working-directory: tools/tofu/qualify-network/azure
+        run: |
+          set -euo pipefail
+          if [ ! -f terraform.tfstate ]; then
+            echo "No OpenTofu state file present (apply never ran or never created anything) - nothing to destroy."
+            exit 0
+          fi
+          tofu destroy -auto-approve -input=false -var location="$RUNNERSCOUT_QUALIFY_AZURE_REGION"
+
+      - name: "[GCP] Independent post-run cleanup safety net (VM-level)"
         if: always() && matrix.provider == 'gcp'
         run: |
           set -euo pipefail
@@ -854,3 +970,29 @@ jobs:
             exit 1
           fi
           echo "Independent inventory confirms zero leftover billable resources for allocation $allocation."
+
+      - name: "[GCP] Re-authenticate network provisioner for teardown"
+        if: always() && matrix.provider == 'gcp'
+        # Overwrites GOOGLE_APPLICATION_CREDENTIALS from the qualification
+        # phase above - the qualification identity has no permission to
+        # delete network/subnetwork/firewall resources by design. Runs via
+        # if: always() so the network is torn down even if an earlier step
+        # failed.
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ vars.GCP_NETWORK_PROVISIONER_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT }}
+      - name: "[GCP] Destroy qualification network (tofu destroy)"
+        if: always() && matrix.provider == 'gcp'
+        # OpenTofu's local state (written incrementally during apply, never
+        # left this job's filesystem) still reflects whatever was actually
+        # created, so this correctly tears down a partial apply too.
+        working-directory: tools/tofu/qualify-network/gcp
+        run: |
+          set -euo pipefail
+          if [ ! -f terraform.tfstate ]; then
+            echo "No OpenTofu state file present (apply never ran or never created anything) - nothing to destroy."
+            exit 0
+          fi
+          tofu destroy -auto-approve -input=false -var project_id="$RUNNERSCOUT_QUALIFY_GCP_PROJECT" -var region="$RUNNERSCOUT_QUALIFY_GCP_REGION"
