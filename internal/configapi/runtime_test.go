@@ -75,6 +75,7 @@ func TestNewWorkerLeavesAWSPricesNilWhenDisabled(t *testing.T) {
 func TestNewWorkerAlwaysWiresNetworkPeers(t *testing.T) {
 	cfg := awsPriceRefreshConfig(false, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
 	cfg.NetworkProfile = "mesh"
+	cfg.NetworkOverlayCIDRs = []string{"10.90.0.0/24"}
 	r := &Runtime{Client: fake.NewClientset()}
 	credentials := Credentials{Providers: map[string]map[string]string{"aws": {"AWS_ACCESS_KEY_ID": "fixture-id", "AWS_SECRET_ACCESS_KEY": "fixture-secret"}}}
 	worker, cleanup, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {})

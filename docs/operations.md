@@ -137,7 +137,13 @@ exactly one network mapping". Each mapping's `providerRef`, `region`,
 `networkID`, `subnetID` and `cidrs` follow the same requirements `separate`
 mode already imposes on them (see `api/v1alpha1/types.go`'s `NetworkMapping`
 type and `examples/multicloud/network.yaml`/README.md for a worked `separate`
-example). `spec.allowedServices` has no meaning in `wireguard` mode and is
+example). In `wireguard` mode, that same mapping's `cidrs` also double as the
+overlay address pool every allocation on this `NetworkProfile` draws its
+WireGuard tunnel address from — see
+[networking-peer-model.md](networking-peer-model.md)'s "5. Overlay address
+allocation" section for exactly how an address is picked, how collisions
+with other active allocations are avoided, and what happens when the pool is
+full. `spec.allowedServices` has no meaning in `wireguard` mode and is
 rejected if set. The optional `spec.enrollmentRef` names a Secret holding an
 operator-supplied WireGuard pre-shared key; it is validated like every other
 Secret reference in this codebase and is defense-in-depth only, never a trust
@@ -159,28 +165,25 @@ not something this repository installs automatically. The binary also
 accepts `-poll-interval`, which defaults to 30 seconds.
 
 The controller needs no additional configuration to serve wireguard mode's
-existing configuration surface (see "Known limitations" below for what does
-not work yet). The WireGuard peer-poll endpoint and the `NetworkPeers` hook
+existing configuration surface (see "Known limitations" below for what still
+does not work). The WireGuard peer-poll endpoint and the `NetworkPeers` hook
 it depends on are wired unconditionally at startup, for both the CRD-driven
 and mounted-config entry points; no new Helm chart value, flag, environment
 variable or Secret name exists for this mode. It costs nothing extra when
 no `NetworkProfile` uses `wireguard` mode.
 
-Known limitations: no code path assigns
-`lifecycle.Allocation.WireGuardOverlayAddress` today, so a real
-wireguard-mode allocation's cloud-init payload carries an empty overlay
-address, which `runnerscout-wireguard-agent`'s `LoadPayload` refuses to
-load — even with `examples/wireguard-agent/`'s reference boot integration
-installed and running, wireguard mode is not yet functionally usable
-end-to-end. Only its configuration surface (CRD gate, poll endpoint,
-per-allocation keys) and now its boot-time integration reference are in
-place; the VM-side agent itself cannot successfully start until overlay IP
-address allocation is implemented. That allocation is tracked in
-[#16](https://github.com/tsouza/runnerscout/issues/16) as a design decision
-(CIDR pool source, exhaustion handling, persistence), not yet made. A
-wireguard-mode `NetworkProfile` also supports exactly one `NetworkMapping`
-— a single directly-routable subnet. Cross-region or cross-provider
-WireGuard peering is not supported. On GCP, capturing a VM's
+`internal/operator.HandleDesiredRunnerCount` assigns every new wireguard-mode
+allocation a `lifecycle.Allocation.WireGuardOverlayAddress` from its
+`NetworkProfile`'s CIDR pool at the same point it sets `NetworkProfile`
+itself, so a real wireguard-mode allocation's cloud-init payload now carries
+a real, unique overlay address — `runnerscout-wireguard-agent`'s
+`LoadPayload` no longer refuses to load it for that reason. Combined with
+`examples/wireguard-agent/`'s reference boot integration, wireguard mode is
+now functionally usable end-to-end.
+
+Known limitations: a wireguard-mode `NetworkProfile` supports exactly one
+`NetworkMapping` — a single directly-routable subnet. Cross-region or
+cross-provider WireGuard peering is not supported. On GCP, capturing a VM's
 WireGuard endpoint costs one additional API call per VM creation when
 wireguard mode is used; AWS and Azure capture it from data their create
 paths already fetch, at no extra cost. The VM-side peer-poll endpoint has
@@ -188,7 +191,11 @@ no rate limiting: it is read-only, costs one Load per request (and, only
 after a successful auth, one List), and its response size is bounded by
 the real number of allocations in one `NetworkProfile`, never by anything
 an unauthenticated caller controls; a compromised VM polling far faster
-than its intended interval is the accepted residual risk.
+than its intended interval is the accepted residual risk. Changing a
+`NetworkMapping`'s `cidrs` after allocations already exist against it is not
+reconciled: an already-checkpointed `WireGuardOverlayAddress` is never
+re-validated against a changed pool, matching how this codebase already
+treats every other `NetworkMapping` field.
 
 A minimal wireguard-mode `NetworkProfile`, with one mapping and no
 `enrollmentRef`:
