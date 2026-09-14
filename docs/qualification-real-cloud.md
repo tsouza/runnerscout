@@ -582,13 +582,21 @@ project/region/zone: `compute.zones.get`, `compute.images.get`,
 `compute.disks.list`, `compute.addresses.list`, `compute.zoneOperations.get`,
 `compute.zoneOperations.list`; `compute.instances.create`,
 `compute.instances.delete`, `compute.disks.create`, `compute.disks.delete`,
-`compute.subnetworks.use`. Labels are set as part of the `instances.create`/
-`disks.create` insert calls themselves (`gcp_sdk.go`'s `createGCP`), never
-via a separate `setLabels` call, so no `compute.instances.setLabels`/
-`compute.disks.setLabels` is needed. No project-creation, IAM, VPC-creation
-or billing permissions are needed — this identity only ever launches into a
-network/subnetwork a *separate* identity created (see "Network
-provisioning" below), never creating or modifying the network itself.
+`compute.instances.setLabels`, `compute.disks.setLabels`,
+`compute.subnetworks.use`. `compute.instances.setLabels`/
+`compute.disks.setLabels` are both needed even though `gcp_sdk.go`'s
+`createGCP` never calls a distinct `setLabels` API method - it sets labels
+as part of the `instances.create`/`disks.create` insert calls themselves,
+but GCE's own IAM checks still gate that on the `setLabels` permission
+(confirmed by an actual real-cloud dispatch: `compute.disks.setLabels` was
+missing and the create failed with a live "Required
+'compute.disks.setLabels' permission" error - see
+[qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
+"What real dispatches found" section). No project-creation, IAM,
+VPC-creation or billing permissions are needed — this identity only ever
+launches into a network/subnetwork a *separate* identity created (see
+"Network provisioning" below), never creating or modifying the network
+itself.
 
 ### Network provisioning (issue #89)
 

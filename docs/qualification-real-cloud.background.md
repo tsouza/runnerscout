@@ -634,6 +634,156 @@ pinned private subnet, for the WireGuard peer network — so none is ever
 expected here; the sweep exists as a defensive, always-run assertion of
 that fact, not because one has ever appeared).
 
+## What real dispatches found
+
+Every design decision above was reasoned through and reviewed without ever
+running this workflow for real - issue #3's own qualification purpose is
+precisely to find what that kind of review cannot. The first real
+dispatches against all three clouds (2026-09-14, after issue #89 folded
+network provisioning into this same workflow) found several real bugs,
+none caught by any prior review. Two separate, unrelated identity issues
+also blocked the very first attempt at each of these dispatches
+(pre-existing, not workflow bugs): this repository has GitHub's
+"immutable subject claims" org policy enforced, so the actual presented
+OIDC `sub` claim is `repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:...`,
+not the plain `repo:<owner>/<repo>:ref:...` every AWS/Azure identity had
+originally been provisioned with - fixed by updating each federated
+credential's/IAM role's trust condition to the immutable form, for both
+the qualification and network-provisioner identity on both clouds (GCP's
+WIF attribute mapping was unaffected - it does not do raw `sub`-string
+matching). With that fixed, dispatches actually reached this workflow's
+own logic, surfacing the bugs below:
+
+- **A GCP test bug, not a production bug** (fixed separately - see that
+  fix's own PR/commit for the full diagnosis): `TestQualifyRealGCPSpotLifecycle`
+  called `p.Observe` on a virgin allocation ID as a pre-create sanity
+  check, which always failed - `observeGCP` unconditionally requires
+  evidence of an already-committed create operation, a precondition that
+  is correct for how the real controller actually calls `Observe` (only
+  ever after a create has already been attempted) but makes it unusable as
+  a "does this ID already have leftover resources" check before one.
+- **A real Azure CLI incompatibility**: the VM-level safety-net step's `az
+  resource list --resource-group "$rg" --tag runnerscout-operation="$alloc"`
+  calls error outright - `az resource list` does not accept `--resource-group`
+  and `--tag` together. This had never been hit before because every
+  earlier dispatch attempt failed even earlier in the job (the OIDC
+  subject mismatch above, on the very first attempt) - this specific step
+  had simply never run yet. Fixed by moving the tag match into the
+  `--query` JMESPath expression instead of the server-side `--tag` filter.
+- **Two real AWS IAM gaps, found across successive re-dispatches**: the
+  network-provisioner policy was first missing `ec2:DescribeVpcAttribute`,
+  needed for `aws_vpc`'s own `enable_dns_hostnames` reconciliation - `tofu
+  apply` failed partway through creating the VPC itself (leaving one
+  orphaned, free VPC with no subnet/NAT Gateway/route table ever created
+  after it - manually verified and cleaned up directly, zero ongoing
+  cost), and the equivalent `tofu destroy` failed the same way. With that
+  fixed, the next dispatch got further - creating the VPC, subnets and an
+  Elastic IP - before failing on the *second* gap:
+  `ec2:DescribeAddressesAttribute`, needed for `aws_eip`'s own domain-
+  attribute reconciliation (the same "Terraform reads back an attribute
+  after creating the resource, and that read needs its own permission"
+  shape as the VPC gap, and as GCP's `setLabels`/`setMetadata`/
+  `setScheduling` gaps below). This one briefly left a real, billable,
+  unassociated Elastic IP (AWS charges for an idle EIP) plus an orphaned
+  VPC/subnet pair/internet gateway/security group - manually verified and
+  released/deleted directly within minutes of the failure, so real cost
+  was negligible (a fraction of an hour's idle-EIP rate). Both gaps were
+  fixed by adding the missing permissions to the live role.
+- **A stale-credential bug in the AWS VM-level safety-net step**,
+  surfaced by the AWS IAM gap above: when a network `tofu apply` failure
+  causes every qualification-identity credential step after it to be
+  correctly skipped (implicit `success()` gating), `AWS_ACCESS_KEY_ID` is
+  left set to whatever the NETWORK-PROVISIONER identity's credentials
+  were, since nothing overwrote them. The AWS VM-level safety-net step
+  originally checked only "is `AWS_ACCESS_KEY_ID` non-empty" to decide
+  whether qualification credentials were ever configured - true here, just
+  for the wrong identity - so it ran anyway and failed with
+  `UnauthorizedOperation` trying to call `ec2:DescribeInstances` with a
+  role that was never granted that permission, instead of cleanly
+  recognizing "the qualification phase never got this far." Fixed by
+  checking `RUNNERSCOUT_QUALIFY_ACCOUNT_ID` instead - an env var set only
+  by a step gated behind the qualification identity's own auth having
+  actually succeeded, not by the mere presence of *some* AWS credential in
+  the job environment. GCP's VM-level safety-net step has the exact same
+  shape (`GOOGLE_APPLICATION_CREDENTIALS` would suffer the identical
+  problem) and was fixed the same way as a preventative measure (a new
+  `RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED` marker) even though no real GCP
+  dispatch has actually triggered this specific failure yet - GCP's
+  network apply has, so far, either succeeded or failed for reasons
+  unrelated to IAM (see below), never yet leaving qualification
+  credentials unconfigured while `GOOGLE_APPLICATION_CREDENTIALS` stayed
+  set to the network-provisioner's file. Azure's equivalent safety-net
+  step never had this bug at all: it checks `az account show` succeeding,
+  a live call against whichever identity is *currently* active, not a
+  static env-var presence check.
+- **A second and third real GCP IAM gap**, found across the next two
+  dispatches after the pre-create test bug was fixed: `gcp_sdk.go`'s
+  `createGCP` sets labels, metadata (the startup-script) and Spot
+  scheduling as part of the `instances.create`/`disks.create` insert calls
+  themselves, never via distinct `setLabels`/`setMetadata`/`setScheduling`
+  API calls - which had led to the (wrong) conclusion, during a
+  documentation pass, that `compute.instances.setLabels`/
+  `compute.disks.setLabels` were therefore unnecessary permissions. Real
+  dispatches proved that reasoning wrong at the IAM-permission level: GCE's
+  own authorization checks for setting labels/metadata/scheduling during
+  instance/disk creation are still gated on their respective `setX`
+  permissions, not just the `create` permission, even though no separate
+  `setX` API method is ever called. Each create attempt failed with a live
+  `Required 'compute.<resource>.setX' permission` error in turn (found via
+  Cloud Logging, since `gcp_sdk.go`'s own error wrapping - `"GCP creation
+  commitment unknown"` - deliberately does not leak the real provider
+  error): `compute.disks.setLabels` first, then `compute.instances.setMetadata`.
+  Fixed by adding `compute.instances.setLabels`, `compute.disks.setLabels`,
+  `compute.instances.setMetadata` and `compute.instances.setScheduling` to
+  the live role (the last one added proactively, on the same reasoning,
+  once the pattern was clear, before it could cause a fourth failed
+  round-trip).
+- **A real GCP delete-timeout tuning gap, benefiting this test but not
+  production**: with the IAM gaps above fixed, a dispatch finally created
+  a real Spot instance successfully - and then failed at `p.Delete`,
+  logging `"GCP operation commitment unknown"`. This is `deleteGCP`'s own
+  internal 30-second `context.WithTimeout` expiring while still waiting
+  for GCP's delete operation to reach `DONE` - not a failed delete: GCP
+  keeps processing an already-submitted operation server-side regardless
+  of whether the calling context is still watching it, and this test's own
+  independent, longer-timeout absence-wait confirmed the instance and its
+  boot disk really were gone shortly after. Deleting a real instance -
+  which includes detaching/deleting its `PERSISTENT`, `AutoDelete` boot
+  disk in the same async operation chain - evidently can take longer to
+  reach `DONE` than creating one does (which completed well within its
+  own, unchanged, 30-second budget in the same run). Raised `deleteGCP`'s
+  internal timeout to 60 seconds - still well inside the 5-minute
+  `dedicatedTeardownBudget` this test's own outer retry/independent-wait
+  logic budgets for, so this genuinely avoids the spurious test failure
+  hit here. It does **not** help production reconciliation the same way,
+  though: `operator.go`'s `Step` call wraps every real `Delete` in its own
+  30-second `context.WithTimeout`, which caps `deleteGCP`'s internal
+  timeout at whatever's left of that shorter parent deadline regardless of
+  the 60s value - a child context can never outlive its parent's deadline.
+  In production this bug therefore still results in the same outcome it
+  always did: one reconciliation `Step` may see this same "commitment
+  unknown" error and simply retry on the next tick, which already
+  tolerates it correctly (the allocation stays in `Deleting` until
+  `Observe` confirms absence). Raising that shared, per-`Step` budget to
+  actually help production too would be a separate, broader change (it
+  bounds every provider call in every phase, not just GCP's delete) - out
+  of scope for this fix.
+
+Two of these bugs actually resulted in a real, billed resource being
+created: the GCP Spot instance that hit the delete-timeout finding above
+(existed for well under two minutes, cleanly deleted, real cost a
+fraction of a cent), and the AWS Elastic IP left briefly unassociated by
+the second AWS IAM gap (released within minutes, real cost negligible).
+Every other bug's failure happened before any billable resource was ever
+created, or left behind only a resource type that does not bill by itself
+(a bare VPC/subnet/internet-gateway/security-group; an Azure
+NIC/VNet/NSG/subnet). Each was found, diagnosed against the real cloud
+APIs (Cloud Logging, in GCP's case, since the adapter's own errors are
+deliberately generic), and fixed as its own focused PR rather than folded
+silently into a larger change - matching this workflow's own
+one-focused-unit-per-provider review
+discipline from when it was first built.
+
 ## Provenance
 
 AWS piece written 2026-09-13/14 for the AWS piece of issue #3's remaining
