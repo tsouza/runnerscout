@@ -1,21 +1,20 @@
-```
+<pre align="center">
    ____                              _____                  __
   / __ \__  ______  ____  ___  _____/ ___/_________  __  __/ /_
  / /_/ / / / / __ \/ __ \/ _ \/ ___/\__ \/ ___/ __ \/ / / / __/
 / _, _/ /_/ / / / / / / /  __/ /   ___/ / /__/ /_/ / /_/ / /_
 /_/ |_|\__,_/_/ /_/_/ /_/\___/_/   /____/\___/\____/\__,_/\__/
-```
+</pre>
 
 <p align="center">
   <em>ephemeral GitHub Actions runners on real cloud spot capacity</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/tsouza/runnerscout/actions/workflows/ci.yml"><img src="https://github.com/tsouza/runnerscout/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
-  <a href="https://github.com/tsouza/runnerscout/releases/latest"><img src="https://img.shields.io/github/v/release/tsouza/runnerscout?include_prereleases" alt="Latest release"></a>
-  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/tsouza/runnerscout" alt="Go version"></a>
-  <a href="https://goreportcard.com/report/github.com/tsouza/runnerscout"><img src="https://goreportcard.com/badge/github.com/tsouza/runnerscout" alt="Go Report Card"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/tsouza/runnerscout" alt="License"></a>
+  <a href="https://github.com/tsouza/runnerscout/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/tsouza/runnerscout/ci.yml?branch=main&style=flat-square&label=CI" alt="CI status"></a>
+  <a href="https://github.com/tsouza/runnerscout/releases/latest"><img src="https://img.shields.io/github/v/release/tsouza/runnerscout?include_prereleases&style=flat-square" alt="Latest release"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/tsouza/runnerscout?style=flat-square" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/tsouza/runnerscout?style=flat-square" alt="License"></a>
 </p>
 
 ---
@@ -58,4 +57,7 @@ Emulators do not execute real cloud VMs or establish live-provider support.
 
 Read [contributing](CONTRIBUTING.md), [CI](docs/ci.md),
 [security](SECURITY.md) and [release requirements](docs/releases.md).
+
+## License
+
 RunnerScout is [MIT licensed](LICENSE).
