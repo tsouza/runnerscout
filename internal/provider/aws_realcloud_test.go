@@ -19,13 +19,14 @@
 // path under qualification also being the code path certifying its own
 // success.
 //
-// Only .github/workflows/qualify-aws.yml is meant to ever run this: it is
-// gated behind the "realcloud" build tag (distinct from the "emulators" tag
-// emulator_test.go uses), workflow_dispatch-only, and this test itself
-// additionally refuses to run without an explicit confirmation phrase in its
-// own process environment (requireRealCloudConfirmation) - a second,
-// independent guard against accidental invocation, in case this binary is
-// ever built and run outside that one intended workflow.
+// Only .github/workflows/qualify.yml is meant to ever run this: it is gated
+// behind the "realcloud" build tag (distinct from the "emulators" tag
+// emulator_test.go uses) and workflow_dispatch-only. There is no separate
+// in-process confirmation-phrase guard beyond that: a human choosing to
+// dispatch that workflow, with these specific inputs, already is the
+// deliberate act this test needs - see qualify.yml's own header comment for
+// why a second "type an exact phrase" gate was deliberately not added on
+// top of workflow_dispatch itself.
 //
 // What this test does NOT and honestly CANNOT qualify:
 //
@@ -73,13 +74,6 @@ import (
 	"github.com/tsouza/runnerscout/internal/placement"
 )
 
-// realCloudConfirmPhrase must be present, byte-for-byte, in
-// RUNNERSCOUT_QUALIFY_CONFIRM before this test does anything. This mirrors
-// (and is independent of) qualify-aws.yml's own confirm_real_spend input
-// validation - a second guard so this test refuses real spend even if ever
-// invoked outside that one workflow.
-const realCloudConfirmPhrase = "I-UNDERSTAND-THIS-COSTS-REAL-MONEY"
-
 // dedicatedTeardownBudget is a fixed, hard-coded deletion deadline,
 // deliberately independent of the create/observe/price budget
 // (qualifyAWSEnv.maxRuntime, derived from max_runtime_minutes). A run that
@@ -87,13 +81,6 @@ const realCloudConfirmPhrase = "I-UNDERSTAND-THIS-COSTS-REAL-MONEY"
 // must still be able to tear it down - teardown is never shortened by
 // running out of that earlier budget.
 const dedicatedTeardownBudget = 5 * time.Minute
-
-func requireRealCloudConfirmation(t *testing.T) {
-	t.Helper()
-	if os.Getenv("RUNNERSCOUT_QUALIFY_CONFIRM") != realCloudConfirmPhrase {
-		t.Fatalf("real-cloud qualification requires RUNNERSCOUT_QUALIFY_CONFIRM=%s in the process environment; refusing to provision real billed AWS resources without it", realCloudConfirmPhrase)
-	}
-}
 
 type qualifyAWSEnv struct {
 	region, zone, ami, subnet, securityGroup, accountID   string
@@ -206,7 +193,6 @@ func (e *qualifyEvidence) flush(t *testing.T) {
 }
 
 func TestQualifyRealAWSSpotLifecycle(t *testing.T) {
-	requireRealCloudConfirmation(t)
 	env := loadQualifyAWSEnv(t)
 
 	evidence := newQualifyEvidence(env.evidenceDir)

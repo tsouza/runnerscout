@@ -19,17 +19,14 @@
 // docs/qualification-real-cloud.md/.background.md for the shared design this
 // one deliberately follows rather than reinvents.
 //
-// Only .github/workflows/qualify-gcp.yml is meant to ever run this: it is
-// gated behind the "realcloud" build tag (the same one aws_realcloud_test.go
-// uses - both files live in this one package, distinguished only by their
-// own package-scope identifiers, all deliberately named with a "GCP"
-// distinguisher below so this file can never collide with its AWS sibling),
-// workflow_dispatch-only, and this test itself additionally refuses to run
-// without an explicit confirmation phrase in its own process environment
-// (requireRealCloudConfirmation, shared with aws_realcloud_test.go/
-// azure_realcloud_test.go) - a second, independent guard against accidental
-// invocation, in case this binary is ever built and run outside that one
-// intended workflow.
+// Only .github/workflows/qualify.yml is meant to ever run this: it is gated
+// behind the "realcloud" build tag (the same one aws_realcloud_test.go uses
+// - both files live in this one package, distinguished only by their own
+// package-scope identifiers, all deliberately named with a "GCP"
+// distinguisher below so this file can never collide with its AWS sibling)
+// and workflow_dispatch-only. There is no separate in-process
+// confirmation-phrase guard beyond that - see aws_realcloud_test.go's own
+// header comment (and qualify.yml's) for why.
 //
 // What this test does NOT and honestly CANNOT qualify:
 //
@@ -87,9 +84,8 @@ import (
 	compute "google.golang.org/api/compute/v1"
 )
 
-// realCloudConfirmPhrase and dedicatedTeardownBudget (defined once, in
-// aws_realcloud_test.go, this package) are reused here unmodified - one
-// shared confirmation phrase and one shared teardown budget for every
+// dedicatedTeardownBudget (defined once, in aws_realcloud_test.go, this
+// package) is reused here unmodified - one shared teardown budget for every
 // real-cloud provider piece, exactly like azure_realcloud_test.go already
 // does, rather than a byte-identical GCP-prefixed copy that could silently
 // drift from the shared value if it were ever rotated.
@@ -269,7 +265,6 @@ func (e *qualifyGCPEvidence) flush(t *testing.T) {
 }
 
 func TestQualifyRealGCPSpotLifecycle(t *testing.T) {
-	requireRealCloudConfirmation(t)
 	env := loadQualifyGCPEnv(t)
 
 	evidence := newQualifyGCPEvidence(env.evidenceDir)
