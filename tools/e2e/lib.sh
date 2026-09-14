@@ -3,29 +3,33 @@
 # docs/e2e-qualification.md for the full harness this supports and the exact
 # environment variables each script reads.
 #
-# Every script that sources this file inherits the same two speed bumps
-# qualify-aws.yml/qualify-azure.yml/qualify-gcp.yml enforce before they ever
-# touch a real credential: e2e_require_confirmation (the exact-phrase spend
-# confirmation) and e2e_require_ceiling (a numeric runtime bound no input can
-# raise past a hard-coded constant). e2e_require_confirmation is checked
-# again independently in every script that can reach a billable or
+# Every script that sources this file enforces two speed bumps before it
+# ever touches a real credential: e2e_require_confirmation (the exact-phrase
+# spend confirmation) and e2e_require_ceiling (a numeric runtime bound no
+# input can raise past a hard-coded constant). e2e_require_confirmation is
+# checked again independently in every script that can reach a billable or
 # GitHub-mutating call (including register-scale-set.sh, which has no
 # runtime/wait component of its own and so has no e2e_require_ceiling call);
 # e2e_require_ceiling is checked in every script that enforces a wall-clock
-# budget. Exactly like aws_realcloud_test.go's/azure_realcloud_test.go's/
-# gcp_realcloud_test.go's requireRealCloudConfirmation is independent of
-# qualify-aws.yml's/qualify-azure.yml's/qualify-gcp.yml's own workflow-level
-# check - so no single script in this directory is "the" safety gate that a
-# shorter call path could bypass.
+# budget - so no single script in this directory is "the" safety gate that a
+# shorter call path could bypass. This is a local-runbook-only mechanism,
+# unrelated to `qualify.yml` (which dropped its own equivalent
+# confirm_real_spend gate and requireRealCloudConfirmation Go helper -
+# workflow_dispatch there already requires a human with write access to
+# explicitly trigger it every time, so a second phrase added friction
+# without stopping anything; see
+# docs/qualification-real-cloud.background.md's "Why there is no second
+# confirmation phrase beyond workflow_dispatch"). A local shell script has
+# no analogous "explicit dispatch" act to lean on, so this harness keeps its
+# own phrase check as the only such guard it has.
 set -euo pipefail
 
 # RUNNERSCOUT_E2E_MAX_RUNTIME_CEILING_MINUTES mirrors
-# RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES in qualify-aws.yml/
-# qualify-azure.yml/qualify-gcp.yml: a hard-coded ceiling no
-# E2E_MAX_RUNTIME_MINUTES value can exceed. This harness does strictly more
-# than those workflows (cluster bring-up, real scale-set registration, a
-# real dispatched job, real runner boot/registration/job pickup) so its
-# ceiling is deliberately higher.
+# RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES in qualify.yml: a
+# hard-coded ceiling no E2E_MAX_RUNTIME_MINUTES value can exceed. This
+# harness does strictly more than that workflow (cluster bring-up, real
+# scale-set registration, a real dispatched job, real runner
+# boot/registration/job pickup) so its ceiling is deliberately higher.
 readonly RUNNERSCOUT_E2E_MAX_RUNTIME_CEILING_MINUTES=60
 readonly RUNNERSCOUT_E2E_CONFIRM_PHRASE='I-UNDERSTAND-THIS-COSTS-REAL-MONEY'
 
@@ -46,11 +50,14 @@ e2e_require_var() {
 }
 
 # e2e_require_confirmation refuses to continue unless E2E_CONFIRM_REAL_SPEND
-# is exactly the same literal phrase qualify-aws.yml/qualify-azure.yml/
-# qualify-gcp.yml use for confirm_real_spend - one phrase across every
-# real-spend entry point in this repository, deliberately not
-# scriptable-by-default (see docs/qualification-real-cloud.background.md's
-# "Why a second confirmation phrase beyond workflow_dispatch").
+# is exactly this literal phrase. This is a local-runbook-only mechanism
+# now: qualify.yml dropped its own equivalent confirm_real_spend gate
+# (workflow_dispatch there already requires a human with write access to
+# explicitly trigger it every time - see
+# docs/qualification-real-cloud.background.md's "Why there is no second
+# confirmation phrase beyond workflow_dispatch"), but a local shell script
+# has no analogous "explicit dispatch" act to lean on, so this harness keeps
+# its own phrase check as the only such guard it has.
 e2e_require_confirmation() {
   if [ "${E2E_CONFIRM_REAL_SPEND:-}" != "$RUNNERSCOUT_E2E_CONFIRM_PHRASE" ]; then
     e2e_die "E2E_CONFIRM_REAL_SPEND must be exactly '$RUNNERSCOUT_E2E_CONFIRM_PHRASE' - refusing to provision a real scale set, real cloud VM or dispatch a real workflow without this exact literal confirmation"

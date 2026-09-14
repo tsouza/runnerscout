@@ -49,8 +49,14 @@ two speed bumps regardless of which cloud is being qualified:
 
 - **Explicit spend confirmation.** Every script that can reach a billable or
   GitHub-mutating call refuses to run unless `E2E_CONFIRM_REAL_SPEND` is
-  exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY` - the same literal phrase
-  `qualify.yml` requires for `confirm_real_spend`, on every provider branch.
+  exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. This is a local-runbook-only
+  mechanism: unlike `qualify.yml` (which dropped its own equivalent
+  `confirm_real_spend` input - `workflow_dispatch` there already requires a
+  human with write access to explicitly trigger it, every time, so a second
+  phrase added friction without stopping anything), this harness has no
+  such trigger-level gate at all - a local shell script has no analogous
+  "explicit dispatch" act to lean on, so its own phrase check remains the
+  only such guard it has.
 - **Hard numeric runtime ceiling.** `E2E_MAX_RUNTIME_MINUTES` must be a plain
   integer, 1-60 (`tools/e2e/lib.sh`'s hard-coded ceiling - higher than
   `qualify.yml`'s own 20 (shared across all three provider branches), since

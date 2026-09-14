@@ -61,28 +61,48 @@ paragraph avoids. It remains a named, tracked gap in each provider's own
 "Known gaps" section (`docs/qualification-real-cloud.md`), not a silently
 dropped requirement.
 
-## Why a second confirmation phrase beyond workflow_dispatch
+## Why there is no second confirmation phrase beyond workflow_dispatch
 
-`workflow_dispatch` alone already requires a human to explicitly trigger a
-run. `confirm_real_spend`'s exact-phrase requirement is a deliberate second
-speed bump specifically against a *scripted* dispatch — `gh workflow run
-qualify-aws.yml -f aws_region=...` (or the Azure/GCP equivalents) composed
-once and reused, or a templated automation, could otherwise re-trigger real
-spend with no human actually reading a confirmation at the time of that
-particular run. Requiring an exact, unusual literal string (not a boolean,
-not "yes") means the phrase has to be deliberately retyped or copy-pasted
-with intent each time, not defaulted or scripted away casually. All three
-workflows use the identical literal phrase. AWS and GCP check it
-independently via two distinctly-named functions
-(`requireRealCloudConfirmation`/`requireGCPRealCloudConfirmation`) so
-`aws_realcloud_test.go` and `gcp_realcloud_test.go` can live in the same
-package without either one's identifiers colliding with the other's.
-Azure's test reuses AWS's `requireRealCloudConfirmation`/
-`realCloudConfirmPhrase` directly rather than inventing a third
-identically-shaped pair — one shared confirmation phrase and check for
-every real-cloud provider piece that does not need a distinct name to
-avoid a collision (Azure has no `gcp_realcloud_test.go`-style naming
-pressure, since its own identifiers are already Azure-specific).
+This workflow originally required a `confirm_real_spend` input matching an
+exact literal phrase (`I-UNDERSTAND-THIS-COSTS-REAL-MONEY`), checked both
+in `qualify.yml` itself and, independently, inside each
+`*_realcloud_test.go` file (`requireRealCloudConfirmation`, reading
+`RUNNERSCOUT_QUALIFY_CONFIRM` from the process environment) - a deliberate
+second speed bump on top of `workflow_dispatch`, reasoned at the time as
+protection against a *scripted* dispatch (`gh workflow run qualify.yml -f
+...`) composed once and reused, or a templated automation, re-triggering
+real spend with no human actually reading a confirmation at the time of
+that particular run.
+
+This was removed. The reasoning it was built on turned out not to survive
+contact with how this workflow is actually used: `workflow_dispatch`
+already requires a human with write access to this repository to choose to
+run it, with these specific inputs, every single time - there is no
+"leftover default" or "stale reused invocation" risk the way there can be
+with, say, a config file committed once and forgotten, because a dispatch
+is an explicit act taken at the moment it happens, not a standing setting
+that could silently apply again later. A second exact-phrase gate on top
+of that added real, ongoing friction (one more required input to
+paste correctly into every single dispatch, forever) for a threat model -
+an automated system somehow acquiring write access to this repository and
+scripting dispatches - that a second string in the same dispatch command
+does nothing to actually stop; anything capable of calling `gh workflow
+run qualify.yml -f provider=aws -f ...` is equally capable of appending one
+more `-f confirm_real_spend=...` to that same call. The phrase never
+protected against automation with access; it only added a step for the
+human who already has access and has already decided to run this. This
+mirrors, exactly, the reasoning that led to removing network provisioning's
+own separate `confirm`-style gate in the same workflow (see "Network
+provisioning" below): the act of dispatching, with real inputs, already is
+the confirmation.
+
+The corresponding `requireRealCloudConfirmation`/`realCloudConfirmPhrase`
+Go-level guard (shared byte-for-byte across `aws_realcloud_test.go`,
+`azure_realcloud_test.go` and `gcp_realcloud_test.go`) was removed
+alongside it - keeping that guard while removing the workflow-level input
+would have just made every real dispatch fail outright (the test would
+read an always-empty `RUNNERSCOUT_QUALIFY_CONFIRM` and immediately
+`t.Fatalf`), not preserved any actual safety property.
 
 ## Why `vpc_id`/`vnet_id`/`gcp_network` are inputs at all, never passed to `Config`
 

@@ -51,17 +51,15 @@ realcloud`, never part of any other build or test path). One run:
 ### AWS trigger and required inputs
 
 `workflow_dispatch` only — no schedule, no push, no pull_request, on
-`qualify.yml` with `provider: aws` (or `all`). `confirm_real_spend` and
-`max_runtime_minutes` are required at the trigger level and shared across
-every selected provider; every other input below is `required: false` at
-the trigger level (GitHub Actions cannot make an input conditionally
-required on another input's value) but is enforced as required for AWS by
-the workflow's own first AWS-specific step, before any AWS credential is
-configured:
+`qualify.yml` with `provider: aws` (or `all`). `max_runtime_minutes` is
+required at the trigger level and shared across every selected provider;
+every other input below is `required: false` at the trigger level (GitHub
+Actions cannot make an input conditionally required on another input's
+value) but is enforced as required for AWS by the workflow's own first
+AWS-specific step, before any AWS credential is configured:
 
 | Input | Meaning |
 | --- | --- |
-| `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
 | `aws_region` | Region to qualify against - also where the qualification network (see below) is created and destroyed. |
 | `aws_ami_id` | Pinned AMI. Must be `available`, EBS-backed, and match `aws_architecture`. |
 | `aws_instance_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
@@ -250,14 +248,13 @@ build or test path). One run:
 
 `workflow_dispatch` only — no schedule, no push, no pull_request, on
 `qualify.yml` with `provider: azure` (or `all`). As with AWS, only
-`confirm_real_spend` and `max_runtime_minutes` are required at the trigger
+`max_runtime_minutes` is required at the trigger
 level; every other input below is enforced as required for Azure by the
 workflow's own first Azure-specific step, before any Azure credential is
 configured:
 
 | Input | Meaning |
 | --- | --- |
-| `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
 | `azure_region` | Region to qualify against (e.g. `eastus`) - also where the qualification network (see below) is created and destroyed. |
 | `azure_subscription_id` | Pinned Azure subscription GUID. |
 | `azure_image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
@@ -485,14 +482,13 @@ Real Spot **price** observation is not attempted — see "What GCP qualifies
 
 `workflow_dispatch` only — no schedule, no push, no pull_request, on
 `qualify.yml` with `provider: gcp` (or `all`). As with AWS and Azure, only
-`confirm_real_spend` and `max_runtime_minutes` are required at the trigger
+`max_runtime_minutes` is required at the trigger
 level; every other input below is enforced as required for GCP by the
 workflow's own first GCP-specific step, before any GCP credential is
 configured:
 
 | Input | Meaning |
 | --- | --- |
-| `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
 | `gcp_project` | Project to qualify against. Must equal `vars.GCP_QUALIFICATION_PROJECT_ID` (checked before any credential is configured). Also where the qualification network (see below) is created and destroyed. |
 | `gcp_region` | Region to qualify against. |
 | `gcp_zone` | Zone to launch into. Must belong to `gcp_region` (checked before any create call). |

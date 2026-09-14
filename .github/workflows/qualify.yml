@@ -19,22 +19,18 @@
 # convenience:
 #
 #   - workflow_dispatch is the ONLY trigger. No schedule, no push, no
-#     pull_request. A human must explicitly run this, every time - that
-#     act, with these specific inputs, is itself the confirmation for the
-#     network-provisioning half of this workflow (see issue #89's own
-#     history: a separately-exposed provision/destroy workflow was tried
-#     first and rejected as unnecessary indirection - a human should not
-#     have to sequence two separate dispatches by hand to get one real
-#     qualification result).
-#   - A required `confirm_real_spend` input must match an exact literal
-#     phrase, checked before anything else runs for a given provider
-#     (including before that provider's credentials are ever configured) -
-#     a second, deliberate speed bump beyond workflow_dispatch's own
-#     "someone had to click Run workflow" protection, so a scripted
-#     `gh workflow run` with stale/default arguments cannot silently
-#     provision real resources either. This one gate remains because this
-#     workflow's own real-cloud VM spend is larger and less tightly bounded
-#     per run than the network's own few-cents-per-run cost.
+#     pull_request. A human must explicitly run this, every time, with these
+#     specific inputs - that act IS the confirmation, for both halves of
+#     this workflow (the network provisioning and the real, billed compute
+#     instance alike). There is no separate "type an exact phrase" gate on
+#     top of that: a human choosing to dispatch this workflow, with these
+#     inputs, already knows what it does - a second confirmation input would
+#     only add friction to the one path a human already had to take
+#     deliberately, never protection against anything workflow_dispatch
+#     itself doesn't already guard against. (See issue #89's own history for
+#     the same reasoning applied to the network half: a separately-exposed
+#     provision/destroy workflow was tried first and rejected as
+#     unnecessary indirection.)
 #   - `max_runtime_minutes` is a required, explicit numeric VM-time bound -
 #     issue #3's own "numeric spend/VM-time allocation" wording - validated
 #     against a hard-coded workflow ceiling
@@ -133,13 +129,6 @@ on:
           - aws
           - azure
           - gcp
-      confirm_real_spend:
-        description: >-
-          Must be exactly: I-UNDERSTAND-THIS-COSTS-REAL-MONEY - this run
-          provisions a qualification network and one real, billed compute
-          instance per selected provider.
-        required: true
-        type: string
       max_runtime_minutes:
         description: Hard VM-time bound for the create/observe/price phase, as a plain integer, shared across every selected provider. Must be between 1 and 20 (workflow-enforced ceiling) - see this workflow's own header comment.
         required: true
@@ -265,7 +254,6 @@ jobs:
       id-token: write
     env:
       RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES: "20"
-      RUNNERSCOUT_QUALIFY_CONFIRM: ${{ inputs.confirm_real_spend }}
       RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES: ${{ inputs.max_runtime_minutes }}
       RUNNERSCOUT_QUALIFY_ALLOCATION_ID: qualify-${{ matrix.provider }}-${{ github.run_id }}
       RUNNERSCOUT_QUALIFY_EVIDENCE_DIR: evidence/qualify-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -291,19 +279,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate explicit confirmation and numeric runtime ceiling
+      - name: Validate numeric runtime ceiling
         # Deliberately the very first step, before Go setup and before any
-        # cloud credential is configured: an invalid confirmation phrase or
-        # an out-of-bound runtime request must fail with zero cloud
-        # interaction of any kind, not even a read-only one. Shared across
-        # all three providers.
+        # cloud credential is configured: an out-of-bound runtime request
+        # must fail with zero cloud interaction of any kind, not even a
+        # read-only one. Shared across all three providers.
         run: |
           set -euo pipefail
-          expected='I-UNDERSTAND-THIS-COSTS-REAL-MONEY'
-          if [ "$RUNNERSCOUT_QUALIFY_CONFIRM" != "$expected" ]; then
-            echo "::error::confirm_real_spend must be exactly '$expected' - refusing to provision real, billed ${{ matrix.provider }} resources without this exact literal confirmation"
-            exit 1
-          fi
           max="$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_MINUTES"
           ceiling="$RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES"
           if ! [[ "$max" =~ ^[0-9]+$ ]] || [ "$max" -lt 1 ] || [ "$max" -gt "$ceiling" ]; then
@@ -756,7 +738,7 @@ jobs:
           name: qualify-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.RUNNERSCOUT_QUALIFY_EVIDENCE_DIR }}/
           # warn, not error: a run that fails before the qualification test
-          # ever starts (e.g. bad confirm_real_spend, bad runtime ceiling)
+          # ever starts (e.g. bad runtime ceiling, bad compute input)
           # legitimately produces no evidence directory at all - that is a
           # correct outcome, not a bug to surface loudly.
           if-no-files-found: warn

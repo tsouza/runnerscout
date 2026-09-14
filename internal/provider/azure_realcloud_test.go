@@ -25,14 +25,11 @@
 // the code path under qualification also being the code path certifying
 // its own success.
 //
-// Only .github/workflows/qualify-azure.yml is meant to ever run this: it is
-// gated behind the "realcloud" build tag (distinct from the "emulators" tag
-// azure_emulator_test.go uses), workflow_dispatch-only, and this test itself
-// additionally refuses to run without an explicit confirmation phrase in its
-// own process environment (requireRealCloudConfirmation, shared byte-for-byte
-// with the AWS piece) - a second, independent guard against accidental
-// invocation, in case this binary is ever built and run outside that one
-// intended workflow.
+// Only .github/workflows/qualify.yml is meant to ever run this: it is gated
+// behind the "realcloud" build tag (distinct from the "emulators" tag
+// azure_emulator_test.go uses) and workflow_dispatch-only. There is no
+// separate in-process confirmation-phrase guard beyond that - see
+// aws_realcloud_test.go's own header comment (and qualify.yml's) for why.
 //
 // Real-Azure specifics that differ from the AWS piece (see
 // docs/qualification-real-cloud.background.md's Azure section for the full
@@ -367,11 +364,6 @@ func driveAzureTeardown(ctx context.Context, p *Command, a lifecycle.Allocation,
 }
 
 func TestQualifyRealAzureSpotLifecycle(t *testing.T) {
-	// requireRealCloudConfirmation and realCloudConfirmPhrase are defined
-	// once, in aws_realcloud_test.go (this package) - one shared
-	// confirmation phrase and check for every real-cloud provider piece,
-	// not a separate one invented per cloud.
-	requireRealCloudConfirmation(t)
 	env := loadQualifyAzureEnv(t)
 
 	evidence := newQualifyEvidence(env.evidenceDir)
