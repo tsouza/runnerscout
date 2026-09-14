@@ -1,0 +1,24 @@
+# Rendered by tools/e2e/bring-up-gcp.sh via envsubst. One real, operator-supplied
+# GCP ProviderConfig - modeled on examples/multicloud/providers.yaml's "gcp"
+# entry (see provider-config.yaml.tmpl for the AWS equivalent shape).
+# GCP-only per issue #80's own scoping. Every identifier below is a required
+# input (see docs/e2e-qualification.md); nothing is hardcoded or discovered.
+#
+# Unlike AWS's ProviderConnection, GCP's only requires "project" to be
+# non-empty (api/v1alpha1/types.go's ProviderConnection XValidation) - no
+# securityGroup field exists for GCP at all, since internal/provider/gcp_sdk.go's
+# createGCP never references one.
+apiVersion: runnerscout.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: gcp
+  namespace: ${E2E_NAMESPACE}
+spec:
+  connection:
+    kind: gcp
+    project: ${E2E_GCP_PROJECT}
+    subnet: ${E2E_GCP_SUBNETWORK}
+  credentialEnvironment:
+    GOOGLE_APPLICATION_CREDENTIALS:
+      name: gcp-credentials
+      key: path

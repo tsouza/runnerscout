@@ -1,6 +1,6 @@
-# Full end-to-end qualification: AWS and Azure - background
+# Full end-to-end qualification: AWS, Azure and GCP - background
 
-## Why this exists now, and why AWS then Azure
+## Why this exists now, and why AWS then Azure then GCP
 
 Issue #3's own three real-cloud qualification workflows
 (`qualify-aws.yml`/`qualify-azure.yml`/`qualify-gcp.yml`, see
@@ -15,41 +15,43 @@ the multi-layer failure surface
 avoiding for that piece of work. Issue #80 is that deferred piece, arriving
 after all three provider adapters were qualified independently. Its own
 text recommends AWS first, mirroring how AWS was issue #3's first provider
-too; this Azure piece follows immediately, reading the AWS piece's exact
-committed shape first (see "Provenance" below) rather than re-deriving the
-pattern independently. GCP remains a separate, later, not-yet-built piece
-of the same issue.
+too; this piece's Azure and GCP passes each followed immediately after,
+reading the AWS piece's exact committed shape first (see "Provenance"
+below) rather than re-deriving the pattern independently.
 
 ## Why a local runbook, not a GitHub Actions workflow
 
 This was an explicit, required decision (issue #80's own text calls it "an
-open implementation choice, not yet decided"), weighed as follows:
+open implementation choice, not yet decided"), weighed as follows, and this
+reasoning applies identically across all three provider passes - none of
+their own moving parts changed the answer:
 
 **What a GitHub Actions workflow would have bought**: consistency with
-`qualify-aws.yml`'s/`qualify-azure.yml`'s established shape, an
-`if: always()` teardown guarantee enforced by the platform rather than a
-script's own `trap`, and a job-level `timeout-minutes:` ceiling the
+`qualify-aws.yml`'s/`qualify-azure.yml`'s/`qualify-gcp.yml`'s established
+shape, an `if: always()` teardown guarantee enforced by the platform rather
+than a script's own `trap`, and a job-level `timeout-minutes:` ceiling the
 workflow YAML itself enforces independently of any script logic.
 
 **Why it was not chosen anyway**: this harness's failure surface is
 qualitatively larger than any of the three provider-adapter qualifications.
-`qualify-aws.yml`/`qualify-azure.yml` each drive one Go test function
-directly against one cloud SDK. This harness needs k3d running inside the
-runner (Docker-in-Docker, its own networking/storage/loadbalancer stack -
-never exercised by any existing workflow in this repository, unlike
-`kindest/node` via `kind`, which `docs/operations.md`'s local Kubernetes
-qualification already uses successfully), a Helm install, CRD
-reconciliation, a live scale-set listener session, real VM
-boot/cloud-init/runner-registration timing that is inherently variable and
-slow (unlike a Go test polling one cloud API directly), and a real
-dispatched job's own queueing/pickup latency on top of all of that.
-Stacking this much genuinely new-to-this-repository CI machinery
-(k3d-in-Actions) onto the same commit as the harness's own first real
-end-to-end exercise would have made a first failure ambiguous: cluster
-bring-up flake, k3d-in-Docker-in-Actions quirk, or a real bug in the
-resource graph / controller reconciliation itself. A local runbook lets an
-operator iterate on exactly that ambiguity interactively - re-run one stage,
-inspect `kubectl get` output between stages, keep the cluster up with
+`qualify-aws.yml`/`qualify-azure.yml`/`qualify-gcp.yml` each drive one Go
+test function directly against one cloud SDK. This harness needs k3d
+running inside the runner (Docker-in-Docker, its own
+networking/storage/loadbalancer stack - never exercised by any existing
+workflow in this repository, unlike `kindest/node` via `kind`, which
+`docs/operations.md`'s local Kubernetes qualification already uses
+successfully), a Helm install, CRD reconciliation, a live scale-set
+listener session, real VM boot/cloud-init (AWS, Azure)/startup-script
+(GCP)/runner-registration timing that is inherently variable and slow
+(unlike a Go test polling one cloud API directly), and a real dispatched
+job's own queueing/pickup latency on top of all of that. Stacking this much
+genuinely new-to-this-repository CI machinery (k3d-in-Actions) onto the
+same commit as the harness's own first real end-to-end exercise would have
+made a first failure ambiguous: cluster bring-up flake,
+k3d-in-Docker-in-Actions quirk, or a real bug in the resource graph /
+controller reconciliation itself. A local runbook lets an operator iterate
+on exactly that ambiguity interactively - re-run one stage, inspect
+`kubectl get` output between stages, keep the cluster up with
 `E2E_KEEP_CLUSTER` after a failure - none of which a single CI job attempt
 offers.
 
@@ -59,31 +61,32 @@ against a specific pinned test repository chosen by the operator running it,
 not this repository's own CI. A GitHub Actions workflow's implicit
 framing - "something that runs in this repository's Actions tab, on this
 repository's runners" - fits a workflow that qualifies infrastructure this
-repository owns end-to-end (like `qualify-aws.yml`/`qualify-azure.yml` do
-for their respective adapters). It fits less well for a harness whose
-entire subject is an *external* test repository's own Actions surface. A
-local runbook makes that boundary explicit rather than blurring it.
+repository owns end-to-end (like `qualify-aws.yml`/`qualify-azure.yml`/
+`qualify-gcp.yml` do for their respective adapters). It fits less well for a
+harness whose entire subject is an *external* test repository's own Actions
+surface. A local runbook makes that boundary explicit rather than blurring
+it.
 
-The safety bar is identical across both clouds and both pieces, and is
-enforced identically: `tools/e2e/lib.sh`'s `e2e_require_confirmation`/
-`e2e_require_ceiling` are the runbook's equivalent of
-`qualify-aws.yml`'s/`qualify-azure.yml`'s first workflow step and its
-hard-coded `RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES`, and
-`tools/e2e/run.sh`'s/`run-azure.sh`'s `trap ... EXIT` calling
-`tools/e2e/teardown.sh`/`teardown-azure.sh` is the runbook's equivalent of
-those workflows' `if: always()` final step. A local runbook does not mean a
-weaker safety net - it means the same net, enforced by the script author
-instead of the platform, chosen because the platform's own moving parts
-here (k3d-in-Actions) are the least proven part of this whole harness, not
-the safety net itself.
+The safety bar is identical across all three providers and every piece, and
+is enforced identically: `tools/e2e/lib.sh`'s `e2e_require_confirmation`/
+`e2e_require_ceiling` are the runbook's equivalent of each `qualify-*.yml`'s
+first workflow step and its hard-coded
+`RUNNERSCOUT_QUALIFY_MAX_RUNTIME_CEILING_MINUTES`, and each
+`tools/e2e/run*.sh`'s `trap ... EXIT` calling its own
+`tools/e2e/teardown*.sh` is the runbook's equivalent of those workflows'
+`if: always()` final step. A local runbook does not mean a weaker safety
+net - it means the same net, enforced by the script author instead of the
+platform, chosen because the platform's own moving parts here
+(k3d-in-Actions) are the least proven part of this whole harness, not the
+safety net itself.
 
-## Why AWS and Azure got separate scripts, not one parameterized set
+## Why each provider got separate scripts, not one parameterized set
 
-Before writing any Azure script, this piece read every AWS script in full
+Before writing any Azure script, that piece read every AWS script in full
 to check whether the non-cloud-specific ones (`dispatch-and-wait.sh` in
 particular, per issue #80's own suggestion that it "likely has no
 AWS-specific logic at all except its own catalog-refresh call") were
-already cloud-agnostic enough to reuse directly, adding only an Azure
+already cloud-agnostic enough to reuse directly, adding only a per-provider
 catalog-refresh helper to `tools/e2e/lib.sh`. They were not, on inspection:
 
 - `tools/e2e/dispatch-and-wait.sh` hardcodes the rendered manifest filename
@@ -98,55 +101,64 @@ catalog-refresh helper to `tools/e2e/lib.sh`. They were not, on inspection:
   separately-typed `describe-instances`/`describe-volumes`/
   `describe-network-interfaces` calls) with no cloud-agnostic abstraction
   over "list leftover resources for this owner" - Azure's equivalent is a
-  single generic `az resource list --tag` call, a different enough shape
-  that forcing both through one script would need a real abstraction layer,
-  not just a substituted variable prefix.
+  single generic `az resource list --tag` call and GCP's is a single
+  generic `gcloud ... list --filter labels....` call, different enough
+  shapes that forcing all three through one script would need a real
+  abstraction layer, not just a substituted variable prefix.
 - The one manifest that is *almost* cloud-agnostic,
   `manifests/runner-scaleset-{pat,app}.yaml.tmpl`, still hardcodes
-  `runnerClassRef.name: e2e-aws` as a literal string, not a variable - reusing
-  it verbatim for Azure would point Azure's `RunnerScaleSet` at a
-  `RunnerClass` that does not exist in Azure's own resource graph.
+  `runnerClassRef.name: e2e-aws` as a literal string, not a variable -
+  reusing it verbatim for another provider would point that provider's
+  `RunnerScaleSet` at a `RunnerClass` that does not exist in its own
+  resource graph.
 
-Given that, this piece added exactly what issue #80's own hoped-for-if-true
-shortcut still holds regardless: `e2e_refresh_azure_catalog_inputs`, added
-to the shared `tools/e2e/lib.sh` (not a new file), alongside the other
-already-cloud-agnostic pieces of that library
-(`e2e_require_confirmation`/`e2e_require_ceiling`/`e2e_deadline_epoch`/
-`e2e_default_catalog_vars`/`e2e_render`, all reused unchanged). Every other
-Azure-specific stage got its own script (`bring-up-azure.sh`,
-`dispatch-and-wait-azure.sh`, `teardown-azure.sh`, `verify-azure.sh`,
-`run-azure.sh`) and its own manifest set
-(`manifests/*-azure*.yaml.tmpl`), rather than retrofitting the AWS scripts
-into a parameterized shared set. Two reasons, not one:
+Given that, each provider piece added exactly what issue #80's own
+hoped-for-if-true shortcut still holds regardless: a per-provider catalog
+cross-validation function (`e2e_refresh_azure_catalog_inputs`,
+`e2e_refresh_gcp_catalog_inputs`) added to the shared `tools/e2e/lib.sh`
+(not a new file), alongside the other already-cloud-agnostic pieces of that
+library (`e2e_require_confirmation`/`e2e_require_ceiling`/
+`e2e_deadline_epoch`/`e2e_default_catalog_vars`/`e2e_render`, all reused
+unchanged, or - for GCP - its own self-contained
+`e2e_default_gcp_catalog_vars`, see "GCP-specific design notes" below for
+why). Every other Azure- or GCP-specific stage got its own script
+(`bring-up-azure.sh`/`bring-up-gcp.sh`,
+`dispatch-and-wait-azure.sh`/`dispatch-and-wait-gcp.sh`,
+`teardown-azure.sh`/`teardown-gcp.sh`, `verify-azure.sh`/`verify-gcp.sh`,
+`run-azure.sh`/`run-gcp.sh`) and its own manifest set
+(`manifests/*-azure*.yaml.tmpl`, `manifests/*-gcp.yaml.tmpl`), rather than
+retrofitting the AWS scripts into a parameterized shared set. Two reasons,
+not one:
 
-1. **Correctness now**: the actual duplication the two clouds share (the
+1. **Correctness now**: the actual duplication every provider shares (the
    dispatch/poll loop against GitHub's own API, the fleet-ConfigMap
    watching, the RunnerScaleSet-delete-then-Helm-uninstall sequence) is
    real and was copied verbatim rather than re-derived, specifically to
    avoid introducing a new bug while translating working AWS logic to
-   Azure. The genuinely cloud-specific parts (credential shape, resource
-   graph field values, leftover-resource sweep shape) are different enough
-   between AWS and Azure that a shared script would need real per-cloud
-   branching internally anyway - which is what separate scripts already
-   are, just organized as separate files instead of separate `case`
-   branches in one file.
-2. **Merge sequencing now**: this piece was built entirely on a worktree
-   branched from `origin/main`, before AWS's own PR (#82) had merged - see
-   "Provenance" below. Editing `tools/e2e/bring-up.sh`/`dispatch-and-wait.sh`/
-   `teardown.sh`/`verify.sh` in place to add Azure branches would have
-   guaranteed a merge conflict against every line PR #82 itself touches in
-   those same files. Adding only new, Azure-suffixed files (plus the one
-   necessarily shared addition to `tools/e2e/lib.sh`, `tools/e2e/env.example`,
-   and this document) keeps that conflict surface to the minimum the two
-   pieces cannot avoid sharing, letting the coordinating session sequence
-   the rebase deliberately rather than resolving conflicts scattered across
-   every AWS script this piece never actually needed to touch.
+   another provider. The genuinely cloud-specific parts (credential shape,
+   resource graph field values, leftover-resource sweep shape) are
+   different enough between providers that a shared script would need real
+   per-cloud branching internally anyway - which is what separate scripts
+   already are, just organized as separate files instead of separate
+   `case` branches in one file.
+2. **Merge sequencing now**: both the Azure and GCP pieces were built
+   entirely on worktrees branched from `origin/main`, before AWS's own PR
+   (#82) had merged - see "Provenance" below. Editing
+   `tools/e2e/bring-up.sh`/`dispatch-and-wait.sh`/`teardown.sh`/`verify.sh`
+   in place to add per-provider branches would have guaranteed a merge
+   conflict against every line PR #82 itself touches in those same files.
+   Adding only new, suffixed files (plus the necessarily shared additions
+   to `tools/e2e/lib.sh`, `tools/e2e/env.example`, and this document) kept
+   that conflict surface to the minimum each piece could not avoid sharing,
+   letting the coordinating session sequence each rebase deliberately
+   rather than resolving conflicts scattered across every AWS script
+   neither piece ever actually needed to touch.
 
 A future consolidation into one parameterized script per stage remains
-possible once both pieces exist in the same tree and any real duplication
-becomes easier to see and remove safely - deliberately left for whoever
-does that unification with both implementations in hand, not attempted
-speculatively here.
+possible now that all three passes exist in the same tree and any real
+duplication becomes easier to see and remove safely - deliberately left for
+whoever does that unification with all three implementations in hand, not
+attempted speculatively here.
 
 ## Why registration is a separate script/binary from bring-up and from cmd/runnerscout
 
@@ -161,8 +173,9 @@ serve a qualification harness - a capability every real deployment of that
 binary would then carry, unused, forever. `cmd/e2e-register-scale-set` is a
 separate, small program specifically so that capability lives only where
 it is actually needed - and, being a GitHub-side concept only, is shared
-unchanged by both the AWS and Azure pieces rather than reimplemented per
-cloud.
+unchanged by every provider pass rather than reimplemented per cloud (the
+GCP pass reuses it, `tools/e2e/register-scale-set.sh` and all, completely
+unmodified).
 
 Splitting registration from the bring-up scripts (rather than folding
 registration into bring-up's own first step) keeps bring-up idempotent-safe
@@ -178,20 +191,21 @@ install failure never even needs to reason about the GitHub side at all.
 
 A GitHub Actions runner scale set with no active runners is not a billable
 resource - it is metadata (a name, a runner group binding, a listener
-session endpoint), unlike the EC2 Spot Instance/EBS volume/ENI trio (AWS)
-or the Azure Spot VM/NIC/OS disk trio (Azure) this harness's teardown
-treats as urgent to reclaim. Deleting and recreating the same scale set
-name on every run would add GitHub-side churn (a new scale set ID each
-time, invalidating anything an operator wired to the old one) for no safety
-benefit - the actual safety-relevant cleanup obligation is the cloud-side
-VM (and its dependents), which `tools/e2e/teardown.sh`/`teardown-azure.sh`
-and `tools/e2e/verify.sh`/`verify-azure.sh` do treat as the hard gate.
+session endpoint), unlike the EC2 Spot Instance/EBS volume/ENI trio (AWS),
+the Azure Spot VM/NIC/OS disk trio (Azure), or the GCE Spot instance/boot
+disk pair (GCP) this harness's teardown treats as urgent to reclaim.
+Deleting and recreating the same scale set name on every run would add
+GitHub-side churn (a new scale set ID each time, invalidating anything an
+operator wired to the old one) for no safety benefit - the actual
+safety-relevant cleanup obligation is the cloud-side VM (and its
+dependents), which each provider's own `tools/e2e/teardown*.sh` and
+`tools/e2e/verify*.sh` do treat as the hard gate.
 `tools/e2e/register-scale-set.sh --delete` exists for an operator who is
 done with the harness entirely and wants to remove the registration too,
 but it is a deliberate, separate, opt-in action, not something teardown
 does automatically on every run.
 
-## Why `dispatch-and-wait.sh`/`dispatch-and-wait-azure.sh` re-render the CapacityCatalog immediately before dispatch
+## Why `dispatch-and-wait-<provider>.sh` re-renders the CapacityCatalog immediately before dispatch
 
 `internal/placement.MaxPriceAge` is five minutes, and CRD-driven mode has
 no equivalent of `operator.Config.AWSPriceRefresh` - that flag is read only
@@ -200,10 +214,10 @@ by `cmd/runnerscout`'s mounted-JSON path
 but nothing in `internal/configapi/compile.go` or `api/v1alpha1/types.go`
 ever sets it from any CRD field). This was verified by reading both files
 directly while designing the AWS piece, not assumed by analogy with AWS's
-mounted-config path, and applies identically to Azure - CRD-driven mode has
-no per-cloud carve-out here at all. A CRD-driven `CapacityCatalog` is
-therefore always a static snapshot: whatever `observedAt` timestamp was in
-the manifest at `kubectl apply` time is what it stays until something
+mounted-config path, and applies identically to Azure and GCP - CRD-driven
+mode has no per-cloud carve-out here at all. A CRD-driven `CapacityCatalog`
+is therefore always a static snapshot: whatever `observedAt` timestamp was
+in the manifest at `kubectl apply` time is what it stays until something
 re-applies it. If a bring-up script rendered the catalog once and an
 operator then took several minutes bringing up the rest of the graph,
 waiting for `Ready`, and only then ran the dispatch-and-wait script, the
@@ -213,9 +227,12 @@ multi-stage runbook an operator drives by hand rather than a single
 unattended script. Re-rendering and re-applying just the `CapacityCatalog`
 at the start of dispatch-and-wait, immediately before the real
 `workflow_dispatch`, keeps the freshness window tied to the moment it
-actually matters instead of to whatever bring-up happened to take.
+actually matters instead of to whatever bring-up happened to take. This
+applies even to GCP, whose price itself is static (see "GCP-specific design
+notes" below) - only `observedAt` needs refreshing there, for the same
+`MaxPriceAge` reason.
 
-## Why the independent verification found a real bug during the AWS piece's own smoke testing
+## Why the independent AWS verification found a real bug during that pass's own smoke testing
 
 While mechanically smoke-testing `tools/e2e/teardown.sh` locally (k3d
 cluster bring-up with placeholder credentials, no real AWS account
@@ -233,10 +250,11 @@ harness's own verification script. It was fixed by replacing every
 `teardown.sh`'s final gate with an explicit
 `if ! var=$(aws ...); then <fail loudly, distinctly from "found leftover">`
 pattern, so "the query itself failed" and "the query succeeded and found
-zero" can never be confused with each other again. This piece's Azure
-scripts (`verify-azure.sh`/`teardown-azure.sh`) applied that exact pattern
-to every `az` call in their own final gate from the start, proactively
-rather than needing the same bug found twice.
+zero" can never be confused with each other again. The Azure and GCP
+scripts (`verify-azure.sh`/`teardown-azure.sh`,
+`verify-gcp.sh`/`teardown-gcp.sh`) applied that exact pattern to every
+`az`/`gcloud` call in their own final gate from the start, proactively
+rather than needing the same bug found three times.
 
 A related, narrower pitfall fixed during the AWS piece's same testing pass:
 several early drafts of `tools/e2e/dispatch-and-wait.sh`/`verify.sh` used
@@ -247,24 +265,25 @@ status, which `set -e` treats as the whole script failing - an entirely
 unrelated, silent early-abort bug that has nothing to do with the AWS query
 issue above but was caught the same way, by actually running the scripts
 rather than only reading them. Every such site was rewritten as an explicit
-`if`; this piece's Azure scripts follow the same explicit-`if` style
+`if`; the Azure and GCP scripts follow the same explicit-`if` style
 throughout for the same reason.
 
-## Why `E2E_MAX_RUNTIME_MINUTES`'s ceiling (60) is higher than `qualify-aws.yml`'s/`qualify-azure.yml`'s (20)
+## Why `E2E_MAX_RUNTIME_MINUTES`'s ceiling (60) is higher than each `qualify-*.yml`'s (20)
 
-Both `qualify-aws.yml` and `qualify-azure.yml` only have to wait for one
-Spot VM to reach a running state - typically well under a minute once the
-API call returns. This harness's equivalent wait chains several genuinely
-slower steps, for either cloud: cluster bring-up and Helm install (roughly
-a minute in this harness's own local smoke testing), the controller's own
-admission/placement cycle, real VM boot and cloud-init execution before a
-runner process even starts, GitHub Actions runner registration,
-queueing/pickup latency for the dispatched job, and only then the job's own
-(deliberately trivial) run time. 60 minutes is a hard ceiling, not an
-expectation that a real run takes anywhere close to it - keeping the
-dispatched workflow trivial (an `echo` step, per this doc's
-operator-prerequisites section) is what actually bounds real spend; the
-ceiling exists to guarantee termination, not to describe typical duration.
+Each of `qualify-aws.yml`, `qualify-azure.yml` and `qualify-gcp.yml` only
+has to wait for one Spot VM to reach a running state - typically well under
+a minute once the API call returns. This harness's equivalent wait chains
+several genuinely slower steps, for any provider: cluster bring-up and Helm
+install (roughly a minute in this harness's own local smoke testing), the
+controller's own admission/placement cycle, real VM boot and
+cloud-init/startup-script execution before a runner process even starts,
+GitHub Actions runner registration, queueing/pickup latency for the
+dispatched job, and only then the job's own (deliberately trivial) run
+time. 60 minutes is a hard ceiling, not an expectation that a real run
+takes anywhere close to it - keeping the dispatched workflow trivial (an
+`echo` step, per this doc's operator-prerequisites section) is what
+actually bounds real spend; the ceiling exists to guarantee termination,
+not to describe typical duration.
 
 ## Why the dispatched workflow's triviality is documented, not enforced
 
@@ -281,38 +300,36 @@ much more invasive (and still gameable) content scan. The
 long-running or runaway dispatched job - if an operator points this at a
 workflow that runs for 45 minutes, the harness's poll loop still terminates
 at the ceiling and teardown still runs, at the cost of a failed (timed-out)
-run rather than a hung one. The same trust boundary already exists at
-`tools/e2e/dispatch-and-wait.sh`'s/`dispatch-and-wait-azure.sh`'s own use of
-the operator's own `gh` session against `E2E_TARGET_REPO`, not this
-repository's `gh-tsouza` wrapper - see AGENTS.md and each script's own
-header comment.
+run rather than a hung one. The same trust boundary already exists at each
+`tools/e2e/dispatch-and-wait*.sh`'s own use of the operator's own `gh`
+session against `E2E_TARGET_REPO`, not this repository's `gh-tsouza`
+wrapper - see AGENTS.md and each script's own header comment.
 
-## Why `verify.sh`/`teardown.sh`/`verify-azure.sh`/`teardown-azure.sh` never trust the controller's own reported state alone
+## Why `verify-<provider>.sh`/`teardown-<provider>.sh` never trust the controller's own reported state alone
 
 Same reasoning as `aws_realcloud_test.go`'s `newIndependentEC2Client`/
-`azure_realcloud_test.go`'s `newIndependentAzureClients` and
-`qualify-aws.yml`'s/`qualify-azure.yml`'s own "Independent post-run cleanup
-safety net" step (see
+`azure_realcloud_test.go`'s `newIndependentAzureClients`/
+`gcp_realcloud_test.go`'s `newIndependentGCPComputeService` and each
+`qualify-*.yml`'s own "Independent post-run cleanup safety net" step (see
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
-"Why a second, independent client, and what independence means here"): a
+"Why a second, independent client for verification, in every provider"): a
 bug that made the controller's own `Observe()`/`Delete()` wrongly report
-success would not also make a separately-invoked `aws`/`az` CLI call agree,
-because the two never share a code path. `verify.sh`/`teardown.sh` use the
-operator's own ambient AWS CLI session; `verify-azure.sh`/`teardown-azure.sh`
-use the operator's own ambient `az` CLI session (whatever credentials are
-configured in the invoking shell - a login session, environment variables,
-anything the CLI itself resolves), each a different credential *resolution
-path* from what is mounted into the controller's own pod, even when both
-ultimately reach the same cloud account. This is independence of code
-path, identical in spirit to (and for the same reason as) how
-`aws_realcloud_test.go`/`azure_realcloud_test.go` each reason about their
+success would not also make a separately-invoked `aws`/`az`/`gcloud` CLI
+call agree, because the two never share a code path. Each provider's
+`verify*.sh`/`teardown*.sh` use the operator's own ambient CLI session for
+that provider (whatever credentials are configured in the invoking shell -
+a login session, environment variables, anything the CLI itself resolves),
+a different credential *resolution path* from what is mounted into the
+controller's own pod, even when both ultimately reach the same cloud
+account. This is independence of code path, identical in spirit to (and
+for the same reason as) how each `*_realcloud_test.go` reasons about its
 own second cloud client - not independence of underlying identity, since
 realistically both credential paths belong to the same operator's account
 either way.
 
 ## Azure-specific adaptations
 
-Everything below is a real difference this piece had to reason about
+Everything below is a real difference the Azure piece had to reason about
 adapting from the AWS piece, following
 [qualification-real-cloud.md](qualification-real-cloud.md)'s/
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
@@ -388,8 +405,8 @@ do. `manifests/runner-class-azure.yaml.tmpl` therefore uses
 200000 micros by `e2e_default_catalog_vars`, the same default value the AWS
 piece already uses for its own equivalent), exactly like the AWS piece's
 own `maxPriceMicros` already does - this is not a gap relative to what a
-CRD-driven graph can express, since no CRD-driven `RunnerClass` for either
-cloud can express an unconditional "no cap" today.
+CRD-driven graph can express, since no CRD-driven `RunnerClass` for any
+provider can express an unconditional "no cap" today.
 
 ### Why local smoke testing of `teardown-azure.sh` cannot fully neutralize a real `az` session the way the AWS piece's placeholder credentials file does
 
@@ -432,7 +449,10 @@ the AWS piece's placeholder-credentials-file trick closes it. An operator
 or agent smoke-testing `teardown-azure.sh`/`verify-azure.sh` locally should
 first confirm with `az account show` whether a real session is active, and
 prefer a sandbox/container with no Azure credentials configured at all if
-one is not already guaranteed absent.
+one is not already guaranteed absent. The GCP pass's own smoke testing
+discovered the equivalent ambient-`gcloud`-session risk in advance from
+this finding and deliberately avoided it (see "GCP-specific design notes"
+below) rather than repeating it.
 
 ### Why the independent leftover sweep is one generic query, not three typed ones
 
@@ -454,6 +474,137 @@ force-cleanup pass still deletes VMs before re-listing and deleting
 whatever remains, matching Azure's `deleteAzure` one-resource-per-call
 priority order (VM, then NIC, then disk) and `qualify-azure.yml`'s own
 final-step structure almost verbatim.
+
+## GCP-specific design notes
+
+### Why GCP's `CapacityCatalog` uses a static price, and what still had to be built anyway
+
+`docs/prices-gcp.md`/`docs/prices-gcp.background.md` (issue #2, closed)
+already settled this for the production adapter: no `internal/prices` GCP
+client exists, or ever will, because Compute Engine's public pricing
+surface splits Core/RAM SKUs with no structured machine-type field, no
+zone-level pricing and no request-side filter - building one would mean
+pattern-matching free-text SKU descriptions, exactly the "usually works"
+guessing this codebase's provider adapters otherwise refuse to ship. This
+E2E harness inherits that decision rather than relitigating it: there was
+never a candidate design where `tools/e2e/lib.sh` grew a
+`e2e_refresh_gcp_price` function that AWS's `e2e_refresh_aws_catalog_inputs`
+has and GCP's does not - doing so would have built, inside a qualification
+harness, exactly the price observer the production codebase deliberately
+does not ship, for the same reasons.
+
+What the GCP pass still had to build, despite the static price, is the
+*cross-validation* half of `e2e_refresh_aws_catalog_inputs`'s job:
+`e2e_refresh_gcp_catalog_inputs` performs the same three read-only
+`gcloud ... describe` checks `qualify-gcp.yml`'s own pre-flight step
+performs (zone belongs to region, subnetwork belongs to network, image
+resolves) before any create call, and refreshes `observedAt` for the
+`MaxPriceAge` reason explained above. `E2E_GCP_PRICE_MICROS` itself is a
+plain, hard-coded-with-an-operator-override constant
+(`e2e_default_gcp_catalog_vars`, default `10000`) - never derived from any
+API call, and documented as such directly in
+[e2e-qualification.md](e2e-qualification.md)'s GCP section and in
+`manifests/capacity-catalog-gcp.yaml.tmpl`'s own header comment, so a reader
+of the rendered manifest never mistakes it for a real quote.
+
+### Why GCP's scripts are separate files from AWS's, not one parameterized set
+
+AWS's own scripts (`tools/e2e/bring-up.sh`, `dispatch-and-wait.sh`,
+`teardown.sh`, `verify.sh`, `run.sh`) and manifests
+(`manifests/provider-config.yaml.tmpl` and siblings) predate the GCP pass
+and use unsuffixed names - there was only one provider when they were
+written. Introducing GCP without renaming any AWS file (out of scope for
+this pass; AWS's own pass was already built and under review) meant every
+new GCP file needed its own name to avoid colliding with AWS's - hence the
+`-gcp` suffix on both scripts (`bring-up-gcp.sh` and siblings) and manifests
+(`provider-config-gcp.yaml.tmpl` and siblings). A single parameterized
+script (e.g. `bring-up.sh --provider gcp`) was considered and declined:
+AWS's `bring-up.sh` already branches on `E2E_GITHUB_AUTH_MODE` for its
+two-mode GitHub secret handling, and adding a second provider dimension
+on top would have doubled that branching inside one file for a harness
+that is, by construction, run by a human operator choosing one provider at
+a time - not a library consumed programmatically where parameterization
+earns its complexity. Per-provider files keep each script's own
+cross-validation and cleanup logic (real AWS tag-based sweep vs. real GCP
+label-based sweep, in particular) linear and readable on its own, at the
+cost of the header-comment/structural duplication visible by diffing
+`bring-up.sh` against `bring-up-gcp.sh` side by side - an accepted,
+deliberate tradeoff, not an oversight. `tools/e2e/lib.sh` (the safety gates,
+the shared `e2e_render` allowlist) and `tools/e2e/register-scale-set.sh`
+(cloud-agnostic GitHub-side registration) remain the one place shared logic
+lives, precisely because that logic is identical across providers rather
+than merely similar.
+
+### Why GCP credentials are an operator-generated WIF file, not `google-github-actions/auth`
+
+`qualify-gcp.yml`'s own WIF-only choice (see
+[qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
+GCP section) is enforced by `google-github-actions/auth`, a GitHub
+Actions-native step that exchanges the job's own Actions OIDC token for a
+short-lived GCP credential - a mechanism that only exists inside a GitHub
+Actions runner, not in an operator's local shell where this harness runs.
+This harness cannot reuse that step; it can only hold itself to the same
+*outcome* (a short-lived, non-persisted credential; never a long-lived
+service account key committed or stored anywhere) via a different
+mechanism: `E2E_GCP_CREDENTIALS_FILE` is documented as a file the operator
+generates themselves before running the harness, either via `gcloud iam
+workload-identity-pools create-cred-config` (producing an `external_account`
+credential configuration - the same *credential type*
+`google-github-actions/auth` itself produces, just generated by the
+operator's own `gcloud` invocation instead of a GitHub Actions step) or via
+`gcloud auth application-default login --impersonate-service-account=<SA>`
+(producing a short-lived `impersonated_service_account` ADC file).
+`internal/provider/gcp_credentials.go`'s `gcpCredential`/`parseGCPCredential`
+already accept both shapes (alongside `ServiceAccount`/`AuthorizedUser`) -
+the adapter itself does not enforce WIF-only, exactly as
+[qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
+GCP section notes for `qualify-gcp.yml`'s own choice: this is this
+harness's own documented policy, not an adapter-level restriction, and it
+is carried into this piece of the qualification surface as an active
+choice, not an accidental gap.
+
+### Why `teardown-gcp.sh`/`verify-gcp.sh` filter only on `labels.runnerscout-owner`, not also `labels.runnerscout-operation`
+
+`internal/provider/gcp_sdk.go`'s `gcpLabels` sets two labels on every VM and
+boot disk it creates: `runnerscout-owner` (the `RunnerScaleSet`'s own name,
+per `internal/operator.Config.Validate`'s "provider owner must match
+controller name" invariant) and `runnerscout-operation` (the allocation's
+own ID). `qualify-gcp.yml`'s own safety-net step filters on both, because
+its Go test creates exactly one allocation with a well-known, fixed ID
+(`RUNNERSCOUT_QUALIFY_ALLOCATION_ID`) known before the run even starts. This
+harness has no such fixed ID: the controller assigns allocation IDs
+dynamically as real placement happens, and an operator re-running stages
+individually (bring-up, then dispatch, then teardown, as separate
+invocations) has no reliable way to thread a single allocation ID across
+all of them the way one Go test function can hold it in a local variable.
+Filtering on `labels.runnerscout-owner` alone is both sufficient and
+correct here: the owner label is the `RunnerScaleSet`'s own name, which is
+already `E2E_SCALE_SET_NAME` - unique to this harness's own run by operator
+convention (see `tools/e2e/env-gcp.example`'s default,
+`e2e-gcp-qualify`) - so every GCP resource this harness's own controller
+instance could possibly have created carries that owner label, and nothing
+else reasonably would. AWS's `tools/e2e/teardown.sh`/`verify.sh` already
+make the identical choice (`tag:runnerscout-owner=$owner`, no operation-level
+tag filter) for the same reason; GCP's pass follows the established
+pattern rather than introducing a narrower one that would have needed
+either a fixed allocation ID (not available here) or a second sweep pass
+per observed allocation (unnecessary complexity for what owner-only
+filtering already answers correctly).
+
+### Why the GCP pass's own local smoke testing deliberately avoided a real `gcloud` session
+
+Having read the Azure section's own discovery above (a smoke test
+inadvertently reaching a real, ambient `az` session) before writing its own
+smoke tests, the GCP pass explicitly checked for and confirmed a real,
+already-authenticated `gcloud` session was also active in its own sandbox -
+and avoided exercising `teardown-gcp.sh`/`verify-gcp.sh` against it at all,
+testing their failure- and success-mode logic instead against a stubbed
+`gcloud` binary. This is the direct, applied lesson from the Azure finding
+rather than a coincidence: once one provider pass demonstrated that this
+environment's agent sandboxes can inherit ambient cloud CLI sessions, every
+later pass treated that as a known risk to check for explicitly before
+smoke-testing any teardown/verify script, rather than rediscovering it
+independently.
 
 ## Provenance
 
@@ -478,14 +629,17 @@ it and risking silent drift - the same discipline the GCP provider-adapter
 qualification piece already used relative to the AWS provider-adapter
 piece (see
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
-own Provenance section). Because `tools/e2e/` does not exist on `main` yet,
-this piece necessarily recreates `tools/e2e/lib.sh`, `tools/e2e/env.example`,
-and this document's own AWS-authored content in full (as a superset with
-Azure's own additions folded in) rather than being able to "extend" a file
-already on `main` - `docs/e2e-qualification.md`/`.background.md` and
-`tools/e2e/lib.sh`/`env.example` are therefore expected merge conflicts
-against PR #82, flagged explicitly for the coordinating session to
-sequence (see "Why AWS and Azure got separate scripts, not one
+own Provenance section). Because `tools/e2e/` did not exist on `main` yet at
+the time, this piece necessarily recreated `tools/e2e/lib.sh`,
+`tools/e2e/env.example`, and this document's own AWS-authored content in
+full (as a superset with Azure's own additions folded in) rather than being
+able to "extend" a file already on `main` - `docs/e2e-qualification.md`/
+`.background.md` and `tools/e2e/lib.sh`/`env.example` were therefore
+expected merge conflicts against PR #82, resolved by the coordinating
+session by diffing each incoming version against the merged AWS content to
+confirm it was a clean superset (or, where it was not, splicing the
+genuinely new content in directly) rather than either side's work being
+discarded (see "Why each provider got separate scripts, not one
 parameterized set" above for why every other file was kept additive-only
 instead). This piece was built, reviewed via local k3d mechanics smoke
 testing (mirroring the AWS piece's own scope: cluster creation, CRD/chart
@@ -499,3 +653,24 @@ cannot fully neutralize a real `az` session the way the AWS piece's
 placeholder credentials file does" above for exactly what that session was
 and the two read-only, no-mutation calls it received, discovered and
 disclosed rather than hidden.
+
+The GCP piece was written 2026-09-14, the same day, by a third concurrent
+session building the GCP equivalent while both the AWS and Azure pieces sat
+merge-pending (AWS as PR #82, Azure not yet opened), also on a worktree
+branched from `origin/main` before either had merged, for the same
+independent-sequencing reason. It mirrored the AWS pass's structure and
+safety bounds and adapted the pieces genuinely specific to GCP: pricing
+(static, not observed - see "GCP-specific design notes" above), network
+cross-validation (`gcloud` shapes, region/zone/network/subnetwork/image
+rather than VPC/subnet/security-group/AMI), credential handling
+(operator-generated WIF file rather than a shared-credentials profile), and
+cleanup (label-based GCP inventory sweep rather than tag-based AWS
+inventory sweep). Learning directly from the Azure piece's own disclosed
+ambient-credential finding, this piece explicitly checked for and confirmed
+a real `gcloud` session in its own sandbox before smoke-testing
+`teardown-gcp.sh`/`verify-gcp.sh`, and deliberately tested their logic
+against a stubbed `gcloud` binary instead of the real ambient session - the
+one place this piece's own process genuinely improved on the pattern rather
+than merely repeating it. Like both earlier pieces, it was built, reviewed,
+and committed without ever registering a real GitHub scale set, configuring
+real GCP credentials, or dispatching a real workflow.

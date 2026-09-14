@@ -1,0 +1,64 @@
+# Copy this file to an untracked location (e.g. tools/e2e/.env - already
+# covered by .gitignore's "*.env"/".env" pattern) and `source` it before
+# running any tools/e2e/*-gcp.sh script (or tools/e2e/register-scale-set.sh,
+# which is cloud-agnostic). See docs/e2e-qualification.md for what each
+# variable means, what it must be provisioned as, and the exact scripts
+# that read it. Never commit a filled-in copy of this file - it names real
+# credentials and real cloud/GitHub identifiers.
+#
+# This is the GCP counterpart of tools/e2e/env.example (AWS) - kept as its
+# own file, not a combined one, so sourcing it never also sets unrelated
+# AWS variables an operator running only the GCP harness has no reason to
+# provision or reason about.
+
+# --- Safety gates (tools/e2e/lib.sh) ---
+export E2E_CONFIRM_REAL_SPEND='I-UNDERSTAND-THIS-COSTS-REAL-MONEY'
+export E2E_MAX_RUNTIME_MINUTES=45   # 1-60, see tools/e2e/lib.sh's hard ceiling
+
+# --- GitHub: target test repository/org and scale set ---
+export E2E_GITHUB_URL='https://github.com/REPLACE_WITH_OWNER/REPLACE_WITH_TEST_REPO'
+export E2E_SCALE_SET_NAME='e2e-gcp-qualify'
+export E2E_RUNNER_GROUP='Default'
+export E2E_GITHUB_AUTH_MODE='pat'   # or 'app'
+export E2E_GITHUB_TOKEN_FILE='/path/to/mounted/pat-token'
+# export E2E_GITHUB_APP_CLIENT_ID='Iv1.REPLACE'
+# export E2E_GITHUB_APP_INSTALLATION_ID=1
+# export E2E_GITHUB_APP_KEY_FILE='/path/to/mounted/github-app.pem'
+
+# Registered by tools/e2e/register-scale-set.sh - set this AFTER running it:
+# export E2E_REGISTERED_SCALE_SET_ID=123
+
+# --- GitHub: workflow to dispatch (usually the same repo as E2E_GITHUB_URL,
+# but not required to be - see tools/e2e/dispatch-and-wait-gcp.sh) ---
+export E2E_TARGET_REPO='REPLACE_WITH_OWNER/REPLACE_WITH_TEST_REPO'
+export E2E_TARGET_WORKFLOW='e2e-trivial.yml'
+export E2E_TARGET_REF='main'
+
+# --- GCP: reuse the same pinned qualification network documented in
+# docs/qualification-real-cloud.md's GCP section ---
+export E2E_GCP_PROJECT='replace-with-project'
+export E2E_GCP_REGION='us-central1'
+export E2E_GCP_ZONE='us-central1-a'
+export E2E_GCP_NETWORK='runners'
+export E2E_GCP_SUBNETWORK='runners'
+# Exact image self-link - NEVER a rolling family reference (see
+# docs/qualification-real-cloud.md's GCP section on gcp_image).
+export E2E_GCP_IMAGE='projects/debian-cloud/global/images/debian-12-bookworm-v20250910'
+export E2E_GCP_MACHINE_TYPE='e2-micro'
+# GOOGLE_APPLICATION_CREDENTIALS-format file the operator generates via
+# Workload Identity Federation - e.g. `gcloud iam workload-identity-pools
+# create-cred-config` (external_account), or `gcloud auth
+# application-default login --impersonate-service-account=<SA>` for a
+# short-lived local ADC file (impersonated_service_account) - NEVER a static
+# service account key JSON. See docs/e2e-qualification.background.md's GCP
+# section for why this mirrors qualify-gcp.yml's WIF-only philosophy even
+# though this harness runs from an operator's own shell, not GitHub Actions.
+export E2E_GCP_CREDENTIALS_FILE='/path/to/gcp-application-default-credentials.json'
+
+# --- Kubernetes/cluster ---
+export E2E_NAMESPACE='runnerscout'
+export E2E_CLUSTER_NAME='runnerscout-e2e'
+export E2E_IMAGE='runnerscout:e2e'
+
+# --- Evidence ---
+export E2E_EVIDENCE_DIR='evidence/e2e-gcp-qualify'   # gitignored, see .gitignore's /evidence/

@@ -1,0 +1,30 @@
+# Rendered by tools/e2e/bring-up-gcp.sh via envsubst. One eligible pool (the
+# static-priced GCP Spot offering in capacity-catalog-gcp.yaml.tmpl);
+# allowOnDemand stays false - this harness never authorizes on-demand
+# fallback spend.
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerClass
+metadata:
+  name: e2e-gcp
+  namespace: ${E2E_NAMESPACE}
+spec:
+  resources:
+    cpu: ${E2E_GCP_OFFERING_CPU}
+    memoryMiB: ${E2E_GCP_OFFERING_MEMORY_MIB}
+    architecture: ${E2E_GCP_ARCHITECTURE}
+    capabilities: []
+  placement:
+    policy: lowest-price
+    regions: [${E2E_GCP_REGION}]
+    maxPriceMicros: ${E2E_GCP_MAX_PRICE_MICROS}
+    allowOnDemand: false
+  providers:
+    - name: gcp
+  catalogRef:
+    name: e2e-gcp
+  networkRef:
+    name: e2e-gcp
+  retry:
+    enabled: false
+    maxRetries: 0
+    acknowledgeRepeatedEffects: false

@@ -1,0 +1,46 @@
+# Rendered by tools/e2e/bring-up-gcp.sh via envsubst, using a STATIC price
+# (never a real observation) and a freshly refreshed observedAt timestamp.
+#
+# This is the one deliberate divergence from capacity-catalog.yaml.tmpl (the
+# AWS equivalent): no internal/prices GCP client exists anywhere in this
+# codebase, permanently, by design - see docs/prices-gcp.md and
+# docs/prices-gcp.background.md (issue #2, closed). E2E_GCP_PRICE_MICROS is
+# a fixed, operator-overridable constant (tools/e2e/lib.sh's
+# e2e_default_gcp_catalog_vars), never a live quote - there is no
+# e2e_refresh_gcp_catalog_inputs equivalent of e2e_refresh_aws_catalog_inputs's
+# real DescribeSpotPriceHistory call, and none will be added (see
+# docs/e2e-qualification.background.md's GCP section for why building one
+# would repeat the exact "usually works" guessing docs/prices-gcp.background.md
+# already rejected for the production adapter).
+#
+# The observedAt timestamp still needs refreshing, though: internal/placement.MaxPriceAge
+# (5 minutes) applies uniformly to every offering regardless of provider
+# (internal/placement/placement.go has no gcp-specific carve-out), and
+# CRD-driven mode has no price-refresh mechanism of any kind (nothing
+# re-applies this file on a timer) - so, exactly like the AWS pass's own
+# capacity-catalog.yaml.tmpl, tools/e2e/dispatch-and-wait-gcp.sh re-renders
+# and re-applies this exact file immediately before dispatch. Only
+# observedAt changes on that refresh; the price itself never does.
+apiVersion: runnerscout.io/v1alpha1
+kind: CapacityCatalog
+metadata:
+  name: e2e-gcp
+  namespace: ${E2E_NAMESPACE}
+spec:
+  offerings:
+    - id: gcp-spot-e2e
+      provider: gcp
+      region: ${E2E_GCP_REGION}
+      zone: ${E2E_GCP_ZONE}
+      machine: ${E2E_GCP_MACHINE_TYPE}
+      image: ${E2E_GCP_IMAGE}
+      cpu: ${E2E_GCP_OFFERING_CPU}
+      memoryMiB: ${E2E_GCP_OFFERING_MEMORY_MIB}
+      architecture: ${E2E_GCP_ARCHITECTURE}
+      capabilities: []
+      spot: true
+      priceMicros: ${E2E_GCP_PRICE_MICROS}
+      currency: USD
+      observedAt: "${E2E_GCP_PRICE_OBSERVED_AT}"
+  complete:
+    gcp: false

@@ -1,0 +1,33 @@
+# Rendered by tools/e2e/bring-up-gcp.sh via envsubst, only when
+# E2E_GITHUB_AUTH_MODE=pat. See runner-scaleset-app-gcp.yaml.tmpl for the
+# App auth equivalent - exactly one of the two is ever applied, matching the
+# RunnerScaleSet CRD's own XValidation mutual-exclusion rule
+# (api/v1alpha1/types.go's GitHubAuthentication). Identical in shape to
+# runner-scaleset-pat.yaml.tmpl (the AWS equivalent) except for
+# runnerClassRef, which points at this file's own GCP RunnerClass.
+#
+# suspend is deliberately false: unlike examples/multicloud (a documentation
+# worked example that must never admit for real), this harness has already
+# passed tools/e2e/lib.sh's confirmation-phrase and runtime-ceiling gates by
+# the time bring-up-gcp.sh applies this file, so there is no separate
+# "operator's second explicit go-ahead" step left to gate on here.
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerScaleSet
+metadata:
+  name: ${E2E_SCALE_SET_NAME}
+  namespace: ${E2E_NAMESPACE}
+spec:
+  runnerClassRef:
+    name: e2e-gcp
+  github:
+    url: ${E2E_GITHUB_URL}
+    scaleSetID: ${E2E_REGISTERED_SCALE_SET_ID}
+    auth:
+      mode: pat
+      secretRef:
+        name: github
+        key: token
+  maxRunners: 1
+  provisioningSeconds: ${E2E_PROVISIONING_SECONDS}
+  maxLifetimeSeconds: ${E2E_MAX_LIFETIME_SECONDS}
+  suspend: false

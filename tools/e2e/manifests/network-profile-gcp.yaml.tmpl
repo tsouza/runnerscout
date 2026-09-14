@@ -1,0 +1,26 @@
+# Rendered by tools/e2e/bring-up-gcp.sh via envsubst. "separate" mode (not
+# "wireguard" - see docs/operations.md's "Known limitations": wireguard mode
+# is not yet functionally usable end-to-end, so this harness, like
+# examples/multicloud, uses the mode that actually works). One GCP mapping,
+# reusing the same pinned qualification network documented in
+# docs/qualification-real-cloud.md's GCP section.
+#
+# networkID/subnetID use full GCP resource paths, matching
+# examples/multicloud/network.yaml's own "gcp" mapping shape - unlike AWS's
+# network-profile.yaml.tmpl, there is no per-zone identifier here: a GCP
+# subnetwork is regional, not zonal (see docs/qualification-real-cloud.md's
+# GCP section - "Unlike AWS, GCP zones are not derivable from a subnetwork").
+apiVersion: runnerscout.io/v1alpha1
+kind: NetworkProfile
+metadata:
+  name: e2e-gcp
+  namespace: ${E2E_NAMESPACE}
+spec:
+  mode: separate
+  mappings:
+    - providerRef:
+        name: gcp
+      region: ${E2E_GCP_REGION}
+      networkID: projects/${E2E_GCP_PROJECT}/global/networks/${E2E_GCP_NETWORK}
+      subnetID: projects/${E2E_GCP_PROJECT}/regions/${E2E_GCP_REGION}/subnetworks/${E2E_GCP_SUBNETWORK}
+      cidrs: [${E2E_GCP_SUBNET_CIDR}]
