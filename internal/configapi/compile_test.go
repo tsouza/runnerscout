@@ -208,6 +208,55 @@ func TestCompileAcceptsRetryPolicyWithPATAuthentication(t *testing.T) {
 	}
 }
 
+func TestCompileResolvesBudgetRefIntoBudgetDailyMicros(t *testing.T) {
+	s := fixture()
+	s.ScaleSet.Spec.BudgetRef = &api.LocalReference{Name: "daily"}
+	s.Budget = &api.CapacityBudget{ObjectMeta: metav1.ObjectMeta{Name: "daily", Namespace: "test"}, Spec: api.CapacityBudgetSpec{DailyBudgetMicros: 5000000}}
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.BudgetDailyMicros != 5000000 {
+		t.Fatal("budget ceiling not resolved into config", r.Config.BudgetDailyMicros)
+	}
+}
+
+func TestCompileNoBudgetRefLeavesUnbounded(t *testing.T) {
+	s := fixture()
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.BudgetDailyMicros != 0 {
+		t.Fatal("no budgetRef must leave admission unbounded", r.Config.BudgetDailyMicros)
+	}
+}
+
+func TestCompileRejectsBudgetRefWithoutBudget(t *testing.T) {
+	s := fixture()
+	s.ScaleSet.Spec.BudgetRef = &api.LocalReference{Name: "daily"}
+	if _, err := Compile(s); err == nil {
+		t.Fatal("budgetRef set but Budget missing must fail to compile")
+	}
+}
+
+func TestCompileRejectsUnreferencedBudget(t *testing.T) {
+	s := fixture()
+	s.Budget = &api.CapacityBudget{ObjectMeta: metav1.ObjectMeta{Name: "daily", Namespace: "test"}, Spec: api.CapacityBudgetSpec{DailyBudgetMicros: 1}}
+	if _, err := Compile(s); err == nil {
+		t.Fatal("Budget present but unreferenced must fail to compile")
+	}
+}
+
+func TestCompileRejectsCrossNamespaceOrWrongNameBudget(t *testing.T) {
+	s := fixture()
+	s.ScaleSet.Spec.BudgetRef = &api.LocalReference{Name: "daily"}
+	s.Budget = &api.CapacityBudget{ObjectMeta: metav1.ObjectMeta{Name: "daily", Namespace: "other"}, Spec: api.CapacityBudgetSpec{DailyBudgetMicros: 1}}
+	if _, err := Compile(s); err == nil {
+		t.Fatal("cross-namespace budget reference must fail to compile")
+	}
+}
+
 func TestCompileStaleCatalogAllowsRecoveryButNotAdmission(t *testing.T) {
 	s := fixture()
 	s.Catalog.Spec.Offerings = []api.Offering{{ID: "pool", Provider: "aws", Region: "us-east-1", Zone: "us-east-1a", Machine: "m5.large", Image: "image", CPU: 2, MemoryMiB: 4096, Architecture: "amd64", Capabilities: []string{"docker"}, Spot: true, PriceMicros: 100000, Currency: "USD", ObservedAt: metav1.NewTime(time.Unix(1, 0))}}

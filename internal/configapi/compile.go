@@ -27,6 +27,7 @@ type Snapshot struct {
 	Catalog   api.CapacityCatalog
 	Providers map[string]api.ProviderConfig
 	Network   *api.NetworkProfile
+	Budget    *api.CapacityBudget
 }
 
 type Resolved struct {
@@ -135,6 +136,20 @@ func Compile(s Snapshot) (Resolved, error) {
 	}
 	for _, o := range s.Catalog.Spec.Offerings {
 		cfg.Catalog.Offerings = append(cfg.Catalog.Offerings, placement.Offering{ID: o.ID, Provider: o.Provider, Region: o.Region, Zone: o.Zone, Machine: o.Machine, Image: o.Image, CPU: o.CPU, MemoryMiB: o.MemoryMiB, Architecture: o.Architecture, Vendor: o.Vendor, Capabilities: slices.Clone(o.Capabilities), Spot: o.Spot, PriceMicros: o.PriceMicros, Currency: o.Currency, ObservedAt: o.ObservedAt.Time})
+	}
+	// A CapacityBudget referenced by more than one RunnerScaleSet is not a
+	// shared pool: each referencing scale set resolves and enforces the same
+	// ceiling independently (see operator.Config.BudgetDailyMicros).
+	if limits.BudgetRef != nil {
+		if s.Budget == nil {
+			return result, errors.New("referenced budget configuration is missing")
+		}
+		if err := object(s.Budget.ObjectMeta, ns, limits.BudgetRef.Name); err != nil {
+			return result, err
+		}
+		cfg.BudgetDailyMicros = s.Budget.Spec.DailyBudgetMicros
+	} else if s.Budget != nil {
+		return result, errors.New("unreferenced budget configuration")
 	}
 	if err := cfg.Validate(); err != nil {
 		return result, err
