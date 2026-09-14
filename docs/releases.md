@@ -25,10 +25,12 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
    artifacts. `release-build.yml` keeps its standalone `workflow_dispatch`
    trigger for ad hoc manual builds against any commit, but that path only
    ever runs the `build` job, never the `publish` or `release` jobs below.
-3. **`publish`**, a job inside `release-build.yml`, runs only when that
-   workflow was itself invoked via `workflow_call` — which today only ever
-   happens from `release.yml`'s `build` job above, after `preflight` has
-   passed. It pushes the multi-arch image just built to
+3. **`publish`**, a job inside `release-build.yml`, runs only when the
+   caller passes `publish: true` as a `workflow_call` input — which today
+   only ever happens from `release.yml`'s `build` job above, after
+   `preflight` has passed; `release-build.yml`'s `workflow_dispatch` trigger
+   does not declare that input, so a direct manual run can never set it. It
+   pushes the multi-arch image just built to
    `ghcr.io/tsouza/runnerscout`, tagged with both the resolved commit SHA and
    the release tag, using the workflow's own `GITHUB_TOKEN` (`packages:
    write` permission) — GHCR accepts this for a public repository with no
@@ -50,9 +52,9 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
    `--certificate-identity-regexp`/`--certificate-oidc-issuer` pair and
    `--type spdxjson`.
 4. **`release`**, a job inside `release-build.yml`, runs under the exact
-   same `if: github.event_name == 'workflow_call'` condition as `publish`
-   (and depends on it via `needs: publish`), so it is reachable only from
-   the same tag-triggered, preflight-gated path. It never creates the git
+   same `if: inputs.publish` condition as `publish` (and depends on it via
+   `needs: publish`), so it is reachable only from the same tag-triggered,
+   preflight-gated path. It never creates the git
    tag itself — that already exists by the time this job runs, since a real
    `git push` of a `v*.*.*` tag is what triggered `release.yml` in the first
    place. It creates the GitHub Release object for that tag with

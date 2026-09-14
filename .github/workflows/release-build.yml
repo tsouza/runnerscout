@@ -7,21 +7,24 @@
 #
 # `publish` pushes the image built above to ghcr.io/tsouza/runnerscout and
 # signs it keylessly with cosign (Sigstore Fulcio/Rekor - no stored private
-# key). It runs ONLY when this workflow is invoked via workflow_call:
-# `github.event_name` is set to the literal string "workflow_call" by
-# GitHub itself whenever a workflow is invoked that way, and to
-# "workflow_dispatch" for a direct manual run - this is not a value either
-# trigger's `inputs:` can spoof. See
-# https://docs.github.com/en/actions/learn-github-actions/contexts#github-context.
+# key). It runs ONLY when the caller passes `publish: true` as a
+# `workflow_call` input. This is NOT gated on `github.event_name ==
+# 'workflow_call'`: inside a called reusable workflow, `github.event_name`
+# reflects the event that triggered the top-level caller run (here,
+# release.yml's own tag `push` trigger), not the literal string
+# "workflow_call" - so that comparison is always false and can never gate
+# anything. The `publish` input is declared only under this file's
+# `workflow_call:` trigger, not under `workflow_dispatch:`, so a direct
+# manual run always sees it as unset/false with no way to opt in by hand.
 #
 # `release` creates the GitHub Release object for the pushed tag and
 # attaches the Helm chart, checksums and SBOM built above as release assets.
-# It runs under the exact same `if: github.event_name == 'workflow_call'`
-# condition as `publish`, for the exact same reason - see `publish`'s own
-# comment below. It never creates the underlying git tag itself: that tag
-# already exists by the time this job runs, because a real `git push` of a
-# `v*.*.*` tag is what triggered release.yml in the first place. `release`
-# only attaches a Release object to that pre-existing tag.
+# It runs under the exact same `if: inputs.publish` condition as `publish`,
+# for the exact same reason - see `publish`'s own comment below. It never
+# creates the underlying git tag itself: that tag already exists by the
+# time this job runs, because a real `git push` of a `v*.*.*` tag is what
+# triggered release.yml in the first place. `release` only attaches a
+# Release object to that pre-existing tag.
 #
 # Today the only caller that reaches workflow_call is release.yml's `build`
 # job, itself gated on tools/release_preflight.py passing - so `publish` and
@@ -62,6 +65,12 @@ on:
         description: Release tag (vMAJOR.MINOR.PATCH) to push and sign the image as, alongside commit_sha
         required: true
         type: string
+      publish:
+        description: >-
+          Set by the caller to enable the publish/release jobs. Not declared
+          under workflow_dispatch, so a direct manual run can never set it.
+        required: true
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -186,12 +195,10 @@ jobs:
   publish:
     name: publish
     needs: build
-    # See this file's header: github.event_name is "workflow_call" only for
-    # runs GitHub itself invoked via workflow_call (release.yml, after its
-    # preflight gate) and is always "workflow_dispatch" for a direct manual
-    # run, regardless of any input passed. This condition is what keeps
-    # `publish` from ever firing on an ad hoc workflow_dispatch build.
-    if: github.event_name == 'workflow_call'
+    # See this file's header: `publish` is a workflow_call-only input, so
+    # this condition is what keeps `publish` from ever firing on an ad hoc
+    # workflow_dispatch build.
+    if: inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -285,15 +292,12 @@ jobs:
   release:
     name: release
     needs: publish
-    # Identical condition to `publish` above, checked the same way: this
-    # value comes from GitHub itself ("workflow_call" only for a run GitHub
-    # invoked via workflow_call, "workflow_dispatch" for a direct manual
-    # run regardless of any input), so no input can spoof it. `needs:
+    # Identical condition to `publish` above, checked the same way. `needs:
     # publish` additionally means this job cannot even start unless publish
     # already ran (and this `if` re-check is not redundant with that: a
     # skipped `publish` still satisfies `needs`, so the `if` is what
     # actually keeps `release` off the workflow_dispatch path).
-    if: github.event_name == 'workflow_call'
+    if: inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

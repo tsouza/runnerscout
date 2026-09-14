@@ -72,3 +72,4 @@ jobs:
     with:
       commit_sha: ${{ needs.preflight.outputs.sha }}
       release_tag: ${{ github.ref_name }}
+      publish: true
