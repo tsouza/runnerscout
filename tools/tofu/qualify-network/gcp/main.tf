@@ -125,6 +125,16 @@ resource "google_compute_subnetwork" "qualify" {
 # provisioned - tracked as a gap for whoever wires up that harness's GCP
 # credentials/network, not silently assumed to work.
 
+# Narrower than the AWS/Azure siblings' own qualify-network egress
+# reasoning, which leaves all outbound ports open specifically because a
+# guest OS needs more than 443 (package repos, time sync, DNS) and
+# wrongly narrowing that would turn a network bug into a mysterious
+# runner-registration failure. This module accepts that same risk for GCP
+# on the strength of the "known limitation" note above: this network has
+# no route to the internet at all yet (no Cloud NAT), so this rule
+# doesn't currently gate anything real - if/when Cloud NAT is wired up
+# for tools/e2e/bring-up-gcp.sh, revisit whether 443-only still holds for
+# a real guest boot (apt/NTP), the same way AWS/Azure already do.
 resource "google_compute_firewall" "allow_egress_https" {
   project     = var.project_id
   name        = "runners-allow-egress-https"

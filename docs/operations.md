@@ -27,10 +27,16 @@ exclusive. Credentials are mounted files; never put values into command argument
 
 Use `catalogPath` to reload a complete JSON price snapshot for new admissions.
 Update that file atomically. Each admitted allocation retains its original snapshot
-and deadline. Provider quote discovery is not yet automatic. Restore the original
-provider/class configuration if durable fleet binding rejects a change; do not delete
-state to bypass it. Admission stops at 1,000 retained allocations until archival is
-implemented. This experimental runtime is not yet suitable for unattended production.
+and deadline. Setting `awsPriceRefresh`/`azurePriceRefresh` in the config file opts
+into live Spot price observation (AWS EC2, Azure Retail Prices) immediately
+before each admission cycle, refreshing every matching Spot offering's price
+and freshness from the real provider API; GCP has no equivalent live API and
+stays on its static catalog price. None of this discovers new pools - adding
+an offering to the catalog remains a manual, file-based change either way.
+Restore the original provider/class configuration if durable fleet binding
+rejects a change; do not delete state to bypass it. Admission stops at 1,000
+retained allocations - no automatic archival exists yet. This experimental
+runtime is not yet suitable for unattended production.
 
 For local Kubernetes qualification, create a dedicated kind v0.33.0 cluster using
 kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5, set `RUNNERSCOUT_TEST_KUBECONFIG` to its explicit kubeconfig,

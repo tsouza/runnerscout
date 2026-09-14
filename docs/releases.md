@@ -1,8 +1,7 @@
 # Releases
 
 RunnerScout has no accepted release baseline. Version tags use
-`vMAJOR.MINOR.PATCH`; pre-1.0 APIs remain experimental. The release pipeline is
-tracked in [#17](https://github.com/tsouza/runnerscout/issues/17).
+`vMAJOR.MINOR.PATCH`; pre-1.0 APIs remain experimental.
 
 ## Automated pipeline
 
@@ -83,11 +82,11 @@ tag release, and change its visibility to public (and confirm it's linked to
 this repository) before downstream consumers can pull or verify it without
 authentication. Every push after that stays public.
 
-This closes out issue #17's originally-stated scope: the pipeline now runs
-`preflight` → `build` → `publish`/sign → `release` end to end, every stage
-gated on the same non-bypassable `tools/release_preflight.py` check and the
-same `workflow_call`-only condition, and it remains fully inert — no image
-pushed, no signature created, no GitHub Release opened — until a human pushes
+The pipeline runs `preflight` → `build` → `publish`/sign → `release` end to
+end, every stage gated on the same non-bypassable
+`tools/release_preflight.py` check and the same `workflow_call`-only
+condition, and it remains fully inert — no image pushed, no signature
+created, no GitHub Release opened — until a human pushes
 a real `v*.*.*` tag.
 
 ## Required acceptance
@@ -138,8 +137,13 @@ three providers' qualification identities (AWS's `AWS_QUALIFICATION_ROLE_ARN`;
 Azure's `AZURE_QUALIFICATION_CLIENT_ID`/`AZURE_QUALIFICATION_TENANT_ID`/
 `AZURE_QUALIFICATION_SUBSCRIPTION_ID`; GCP's `GCP_QUALIFICATION_PROJECT_ID`/
 `GCP_QUALIFICATION_SERVICE_ACCOUNT`/`GCP_QUALIFICATION_WORKLOAD_IDENTITY_PROVIDER`)
-are provisioned in this repository today, but this workflow has never
-actually been dispatched.
+are provisioned in this repository today, and the workflow has been
+dispatched against real AWS, Azure and GCP resources for each provider, with
+a clean pass and independently verified zero leftover billable resources on
+each - see [qualification-real-cloud.background.md](qualification-real-cloud.background.md#what-real-dispatches-found)
+for what each real dispatch found and fixed along the way. A release
+candidate still needs its own qualification run against the exact candidate
+commit; a past pass on a different commit does not carry forward.
 
 ## Artifacts and promotion
 
