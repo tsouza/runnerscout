@@ -1,13 +1,8 @@
 <p align="center">
-
-```
-    ____                              _____                  __ 
-   / __ \__  ______  ____  ___  _____/ ___/_________  __  __/ /_
-  / /_/ / / / / __ \/ __ \/ _ \/ ___/\__ \/ ___/ __ \/ / / / __/
- / _, _/ /_/ / / / / / / /  __/ /   ___/ / /__/ /_/ / /_/ / /_  
-/_/ |_|\__,_/_/ /_/_/ /_/\___/_/   /____/\___/\____/\__,_/\__/
-```
-
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img src="docs/assets/logo-light.svg" alt="RunnerScout" width="323">
+  </picture>
 </p>
 
 <p align="center">
