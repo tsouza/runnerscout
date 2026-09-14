@@ -17,8 +17,8 @@ Publish concise user and contributor documentation; track unfinished work in
 GitHub issues. Do not mistake fixture tests for live-cloud qualification or
 editable CI for independent evaluator custody.
 
-Immediately before cutting 0.1.0, run project-wide Adversarial Critic Pass Review
-(ACPR) on the final release candidate, after implementation is complete. Review
+Immediately before cutting 0.1.0, run a full adversarial critic pass on the
+final release candidate, after implementation is complete. Review
 DRY, KISS, inconsistencies, illogical reasoning, unjustified deferrals,
 contradictions and tests that can pass without proving behavior. Resolve findings
 and re-review the final candidate. Keep review evidence outside release source.

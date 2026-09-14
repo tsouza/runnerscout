@@ -75,7 +75,7 @@ func TestRefreshAWSPricesUpdatesSuccessfulAWSOffering(t *testing.T) {
 // untouched. AWSSpotClient.Observe only ever returns a Spot price (see its
 // own doc comment), so overwriting an on-demand offering's price with it
 // would silently corrupt the one price placement.Choose's MaxPriceMicros
-// ceiling actually compares against - an ACPR finding, not a case this
+// ceiling actually compares against - a real gap, not a case this
 // feature was ever exercised against before.
 func TestRefreshAWSPricesNeverOverwritesOnDemandOffering(t *testing.T) {
 	o := &Operator{AWSPrices: &fakeAWSPrices{observe: func(ctx context.Context, region, zone, instanceType string) (prices.Quote, error) {
