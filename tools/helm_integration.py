@@ -28,7 +28,7 @@ def main():
     evidence.mkdir(parents=True)
     manifest = {"scope": "real Kubernetes and Helm lifecycle with an idle HTTPS GitHub fixture; no live GitHub job or cloud VM", "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "checks": {}, "cleanup_errors": [], "verdict": "fail"}
     manifest["harness_sha256"] = hashlib.sha256(b"\0".join((ROOT / "tools" / name).read_bytes() for name in ("helm_integration.py", "helm_crd_cases.py"))).hexdigest()
-    manifest["example_sha256"] = hashlib.sha256(b"\0".join((ROOT / "examples/multicloud" / name).read_bytes() for name in ("providers.yaml", "class.yaml", "catalog.yaml", "network.yaml", "values.yaml"))).hexdigest()
+    manifest["example_sha256"] = hashlib.sha256(b"\0".join((ROOT / "examples/multicloud" / name).read_bytes() for name in ("providers.yaml", "class.yaml", "catalog.yaml", "network.yaml", "budget.yaml", "values.yaml"))).hexdigest()
     deadline = time.monotonic() + 1500
     sequence = 0
     diagnostic_kubeconfig = None
