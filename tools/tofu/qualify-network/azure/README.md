@@ -66,20 +66,37 @@ credential, or role assignment of its own - provisioning the identity this
 module runs under is a separate, human-driven bootstrap step, out of scope
 here.
 
-## One-time bootstrap, long-lived result
+## Apply before a run, destroy right after
 
-Run this once. The resource group/VNet/subnet/NSG it creates are meant to
-live indefinitely and be reused by every future qualification/E2E run - this
-module has no destroy-on-idle, TTL, or other ephemeral lifecycle logic, and
-none should be added. Tearing it down is a deliberate, manual `tofu destroy`
-if this qualification network is ever retired.
+None of this module's resources (resource group, VNet, subnet, NSG) bill by
+the hour, so applying this once and leaving it standing indefinitely would
+not itself cost anything. It is nonetheless meant to follow the same
+apply-before/destroy-after-each-run lifecycle as the sibling `../aws` module
+(where that lifecycle is cost-driven - `../aws/README.md`'s "Ephemeral"
+section - since AWS's NAT Gateway bills hourly) - for consistency across all
+three providers, and so a single future CI workflow can wrap `tofu apply` →
+dispatch `qualify.yml`/the E2E harness with this module's outputs → `tofu
+destroy` identically for every provider, rather than needing
+provider-specific lifecycle handling. `qualify.yml`/`bring-up-azure.sh`
+still treat `azure_resource_group`/`azure_subnet_id`/`azure_nsg_id` as
+pinned, pre-existing identifiers for the duration of one dispatch - "pinned"
+here means "fixed for that run," not "created once and never rebuilt."
+`tofu destroy -var location=...` (using the same `location` value `apply`
+was given) tears down every resource this module created.
 
 ## State
 
 This module uses local OpenTofu/Terraform state (a `terraform.tfstate` file
-next to these `.tf` files, gitignored). It is run rarely, by hand or from a
-single CI identity, so a remote state backend was deliberately not built for
-it - see the PR this module was introduced in for the reasoning. If you run
-`apply` more than once from different machines, make sure you're sharing the
-same state file, or you will create a second, duplicate network instead of
+next to these `.tf` files, gitignored). Because the network is meant to be
+created and destroyed within a single run (see above) rather than persisted
+across separate invocations, the state file only needs to survive for the
+lifetime of that one apply-then-destroy cycle - a remote state backend was
+deliberately not built for it. If you split `apply` and `destroy` across
+different machines/CI jobs, make sure the state file `apply` produced is
+passed through to whichever job runs `destroy` (e.g. as a build artifact),
+or `destroy` will find nothing to tear down and the resources will be
+orphaned (billing/lingering until removed by hand). If instead you run
+`apply` more than once from different machines without an intervening
+`destroy`, make sure you're sharing the same state file, or you will create
+a second, duplicate network instead of
 updating the first.
