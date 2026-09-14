@@ -640,8 +640,19 @@ Every design decision above was reasoned through and reviewed without ever
 running this workflow for real - issue #3's own qualification purpose is
 precisely to find what that kind of review cannot. The first real
 dispatches against all three clouds (2026-09-14, after issue #89 folded
-network provisioning into this same workflow) found three real bugs, none
-caught by any prior review:
+network provisioning into this same workflow) found several real bugs,
+none caught by any prior review. Two separate, unrelated identity issues
+also blocked the very first attempt at each of these dispatches
+(pre-existing, not workflow bugs): this repository has GitHub's
+"immutable subject claims" org policy enforced, so the actual presented
+OIDC `sub` claim is `repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:...`,
+not the plain `repo:<owner>/<repo>:ref:...` every AWS/Azure identity had
+originally been provisioned with - fixed by updating each federated
+credential's/IAM role's trust condition to the immutable form, for both
+the qualification and network-provisioner identity on both clouds (GCP's
+WIF attribute mapping was unaffected - it does not do raw `sub`-string
+matching). With that fixed, dispatches actually reached this workflow's
+own logic, surfacing the bugs below:
 
 - **A GCP test bug, not a production bug** (fixed separately - see that
   fix's own PR/commit for the full diagnosis): `TestQualifyRealGCPSpotLifecycle`
@@ -655,52 +666,73 @@ caught by any prior review:
   resource list --resource-group "$rg" --tag runnerscout-operation="$alloc"`
   calls error outright - `az resource list` does not accept `--resource-group`
   and `--tag` together. This had never been hit before because every
-  earlier dispatch attempt failed even earlier in the job (see the next
-  finding, and the one after it) - this specific step had simply never
-  run yet. Fixed by moving the tag match into the `--query` JMESPath
-  expression instead of the server-side `--tag` filter.
-- **A stale-credential bug in the AWS and GCP VM-level safety-net steps**,
-  found because a real AWS network-provisioner IAM policy was initially
-  missing `ec2:DescribeVpcAttribute` (needed for `aws_vpc`'s own
-  `enable_dns_hostnames` reconciliation - since fixed) and a real Azure
-  federated-credential subject mismatch (this repository has GitHub's
-  "immutable subject claims" org policy enforced, so the actual presented
-  `sub` claim is `repo:<owner>@<owner-id>/<repo>@<repo-id>:ref:...`, not
-  the plain `repo:<owner>/<repo>:ref:...` every identity was originally
-  provisioned with - fixed by updating each federated credential's/IAM
-  role's trust condition to the immutable form) each caused a network
-  `tofu apply` failure partway through this workflow's job. When that
-  happens, every qualification-identity credential step after it is
-  correctly skipped (implicit `success()` gating) - but `AWS_ACCESS_KEY_ID`/
-  `GOOGLE_APPLICATION_CREDENTIALS` are left set to whatever the
-  NETWORK-PROVISIONER identity's credentials were, since nothing overwrote
-  them. The AWS and GCP VM-level safety-net steps both originally checked
-  only "is this env var non-empty" to decide whether qualification
-  credentials were ever configured - which is true here, just for the
-  wrong identity - so both steps ran anyway and failed with
-  `UnauthorizedOperation`/equivalent trying to query EC2 instances or GCE
-  resources with an identity that was never granted those permissions,
-  instead of cleanly recognizing "the qualification phase never got this
-  far." Fixed by checking a marker instead
-  (`RUNNERSCOUT_QUALIFY_ACCOUNT_ID` for AWS, a new
-  `RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED` for GCP) that is only ever set
+  earlier dispatch attempt failed even earlier in the job (the OIDC
+  subject mismatch above, on the very first attempt) - this specific step
+  had simply never run yet. Fixed by moving the tag match into the
+  `--query` JMESPath expression instead of the server-side `--tag` filter.
+- **A real AWS IAM gap**: the network-provisioner policy was missing
+  `ec2:DescribeVpcAttribute`, needed for `aws_vpc`'s own
+  `enable_dns_hostnames` reconciliation - `tofu apply` failed partway
+  through creating the VPC itself (leaving one orphaned, free VPC with no
+  subnet/NAT Gateway/route table ever created after it - manually verified
+  and cleaned up directly, zero ongoing cost), and the equivalent `tofu
+  destroy` failed the same way. Fixed by adding the missing permission to
+  the live role.
+- **A stale-credential bug in the AWS VM-level safety-net step**,
+  surfaced by the AWS IAM gap above: when a network `tofu apply` failure
+  causes every qualification-identity credential step after it to be
+  correctly skipped (implicit `success()` gating), `AWS_ACCESS_KEY_ID` is
+  left set to whatever the NETWORK-PROVISIONER identity's credentials
+  were, since nothing overwrote them. The AWS VM-level safety-net step
+  originally checked only "is `AWS_ACCESS_KEY_ID` non-empty" to decide
+  whether qualification credentials were ever configured - true here, just
+  for the wrong identity - so it ran anyway and failed with
+  `UnauthorizedOperation` trying to call `ec2:DescribeInstances` with a
+  role that was never granted that permission, instead of cleanly
+  recognizing "the qualification phase never got this far." Fixed by
+  checking `RUNNERSCOUT_QUALIFY_ACCOUNT_ID` instead - an env var set only
   by a step gated behind the qualification identity's own auth having
-  actually succeeded - not by the mere presence of *some* AWS/GCP
-  credential in the job environment. Azure's equivalent safety-net step
-  never had this bug: it checks `az account show` succeeding, a live call
-  against whichever identity is *currently* active, not a static env-var
-  presence check - so it already, correctly, would have reported "Azure
-  credentials were never configured this run" had the qualification
-  `azure/login` step been skipped.
+  actually succeeded, not by the mere presence of *some* AWS credential in
+  the job environment. GCP's VM-level safety-net step has the exact same
+  shape (`GOOGLE_APPLICATION_CREDENTIALS` would suffer the identical
+  problem) and was fixed the same way as a preventative measure (a new
+  `RUNNERSCOUT_QUALIFY_GCP_AUTH_CONFIRMED` marker) even though no real GCP
+  dispatch has actually triggered this specific failure yet - GCP's
+  network apply has, so far, either succeeded or failed for reasons
+  unrelated to IAM (see below), never yet leaving qualification
+  credentials unconfigured while `GOOGLE_APPLICATION_CREDENTIALS` stayed
+  set to the network-provisioner's file. Azure's equivalent safety-net
+  step never had this bug at all: it checks `az account show` succeeding,
+  a live call against whichever identity is *currently* active, not a
+  static env-var presence check.
+- **A second real GCP IAM gap**, found on the dispatch immediately after
+  the pre-create test bug was fixed: `gcp_sdk.go`'s `createGCP` sets
+  labels as part of the `instances.create`/`disks.create` insert calls
+  themselves, never via a distinct `setLabels` API call - which had led to
+  the (wrong) conclusion, during a documentation pass, that
+  `compute.instances.setLabels`/`compute.disks.setLabels` were therefore
+  unnecessary permissions. A real dispatch proved that reasoning wrong at
+  the IAM-permission level: GCE's own authorization check for setting
+  labels during instance/disk creation is still gated on the `setLabels`
+  permission, not just the `create` permission, even though no separate
+  `setLabels` API method is ever called. The create failed with a live
+  `Required 'compute.disks.setLabels' permission` error (found via Cloud
+  Logging, since `gcp_sdk.go`'s own error wrapping - `"GCP creation
+  commitment unknown"` - deliberately does not leak the real provider
+  error). Fixed by adding both `compute.instances.setLabels` and
+  `compute.disks.setLabels` back to the live role (the disk-side one was
+  the one that actually failed; the instance-side one was added
+  proactively, on the same reasoning, before it could cause a second
+  failed round-trip).
 
-None of these three bugs cost any real money: in every case, the failure
-happened before any billable VM was ever created (or, for the orphaned
-NIC left behind by a separately-diagnosed Azure VM-creation failure, on a
-resource type that does not bill by itself). Each was found, diagnosed
-against the real cloud APIs, and fixed as its own focused PR rather than
-folded silently into a larger change - matching this workflow's own
-one-focused-unit-per-provider review discipline from when it was first
-built.
+None of these bugs cost any real money: in every case, the failure
+happened before any billable VM was ever created, or on a resource type
+that does not bill by itself (a bare VPC; an Azure NIC/VNet/NSG/subnet).
+Each was found, diagnosed against the real cloud APIs (Cloud Logging, in
+GCP's case, since the adapter's own errors are deliberately generic), and
+fixed as its own focused PR rather than folded silently into a larger
+change - matching this workflow's own one-focused-unit-per-provider review
+discipline from when it was first built.
 
 ## Provenance
 
