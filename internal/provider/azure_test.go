@@ -289,6 +289,9 @@ func TestAzureCreateAmbiguousDeploymentFailureStaysUnknown(t *testing.T) {
 	if err == nil || errors.Is(err, lifecycle.ErrCapacity) || receipt.ResourceID != "" {
 		t.Fatal("ambiguous deployment failure misclassified as capacity", receipt, err)
 	}
+	if !strings.Contains(err.Error(), "ResourceQuotaExceeded") {
+		t.Fatal("real deployment failure detail was discarded instead of wrapped", err)
+	}
 }
 func TestAzureCreateCapacityCodeWithResidualNICStaysUnknown(t *testing.T) {
 	p, _ := azureFailedDeploymentFixture(t, map[string]any{

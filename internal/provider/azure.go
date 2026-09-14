@@ -92,7 +92,16 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 				return lifecycle.Creation{}, lifecycle.ErrCapacity
 			}
 		}
-		return lifecycle.Creation{}, errors.New("Azure deployment commitment unknown")
+		// The commitment is unknown regardless of *why* deploy() failed (a
+		// capacity rejection is definitive and returns above; everything
+		// else - a transient transport error, a non-capacity Failed
+		// deployment, a context deadline - leaves survivorship unconfirmed
+		// the same way), but the real cause matters for diagnosing which of
+		// those it was. Wrapping instead of discarding is what let the
+		// "fast poller failure" investigation identify its actual error on
+		// the next dispatch instead of guessing from Activity Log timing
+		// alone (see docs/qualification-real-cloud.background.md).
+		return lifecycle.Creation{}, fmt.Errorf("Azure deployment commitment unknown: %w", err)
 	}
 	return p.finishAzureDiskOwnership(ctx, a)
 }
