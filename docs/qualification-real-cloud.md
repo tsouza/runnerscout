@@ -270,7 +270,7 @@ configured:
 | `azure_image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
 | `azure_vm_size` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
 | `azure_availability_zone` | `1`, `2` or `3`. Must be supported by both `azure_region` and `azure_vm_size`. |
-| `azure_disk_controller_type` | Optional, defaults to `unset`. Leave `unset` for Azure's own default controller-type inference (correct for most VM sizes). Set to `NVMe` or `SCSI` only if `azure_vm_size` requires a specific controller type - see "Choosing a compatible `azure_vm_size`" below. |
+| `azure_disk_controller_type` | Optional, defaults to `unset`. Leave `unset` for Azure's own default controller-type inference (correct for most VM sizes). Only meaningful for a VM size that already supports `SCSI` where Azure's own inference picks the wrong default among several supported types - **cannot** unlock an `NVMe`-only VM size for a classic managed image (Azure rejects that combination outright). See "Choosing a compatible `azure_vm_size`" below. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
 
 The image/VM size/subscription are auto-discovered from nowhere -
@@ -289,30 +289,47 @@ provisioning" below).
 
 A classic managed image (`Microsoft.Compute/images/...`, what
 `azure_image_id` must point to - see above) carries no disk-controller-type
-metadata of its own, unlike a Compute Gallery image. Most Azure VM size
-families let Azure infer a working controller type from the image anyway,
-but some newer families (e.g. the `Dv7`/`Ev7`/`Fv7` generations) only
-support `NVMe` and cannot boot such an image without `azure_disk_controller_type`
-set explicitly to `NVMe`. Confidential-computing families (`DCasv6`/`ECasv6`
-and similar) have a separate, unrelated incompatibility: they require an
-explicit `securityProfile.securityType` this workflow's VM deployment
-template does not set, and are not supported by `azure_disk_controller_type`
-or any other input here. Before picking `azure_vm_size`, confirm both:
+metadata of its own, unlike a Compute Gallery image - and, confirmed
+against the real Azure API, **cannot be overridden to boot on an
+`NVMe`-only VM size no matter what `azure_disk_controller_type` is set
+to**: Azure rejects the combination outright with `InvalidParameter:
+"Disk controller type 'NVMe' not supported for user VM image."`
+`azure_disk_controller_type` therefore cannot unlock the newer
+`Dv7`/`Ev7`/`Fv7`-class families (or any other VM size whose *only*
+supported controller type is `NVMe`) for a classic managed image - despite
+the ARM API accepting an explicit `diskControllerType` value in principle,
+a classic image's own implicit `SCSI` default is not something a VM-level
+request can override. Before picking `azure_vm_size`, confirm all three:
 
-- Its supported disk controller type(s):
+- Its supported disk controller type(s) include `SCSI`:
   `az vm list-skus --location <region> --size <size> --resource-type
   virtualMachines --query "[0].capabilities[?name=='DiskControllerTypes']"`.
-  If the result is `NVMe` only, set `azure_disk_controller_type=NVMe`; if it
-  includes `SCSI` (alone or alongside `NVMe`), leave `azure_disk_controller_type`
-  `unset`.
+  If the result is `NVMe` only, this size cannot run a classic managed
+  image at all, `azure_disk_controller_type` included - pick a different
+  size. `azure_disk_controller_type` remains useful only for a size that
+  already supports `SCSI` where Azure's own inference happens to pick the
+  wrong default among several supported types - a narrower case than
+  originally intended for this input.
 - It isn't a confidential-computing family (`DC*`/`EC*`) - those need a
-  `securityProfile` change this workflow doesn't make, regardless of
-  `azure_disk_controller_type`.
+  `securityProfile.securityType` this workflow's VM deployment template
+  does not set, unrelated to disk controller type entirely.
 - Its Spot/low-priority core quota headroom in the target subscription/region
   (`az vm list-usage --location <region> --query "[?name.value=='lowPriorityCores']"`)
   covers the size's own vCPU count - a subscription's default quota can be
   quite low (single digits), which rules out larger sizes (memory-optimized
   `M`-series, for example) even when they're otherwise controller-compatible.
+
+In practice, a subscription/region combination whose entire `SCSI`-capable,
+non-confidential-computing VM catalog is empty (checked directly via
+`az vm list-skus` across every unrestricted size) has **no compatible size
+at all** for a classic managed image, regardless of any input this
+workflow exposes - the only real fixes are building the image as a
+Compute Gallery image version instead (a real adapter capability this
+codebase does not yet have - `validateAzureImage` in `azure_image.go`
+hard-requires a `Microsoft.Compute/images` resource type), using a
+confidential-computing size (needs the unrelated `securityProfile` support
+this codebase also does not yet have), or qualifying in a different
+region/subscription that does carry a compatible size.
 
 ### Azure hard bounds
 
