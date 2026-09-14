@@ -708,9 +708,11 @@ own logic, surfacing the bugs below:
   `Client.AuthFailure.ServiceLinkedRoleCreationNotPermitted: The provided
   credentials do not have permission to create the service-linked role for
   EC2 Spot Instances` (found via CloudTrail, since `createAWS`'s own error
-  wrapping - `"AWS create commitment unknown"` - deliberately does not
-  leak the real provider error, the same discipline as `gcp_sdk.go`'s
-  wrapping). AWS auto-creates the `AWSServiceRoleForEC2Spot`
+  wrapping - `"AWS create commitment unknown"` - discarded the real
+  provider error entirely at the time, the same as `gcp_sdk.go`'s wrapping
+  below; both were later fixed by PR #112 to wrap instead of discard,
+  after this exact pattern cost real diagnosis time twice in this same
+  session). AWS auto-creates the `AWSServiceRoleForEC2Spot`
   service-linked role the first time any identity in an account ever
   requests a Spot Instance - and creating it requires
   `iam:CreateServiceLinkedRole`, a permission the qualification identity
@@ -811,8 +813,9 @@ own logic, surfacing the bugs below:
   `setX` API method is ever called. Each create attempt failed with a live
   `Required 'compute.<resource>.setX' permission` error in turn (found via
   Cloud Logging, since `gcp_sdk.go`'s own error wrapping - `"GCP creation
-  commitment unknown"` - deliberately does not leak the real provider
-  error): `compute.disks.setLabels` first, then `compute.instances.setMetadata`.
+  commitment unknown"` - discarded the real provider error entirely at
+  the time, later fixed by PR #112, see above): `compute.disks.setLabels`
+  first, then `compute.instances.setMetadata`.
   Fixed by adding `compute.instances.setLabels`, `compute.disks.setLabels`,
   `compute.instances.setMetadata` and `compute.instances.setScheduling` to
   the live role (the last one added proactively, on the same reasoning,
@@ -1059,11 +1062,13 @@ happened before any billable resource was ever created, or left behind
 only a resource type that does not bill by itself (a bare
 VPC/subnet/internet-gateway/security-group; an Azure NIC/VNet/NSG/subnet).
 Each was found, diagnosed against the real cloud APIs (Cloud Logging, in
-GCP's case, and Azure's Activity Log, since both adapters' own errors are
-deliberately generic; AWS's own CloudTrail for the service-linked-role
-gap), and fixed as its own focused PR rather than folded silently into a
-larger change - matching this workflow's own one-focused-unit-per-provider
-review discipline from when it was first built.
+GCP's case, and Azure's Activity Log; AWS's own CloudTrail for the
+service-linked-role gap) - all three adapters' own errors were generic at
+the time and discarded the real cause, later fixed by PR #112 (see "What
+real dispatches found" above) - and fixed as its own focused PR rather
+than folded silently into a larger change - matching this workflow's own
+one-focused-unit-per-provider review discipline from when it was first
+built.
 
 ## Provenance
 
