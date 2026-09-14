@@ -104,7 +104,7 @@ preflight retains its read-only repository snapshot under ignored `evidence/`
 and does not publish or certify the remaining qualification requirements
 below — those stay human/process steps, not something automation performs.
 
-Before 0.1.0, complete the requested runtime, all five CRDs and worked examples,
+Before 0.1.0, complete the requested runtime, all six CRDs and worked examples,
 Helm lifecycle, optional networking and provider/retry behavior. Complete a
 full project-wide adversarial critic pass immediately before cutting the
 release, against the final candidate: challenge correctness, DRY, KISS,

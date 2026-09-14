@@ -38,9 +38,11 @@ modes; see the [complete CRD example](examples/multicloud/README.md).
 
 ## Get started
 
-Use the [Helm chart](charts/runnerscout/README.md) for development installation,
-and [operations guide](docs/operations.md) for configuration and recovery.
-See [architecture](docs/architecture.md) for placement and lifecycle contracts.
+Follow the [quickstart](docs/quickstart.md) to install the chart and bound
+spend with a `CapacityBudget`. Use the [Helm chart](charts/runnerscout/README.md)
+for development installation, and [operations guide](docs/operations.md) for
+configuration and recovery. See [architecture](docs/architecture.md) for
+placement and lifecycle contracts.
 
 To build locally, install the Go version in `go.mod` and Python 3:
 

@@ -5,3 +5,4 @@ resources:
   - class.yaml
   - catalog.yaml
   - network.yaml
+  - budget.yaml

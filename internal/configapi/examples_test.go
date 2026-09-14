@@ -17,8 +17,8 @@ import (
 func exampleReader(t *testing.T) *memoryReader {
 	t.Helper()
 	r := &memoryReader{objects: map[string]*unstructured.Unstructured{}}
-	resources := map[string]string{"ProviderConfig": "providerconfigs", "RunnerClass": "runnerclasses", "RunnerScaleSet": "runnerscalesets", "CapacityCatalog": "capacitycatalogs", "NetworkProfile": "networkprofiles"}
-	for _, name := range []string{"providers.yaml", "class.yaml", "catalog.yaml", "network.yaml"} {
+	resources := map[string]string{"ProviderConfig": "providerconfigs", "RunnerClass": "runnerclasses", "RunnerScaleSet": "runnerscalesets", "CapacityCatalog": "capacitycatalogs", "NetworkProfile": "networkprofiles", "CapacityBudget": "capacitybudgets"}
+	for _, name := range []string{"providers.yaml", "class.yaml", "catalog.yaml", "network.yaml", "budget.yaml"} {
 		file, err := os.Open(filepath.Join("../../examples/multicloud", name))
 		if err != nil {
 			t.Fatal(err)
@@ -53,15 +53,18 @@ func exampleReader(t *testing.T) *memoryReader {
 
 func TestCompleteMulticloudExampleCompilesWithoutEnablingAdmissions(t *testing.T) {
 	r := exampleReader(t)
-	if len(r.objects) != 7 {
-		t.Fatalf("complete example has %d resources, want 7", len(r.objects))
+	if len(r.objects) != 8 {
+		t.Fatalf("complete example has %d resources, want 8", len(r.objects))
 	}
 	snapshot, revisions, err := Read(context.Background(), r, "runnerscout", "build")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(revisions) != 7 || len(snapshot.Providers) != 3 || snapshot.Network == nil {
+	if len(revisions) != 8 || len(snapshot.Providers) != 3 || snapshot.Network == nil || snapshot.Budget == nil {
 		t.Fatal("examples do not cover the full CRD graph")
+	}
+	if snapshot.Budget.Spec.DailyBudgetMicros != 5000000 {
+		t.Fatal("example budget ceiling changed", snapshot.Budget.Spec.DailyBudgetMicros)
 	}
 	resolved, err := Compile(snapshot)
 	if err != nil {
@@ -69,6 +72,9 @@ func TestCompleteMulticloudExampleCompilesWithoutEnablingAdmissions(t *testing.T
 	}
 	if !resolved.Suspend || resolved.Config.Requirements.AllowOnDemand || snapshot.Class.Spec.Retry.Enabled || snapshot.Network.Spec.Mode != "separate" {
 		t.Fatal("example silently enabled paid admission or unsupported behavior")
+	}
+	if resolved.Config.BudgetDailyMicros != 5000000 {
+		t.Fatal("example budget ceiling not resolved into config", resolved.Config.BudgetDailyMicros)
 	}
 	if len(resolved.Config.Catalog.Offerings) != 6 {
 		t.Fatal("example must cover spot and on-demand pools for all three clouds")

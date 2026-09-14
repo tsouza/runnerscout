@@ -53,7 +53,7 @@ func verifyRealExamples(t *testing.T, ctx context.Context, kc kubernetes.Interfa
 		}
 	}
 	snapshot, revisions, err := Read(ctx, KubernetesReader{Client: dc}, namespace, "build")
-	if err != nil || len(revisions) != 7 || len(snapshot.Providers) != 3 || snapshot.Network == nil {
+	if err != nil || len(revisions) != 8 || len(snapshot.Providers) != 3 || snapshot.Network == nil || snapshot.Budget == nil {
 		t.Fatal("real examples did not resolve the complete graph", err)
 	}
 	roots := dc.Resource(schema.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: "runnerscalesets"}).Namespace(namespace)

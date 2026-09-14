@@ -42,8 +42,14 @@ be absent. Lowering maxRunners drains naturally without discarding allocations.
 
 The controller accepts mounted JSON or one named RunnerScaleSet CRD. The
 `runnerscout.io/v1alpha1` API defines ProviderConfig, RunnerClass, RunnerScaleSet,
-CapacityCatalog and NetworkProfile. References stay in one namespace; the reader
-rechecks object and Secret identities before accepting a configuration snapshot.
+CapacityCatalog, NetworkProfile and CapacityBudget. References stay in one
+namespace; the reader rechecks object and Secret identities before accepting a
+configuration snapshot.
+
+A RunnerScaleSet may optionally reference a CapacityBudget (`budgetRef`) to
+bound worst-case daily spend; see
+[capacity-budget.md](capacity-budget.md) for its contract and a
+[worked example](../examples/multicloud/README.md).
 
 One Lease covers the CRD supervisor, session workers and finalization. Before
 cloud operations, the supervisor persists a configuration checkpoint containing

@@ -35,6 +35,8 @@ metadata:
 spec:
   runnerClassRef:
     name: linux-amd64
+  budgetRef:
+    name: daily
   github:
     url: https://github.com/REPLACE_WITH_OWNER
     scaleSetID: 1

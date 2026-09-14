@@ -48,8 +48,8 @@ func TestRealKubernetesCRDSchemasAndConfigurationSnapshot(t *testing.T) {
 	defer cancel()
 	crds := dc.Resource(schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"})
 	files, err := filepath.Glob("../../config/crd/bases/*.yaml")
-	if err != nil || len(files) != 5 {
-		t.Fatalf("expected all five CRD schemas: %v", err)
+	if err != nil || len(files) != 6 {
+		t.Fatalf("expected all six CRD schemas: %v", err)
 	}
 	var created []string
 	namespace := "runnerscout-crd-" + uuid.NewString()[:8]

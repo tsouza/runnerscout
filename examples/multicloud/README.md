@@ -1,8 +1,10 @@
 # Multicloud runner class
 
-This example connects all five CRDs: three ProviderConfigs, a RunnerClass,
-RunnerScaleSet, CapacityCatalog and NetworkProfile. `runs-on: build` selects the
-GitHub scale set; RunnerScout chooses eligible AWS, Azure or GCP capacity.
+This example connects all six CRDs: three ProviderConfigs, a RunnerClass,
+RunnerScaleSet, CapacityCatalog, NetworkProfile and CapacityBudget. `runs-on:
+build` selects the GitHub scale set; RunnerScout chooses eligible AWS, Azure
+or GCP capacity, bounded by `budget.yaml`'s $5.00/day ceiling - see
+[capacity-budget.md](../../docs/capacity-budget.md).
 
 Replace account/project IDs, network IDs, SSH public key, image IDs, GitHub URL,
 App identity and scale-set ID. The GitHub scale set must be named `build` and have
