@@ -852,7 +852,12 @@ jobs:
             exit 0
           fi
           echo "Independent post-run inventory sweep for allocation $alloc in resource group $rg"
-          leftover_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --query '[].id' -o tsv)"
+          # `az resource list` rejects combining --resource-group with
+          # --tag (a real, hard CLI incompatibility, discovered via an
+          # actual dispatch - see docs/qualification-real-cloud.background.md)
+          # - so the tag match is done client-side via --query instead of
+          # the server-side --tag filter.
+          leftover_ids="$(az resource list --resource-group "$rg" --query "[?tags.\"runnerscout-operation\"=='$alloc'].id" -o tsv)"
           if [ -z "$leftover_ids" ]; then
             echo "Independent inventory confirms zero leftover billable resources for allocation $alloc."
             exit 0
@@ -861,9 +866,9 @@ jobs:
           # Delete VMs first: a NIC or disk still attached to a VM refuses
           # deletion until the VM itself is gone, mirroring deleteAzure's
           # own VM-then-NIC-then-disk priority order (azure.go).
-          vm_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --resource-type Microsoft.Compute/virtualMachines --query '[].id' -o tsv)"
+          vm_ids="$(az resource list --resource-group "$rg" --resource-type Microsoft.Compute/virtualMachines --query "[?tags.\"runnerscout-operation\"=='$alloc'].id" -o tsv)"
           for id in $vm_ids; do az resource delete --ids "$id" --verbose || true; done
-          remaining_ids="$(az resource list --resource-group "$rg" --tag runnerscout-operation="$alloc" --query '[].id' -o tsv)"
+          remaining_ids="$(az resource list --resource-group "$rg" --query "[?tags.\"runnerscout-operation\"=='$alloc'].id" -o tsv)"
           for id in $remaining_ids; do az resource delete --ids "$id" --verbose || true; done
           echo "::error::the qualification job's own cleanup left billable resources behind; this safety net has force-cleaned them, but this indicates a real bug in the create/observe/delete path above and must not be treated as a normal outcome"
           exit 1
