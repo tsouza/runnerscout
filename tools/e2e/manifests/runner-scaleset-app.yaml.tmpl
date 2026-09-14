@@ -1,0 +1,25 @@
+# Rendered by tools/e2e/bring-up.sh via envsubst, only when
+# E2E_GITHUB_AUTH_MODE=app. See runner-scaleset-pat.yaml.tmpl for why
+# suspend is false and for the PAT auth equivalent.
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerScaleSet
+metadata:
+  name: ${E2E_SCALE_SET_NAME}
+  namespace: ${E2E_NAMESPACE}
+spec:
+  runnerClassRef:
+    name: e2e-aws
+  github:
+    url: ${E2E_GITHUB_URL}
+    scaleSetID: ${E2E_REGISTERED_SCALE_SET_ID}
+    auth:
+      mode: app
+      appClientID: ${E2E_GITHUB_APP_CLIENT_ID}
+      appInstallationID: ${E2E_GITHUB_APP_INSTALLATION_ID}
+      secretRef:
+        name: github
+        key: privateKey
+  maxRunners: 1
+  provisioningSeconds: ${E2E_PROVISIONING_SECONDS}
+  maxLifetimeSeconds: ${E2E_MAX_LIFETIME_SECONDS}
+  suspend: false
