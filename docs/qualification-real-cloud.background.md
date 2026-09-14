@@ -93,7 +93,7 @@ subscription/resource-group/provider/type in their literal path,
 calls, before the API-level cross-check (`az resource show`) that AWS and
 GCP also each perform.
 
-## Why GCP needs a `gcp_zone` input AWS and Azure do not have an equivalent for
+## Why GCP needs a `gcp_zone` input AWS does not have an equivalent for
 
 `qualify-aws.yml` derives the instance's Availability Zone from `subnet_id`
 itself, via a read-only `describe-subnets` call, rather than taking it as a

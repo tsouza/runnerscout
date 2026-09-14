@@ -318,7 +318,7 @@ jobs:
             leftover=1
             echo "::warning::leftover AWS instance(s) not terminated by the qualification job: $instances - force-terminating now"
             # shellcheck disable=SC2086  # intentionally unquoted: --instance-ids takes one argument per id, and $instances is AWS CLI's own space-separated --output text list.
-            aws ec2 terminate-instances --region "$region" --instance-ids $instances
+            aws ec2 terminate-instances --region "$region" --instance-ids $instances || true
           fi
 
           # shellcheck disable=SC2016  # see the describe-instances --query above: JMESPath literal, not shell expansion.

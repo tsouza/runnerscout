@@ -7,13 +7,16 @@
 # qualify-aws.yml/qualify-azure.yml/qualify-gcp.yml enforce before they ever
 # touch a real credential: e2e_require_confirmation (the exact-phrase spend
 # confirmation) and e2e_require_ceiling (a numeric runtime bound no input can
-# raise past a hard-coded constant). Both are checked again independently in
-# every script that can reach a billable or GitHub-mutating call, exactly
-# like aws_realcloud_test.go's/azure_realcloud_test.go's/gcp_realcloud_test.go's
-# requireRealCloudConfirmation is independent of qualify-aws.yml's/
-# qualify-azure.yml's/qualify-gcp.yml's own workflow-level check - so no
-# single script in this directory is "the" safety gate that a shorter call
-# path could bypass.
+# raise past a hard-coded constant). e2e_require_confirmation is checked
+# again independently in every script that can reach a billable or
+# GitHub-mutating call (including register-scale-set.sh, which has no
+# runtime/wait component of its own and so has no e2e_require_ceiling call);
+# e2e_require_ceiling is checked in every script that enforces a wall-clock
+# budget. Exactly like aws_realcloud_test.go's/azure_realcloud_test.go's/
+# gcp_realcloud_test.go's requireRealCloudConfirmation is independent of
+# qualify-aws.yml's/qualify-azure.yml's/qualify-gcp.yml's own workflow-level
+# check - so no single script in this directory is "the" safety gate that a
+# shorter call path could bypass.
 set -euo pipefail
 
 # RUNNERSCOUT_E2E_MAX_RUNTIME_CEILING_MINUTES mirrors

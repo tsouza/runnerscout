@@ -112,7 +112,7 @@ static pricing, as they are today, permanently — accepted as this
 project's product decision for issue #2, closing that issue's remaining
 scope rather than leaving it open indefinitely on a hypothetical future
 API change. Two paths that could justify revisiting this were considered
-and explicitly declined for now:
+and explicitly declined:
 
 - Waiting for Google to publish a structured, documented, GA field that
   maps a specific Compute Engine machine type and region (zone-level

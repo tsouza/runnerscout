@@ -17,7 +17,7 @@ library `wireguard-go` and Tailscale's client are built on), with the
 
 | Requirement (from [networking-plan.md](../work/private-history/source-cleanup-20260912/outputs/networking-plan.md), gitignored) | How userspace WireGuard satisfies it |
 | --- | --- |
-| "Credentials must not appear in CRDs, logs or examples" | Keypairs are generated in controller memory and stored only in a Kubernetes Secret scoped to the allocation; only the *public* key and endpoint are ever shipped to a peer. |
+| "Credentials must not appear in CRDs, logs or examples" | Keypairs are generated in controller memory and never persisted anywhere, including as a Kubernetes Secret; only the *public* key and endpoint are ever shipped to a peer. |
 | "Track ephemeral peer identity and cleanup with the allocation" | Key generation and storage live entirely in the controller process, next to the allocation lifecycle this codebase already manages - no second key-custody system to reconcile against. |
 | Local qualification lane: "no host-network mode... only the minimum container capabilities/devices required" | The netstack backend never touches a real kernel TUN device, so the qualification containers need no `NET_ADMIN`, no `/dev/net/tun`, and no `--privileged` - packets never leave userspace. |
 
