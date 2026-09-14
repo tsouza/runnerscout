@@ -1,0 +1,333 @@
+# Provisions/destroys the isolated per-provider network
+# `.github/workflows/qualify.yml` and the E2E harness (tools/e2e/, issue
+# #80) both expect as pre-existing, pinned, operator-supplied input - see
+# tools/tofu/qualify-network/{aws,azure,gcp}/ for what each provider's
+# module actually creates and why, and docs/qualify-network.md for the
+# procedural description this workflow implements. See
+# docs/qualify-network.background.md for why this exists as a CI workflow
+# rather than local `aws`/`az`/`gcloud`/`tofu` CLI invocations, and why it
+# uses OpenTofu at all instead of the raw cloud CLIs the modules' resources
+# could equally be created with by hand.
+#
+# Design, mirroring qualify.yml's own safety philosophy where it applies
+# here:
+#
+#   - workflow_dispatch is the ONLY trigger. No schedule, no push, no
+#     pull_request.
+#   - A required `confirm` input must match an exact literal phrase, checked
+#     before anything else runs (including before any cloud credential is
+#     configured) - this workflow creates real cloud resources (a real,
+#     billed NAT Gateway on AWS; free-tier network resources on Azure/GCP),
+#     so it gets the same "impossible to trigger by accident" treatment as
+#     qualify.yml, even though its per-run cost is bounded to a few cents
+#     (see "Ephemeral" in tools/tofu/qualify-network/aws/README.md) rather
+#     than qualify.yml's own larger, but still bounded, spend.
+#   - `provider: all` (the default) fans out to all three providers as
+#     independent matrix jobs (fail-fast: false); `provider: aws` (etc.)
+#     runs only that one - the exact same matrix pattern qualify.yml
+#     established.
+#   - `action: apply` provisions the network and uploads the resulting
+#     OpenTofu state as a run-scoped artifact (never committed, never a
+#     remote backend - see each module's own README "State" section for why
+#     local-per-run state is a deliberate tradeoff here); `action: destroy`
+#     requires the operator to name that prior run's ID explicitly
+#     (`apply_run_id`) so this workflow can fetch back the exact same state
+#     rather than guessing at "the most recent apply" - matching this
+#     repository's "nothing auto-discovered, everything pinned" philosophy
+#     (see docs/qualification-real-cloud.md) applied to state selection
+#     itself, not just cloud identifiers.
+#   - A DELIBERATELY SEPARATE, new, least-privilege identity per cloud runs
+#     this workflow - never `AWS_QUALIFICATION_ROLE_ARN`/
+#     `AZURE_QUALIFICATION_CLIENT_ID`+`AZURE_QUALIFICATION_TENANT_ID`/
+#     `GCP_QUALIFICATION_*`. Those identities are deliberately scoped to
+#     launch/observe/delete a VM into a *pre-existing* network only (e.g.
+#     the Azure qualification role has no `Microsoft.Network/
+#     virtualNetworks/write` - confirmed against its actual role
+#     definition) - widening them to also create/delete networks would
+#     permanently grow a purpose-built least-privilege identity's blast
+#     radius for what is otherwise a rare, bounded bootstrap need. See
+#     docs/qualify-network.background.md for the reasoning behind this
+#     separate `NETWORK_PROVISIONER_*` identity set and what each one's
+#     minimum required permissions are.
+name: Qualify network (provision/destroy)
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Which provider(s) to provision/destroy the qualification network for. "all" fans out to AWS, Azure and GCP as independent matrix jobs.
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - aws
+          - azure
+          - gcp
+      action:
+        description: apply creates the network and uploads its OpenTofu state as a run artifact; destroy tears it down using a prior apply run's state.
+        required: true
+        type: choice
+        default: apply
+        options:
+          - apply
+          - destroy
+      confirm:
+        description: >-
+          Must be exactly: I-UNDERSTAND-THIS-PROVISIONS-REAL-CLOUD-RESOURCES
+          - apply creates real cloud network resources (a real, billed NAT
+          Gateway on AWS); destroy deletes them.
+        required: true
+        type: string
+      apply_run_id:
+        description: "[destroy only] The run ID of the prior 'apply' dispatch whose OpenTofu state to restore before destroying. Find it in that run's URL (.../actions/runs/<this number>). Required when action is destroy; ignored for apply."
+        required: false
+        type: string
+      aws_region:
+        description: "[AWS] Region to create/destroy the qualification network in (e.g. us-east-1). Required only when provider is aws or all."
+        required: false
+        type: string
+      azure_location:
+        description: "[Azure] Region to create/destroy the qualification network in (e.g. eastus). Required only when provider is azure or all."
+        required: false
+        type: string
+      gcp_project:
+        description: "[GCP] Project to create/destroy the qualification network in. Must equal vars.GCP_NETWORK_PROVISIONER_PROJECT_ID. Required only when provider is gcp or all."
+        required: false
+        type: string
+      gcp_region:
+        description: "[GCP] Region to create/destroy the qualification network in (e.g. us-central1). Required only when provider is gcp or all."
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    outputs:
+      providers: ${{ steps.plan.outputs.providers }}
+    steps:
+      - id: plan
+        run: |
+          set -euo pipefail
+          case "${{ inputs.provider }}" in
+            all) echo 'providers=["aws","azure","gcp"]' >> "$GITHUB_OUTPUT" ;;
+            aws|azure|gcp) echo "providers=[\"${{ inputs.provider }}\"]" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::provider must be one of: all, aws, azure, gcp - got '${{ inputs.provider }}'"; exit 1 ;;
+          esac
+
+  qualify-network:
+    name: ${{ inputs.action }} (${{ matrix.provider }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: ${{ fromJSON(needs.plan.outputs.providers) }}
+    concurrency:
+      # Never apply and destroy the same provider's network concurrently,
+      # and never run two applies (which would create a second, duplicate
+      # network) or two destroys (racing over the same state) at once.
+      group: qualify-network-${{ matrix.provider }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Consumed by whichever provider's credential step runs for this
+      # matrix job (AWS OIDC role assumption / Azure Workload Identity
+      # Federation / GCP Workload Identity Federation), and by the destroy
+      # action's cross-run artifact download (actions/download-artifact
+      # needs read access to another run's artifacts via the GitHub API).
+      id-token: write
+      actions: read
+    env:
+      RUNNERSCOUT_NETWORK_CONFIRM: ${{ inputs.confirm }}
+      RUNNERSCOUT_NETWORK_ACTION: ${{ inputs.action }}
+      RUNNERSCOUT_NETWORK_AWS_REGION: ${{ inputs.aws_region }}
+      RUNNERSCOUT_NETWORK_AZURE_LOCATION: ${{ inputs.azure_location }}
+      RUNNERSCOUT_NETWORK_GCP_PROJECT: ${{ inputs.gcp_project }}
+      RUNNERSCOUT_NETWORK_GCP_REGION: ${{ inputs.gcp_region }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate explicit confirmation and per-provider required inputs
+        # Deliberately the very first step, before any cloud credential is
+        # configured: an invalid confirmation phrase or a missing
+        # per-provider input must fail with zero cloud interaction of any
+        # kind, not even a read-only one. workflow_dispatch cannot make an
+        # input conditionally required on provider's value (same
+        # constraint qualify.yml documents), so requiredness is enforced
+        # here instead.
+        run: |
+          set -euo pipefail
+          expected='I-UNDERSTAND-THIS-PROVISIONS-REAL-CLOUD-RESOURCES'
+          if [ "$RUNNERSCOUT_NETWORK_CONFIRM" != "$expected" ]; then
+            echo "::error::confirm must be exactly '$expected' - refusing to provision or destroy real cloud network resources without this exact literal confirmation"
+            exit 1
+          fi
+          if [ "$RUNNERSCOUT_NETWORK_ACTION" = "destroy" ] && [ -z "${{ inputs.apply_run_id }}" ]; then
+            echo "::error::apply_run_id is required when action is destroy - it must name the prior 'apply' dispatch run whose OpenTofu state to restore before destroying"
+            exit 1
+          fi
+          case "${{ matrix.provider }}" in
+            aws)
+              [ -n "$RUNNERSCOUT_NETWORK_AWS_REGION" ] || { echo "::error::aws_region is required when provider is aws or all"; exit 1; }
+              ;;
+            azure)
+              [ -n "$RUNNERSCOUT_NETWORK_AZURE_LOCATION" ] || { echo "::error::azure_location is required when provider is azure or all"; exit 1; }
+              ;;
+            gcp)
+              [ -n "$RUNNERSCOUT_NETWORK_GCP_PROJECT" ] || { echo "::error::gcp_project is required when provider is gcp or all"; exit 1; }
+              [ -n "$RUNNERSCOUT_NETWORK_GCP_REGION" ] || { echo "::error::gcp_region is required when provider is gcp or all"; exit 1; }
+              ;;
+          esac
+
+      - name: "[GCP] Validate pinned project against the provisioned network-provisioner identity"
+        if: matrix.provider == 'gcp'
+        # Mirrors qualify.yml's own equivalent check: the WIF service
+        # account below is only ever trusted to act in one project, so this
+        # catches a pasted-wrong-project mistake before any credential is
+        # configured.
+        env:
+          RUNNERSCOUT_NETWORK_EXPECTED_GCP_PROJECT: ${{ vars.GCP_NETWORK_PROVISIONER_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_NETWORK_EXPECTED_GCP_PROJECT" ]; then
+            echo "::error::vars.GCP_NETWORK_PROVISIONER_PROJECT_ID is not set - this repository has no GCP network-provisioner identity provisioned yet; see docs/qualify-network.md's GCP section for what an operator must provision first"
+            exit 1
+          fi
+          if [ "$RUNNERSCOUT_NETWORK_GCP_PROJECT" != "$RUNNERSCOUT_NETWORK_EXPECTED_GCP_PROJECT" ]; then
+            echo "::error::gcp_project ('$RUNNERSCOUT_NETWORK_GCP_PROJECT') does not match the provisioned network-provisioner identity's project (vars.GCP_NETWORK_PROVISIONER_PROJECT_ID) - refusing to proceed"
+            exit 1
+          fi
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.11.4"
+          tofu_wrapper: false
+
+      - name: "[AWS] Configure credentials (OIDC role assumption)"
+        if: matrix.provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
+          role-session-name: runnerscout-qualify-network-${{ github.run_id }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: "[Azure] Confirm OIDC credentials are provisioned"
+        if: matrix.provider == 'azure'
+        env:
+          RUNNERSCOUT_NETWORK_AZURE_CLIENT_ID: ${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}
+          RUNNERSCOUT_NETWORK_AZURE_TENANT_ID: ${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}
+          RUNNERSCOUT_NETWORK_AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_NETWORK_AZURE_CLIENT_ID" ] || [ -z "$RUNNERSCOUT_NETWORK_AZURE_TENANT_ID" ] || [ -z "$RUNNERSCOUT_NETWORK_AZURE_SUBSCRIPTION_ID" ]; then
+            echo "::error::AZURE_NETWORK_PROVISIONER_CLIENT_ID, AZURE_NETWORK_PROVISIONER_TENANT_ID and AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID repository variables must all be set - see docs/qualify-network.md's Azure section for what to provision before dispatching this workflow"
+            exit 1
+          fi
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: matrix.provider == 'azure'
+        with:
+          client-id: ${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: false
+
+      - name: "[Azure] Export ARM_* environment for the azurerm OpenTofu provider"
+        if: matrix.provider == 'azure'
+        # azure/login above authenticates the `az` CLI (unused directly by
+        # this workflow, but harmless) - the azurerm OpenTofu provider
+        # itself reads credentials from ARM_* environment variables, not
+        # from an `az` CLI session, when running non-interactively in CI.
+        # It auto-detects GitHub Actions OIDC (ARM_USE_OIDC / ARM_OIDC_TOKEN
+        # via ACTIONS_ID_TOKEN_REQUEST_*) once ARM_CLIENT_ID/ARM_TENANT_ID/
+        # ARM_SUBSCRIPTION_ID are present, mirroring how qualify.yml's own
+        # Azure branch separately fetches a GitHub OIDC token for its Go
+        # test step rather than relying solely on azure/login's own `az`
+        # session.
+        run: |
+          {
+            echo "ARM_CLIENT_ID=${{ vars.AZURE_NETWORK_PROVISIONER_CLIENT_ID }}"
+            echo "ARM_TENANT_ID=${{ vars.AZURE_NETWORK_PROVISIONER_TENANT_ID }}"
+            echo "ARM_SUBSCRIPTION_ID=${{ vars.AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID }}"
+            echo "ARM_USE_OIDC=true"
+          } >> "$GITHUB_ENV"
+
+      - name: "[GCP] Authenticate (Workload Identity Federation)"
+        if: matrix.provider == 'gcp'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          project_id: ${{ vars.GCP_NETWORK_PROVISIONER_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT }}
+
+      - name: Determine this provider's module directory and -var arguments
+        id: module
+        run: |
+          set -euo pipefail
+          case "${{ matrix.provider }}" in
+            aws)
+              echo "dir=tools/tofu/qualify-network/aws" >> "$GITHUB_OUTPUT"
+              echo "tf_vars=-var region=$RUNNERSCOUT_NETWORK_AWS_REGION" >> "$GITHUB_OUTPUT"
+              ;;
+            azure)
+              echo "dir=tools/tofu/qualify-network/azure" >> "$GITHUB_OUTPUT"
+              echo "tf_vars=-var location=$RUNNERSCOUT_NETWORK_AZURE_LOCATION" >> "$GITHUB_OUTPUT"
+              ;;
+            gcp)
+              echo "dir=tools/tofu/qualify-network/gcp" >> "$GITHUB_OUTPUT"
+              echo "tf_vars=-var project_id=$RUNNERSCOUT_NETWORK_GCP_PROJECT -var region=$RUNNERSCOUT_NETWORK_GCP_REGION" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: "[destroy] Restore OpenTofu state from the named apply run"
+        if: inputs.action == 'destroy'
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: qualify-network-state-${{ matrix.provider }}
+          path: ${{ steps.module.outputs.dir }}
+          run-id: ${{ inputs.apply_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: tofu init
+        working-directory: ${{ steps.module.outputs.dir }}
+        run: tofu init -input=false
+
+      - name: tofu apply
+        if: inputs.action == 'apply'
+        working-directory: ${{ steps.module.outputs.dir }}
+        run: |
+          tofu apply -auto-approve -input=false ${{ steps.module.outputs.tf_vars }}
+          {
+            echo "### Outputs for provider: ${{ matrix.provider }}"
+            echo '```'
+            tofu output
+            echo '```'
+            echo "Copy the outputs above into qualify.yml's workflow_dispatch inputs (or tools/e2e/env*.example) for provider '${{ matrix.provider }}'."
+            echo ""
+            echo "To destroy this network later, dispatch this workflow again with action=destroy, provider=${{ matrix.provider }}, and apply_run_id=${{ github.run_id }} (this run's own ID)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "[apply] Upload OpenTofu state for a later destroy"
+        if: inputs.action == 'apply'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualify-network-state-${{ matrix.provider }}
+          # OpenTofu/Terraform state can contain sensitive values (e.g. an
+          # Azure subscription ID interpolated into resource IDs) - this
+          # artifact is only as private as the repository/workflow-run
+          # visibility already is, matching how qualify.yml's own evidence
+          # artifacts are handled.
+          path: ${{ steps.module.outputs.dir }}/terraform.tfstate
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: tofu destroy
+        if: inputs.action == 'destroy'
+        working-directory: ${{ steps.module.outputs.dir }}
+        run: tofu destroy -auto-approve -input=false ${{ steps.module.outputs.tf_vars }}
