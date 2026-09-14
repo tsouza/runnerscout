@@ -56,8 +56,7 @@ its own credential-presence check, before any cloud interaction.
 | Input | Meaning |
 | --- | --- |
 | `provider` | `all` (default, fans out to all three as independent matrix jobs) or one of `aws`/`azure`/`gcp`. |
-| `action` | `apply` (create the network) or `destroy` (tear it down). |
-| `confirm` | Must equal exactly `I-UNDERSTAND-THIS-PROVISIONS-REAL-CLOUD-RESOURCES`. |
+| `action` | `apply` (create the network) or `destroy` (tear it down). No separate confirmation input - dispatching this workflow with these inputs is itself the confirmation. |
 | `apply_run_id` | Required only when `action: destroy` - the run ID of the prior `apply` dispatch whose OpenTofu state to restore before destroying (from that run's own URL). |
 | `aws_region` | Required only when `provider` is `aws` or `all`. |
 | `azure_location` | Required only when `provider` is `azure` or `all`. |

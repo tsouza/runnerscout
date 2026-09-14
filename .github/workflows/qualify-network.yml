@@ -13,15 +13,11 @@
 # here:
 #
 #   - workflow_dispatch is the ONLY trigger. No schedule, no push, no
-#     pull_request.
-#   - A required `confirm` input must match an exact literal phrase, checked
-#     before anything else runs (including before any cloud credential is
-#     configured) - this workflow creates real cloud resources (a real,
-#     billed NAT Gateway on AWS; free-tier network resources on Azure/GCP),
-#     so it gets the same "impossible to trigger by accident" treatment as
-#     qualify.yml, even though its per-run cost is bounded to a few cents
-#     (see "Ephemeral" in tools/tofu/qualify-network/aws/README.md) rather
-#     than qualify.yml's own larger, but still bounded, spend.
+#     pull_request - a human choosing to run this, with these specific
+#     inputs, is itself the confirmation; no separate confirm phrase or
+#     checkbox is layered on top (unlike qualify.yml, whose own spend is
+#     larger and less bounded per run - this workflow's real cost is a few
+#     cents, see "Ephemeral" in tools/tofu/qualify-network/aws/README.md).
 #   - `provider: all` (the default) fans out to all three providers as
 #     independent matrix jobs (fail-fast: false); `provider: aws` (etc.)
 #     runs only that one - the exact same matrix pattern qualify.yml
@@ -71,13 +67,6 @@ on:
         options:
           - apply
           - destroy
-      confirm:
-        description: >-
-          Must be exactly: I-UNDERSTAND-THIS-PROVISIONS-REAL-CLOUD-RESOURCES
-          - apply creates real cloud network resources (a real, billed NAT
-          Gateway on AWS); destroy deletes them.
-        required: true
-        type: string
       apply_run_id:
         description: "[destroy only] The run ID of the prior 'apply' dispatch whose OpenTofu state to restore before destroying. Find it in that run's URL (.../actions/runs/<this number>). Required when action is destroy; ignored for apply."
         required: false
@@ -141,7 +130,6 @@ jobs:
       id-token: write
       actions: read
     env:
-      RUNNERSCOUT_NETWORK_CONFIRM: ${{ inputs.confirm }}
       RUNNERSCOUT_NETWORK_ACTION: ${{ inputs.action }}
       RUNNERSCOUT_NETWORK_AWS_REGION: ${{ inputs.aws_region }}
       RUNNERSCOUT_NETWORK_AZURE_LOCATION: ${{ inputs.azure_location }}
@@ -152,21 +140,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate explicit confirmation and per-provider required inputs
+      - name: Validate per-provider required inputs
         # Deliberately the very first step, before any cloud credential is
-        # configured: an invalid confirmation phrase or a missing
-        # per-provider input must fail with zero cloud interaction of any
-        # kind, not even a read-only one. workflow_dispatch cannot make an
-        # input conditionally required on provider's value (same
-        # constraint qualify.yml documents), so requiredness is enforced
-        # here instead.
+        # configured: a missing per-provider input must fail with zero
+        # cloud interaction of any kind, not even a read-only one.
+        # workflow_dispatch cannot make an input conditionally required on
+        # provider's value (same constraint qualify.yml documents), so
+        # requiredness is enforced here instead.
         run: |
           set -euo pipefail
-          expected='I-UNDERSTAND-THIS-PROVISIONS-REAL-CLOUD-RESOURCES'
-          if [ "$RUNNERSCOUT_NETWORK_CONFIRM" != "$expected" ]; then
-            echo "::error::confirm must be exactly '$expected' - refusing to provision or destroy real cloud network resources without this exact literal confirmation"
-            exit 1
-          fi
           if [ "$RUNNERSCOUT_NETWORK_ACTION" = "destroy" ] && [ -z "${{ inputs.apply_run_id }}" ]; then
             echo "::error::apply_run_id is required when action is destroy - it must name the prior 'apply' dispatch run whose OpenTofu state to restore before destroying"
             exit 1
