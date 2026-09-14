@@ -409,7 +409,11 @@ resource group, if narrower):
 `Microsoft.Compute/virtualMachines/delete`;
 `Microsoft.Compute/disks/read`, `Microsoft.Compute/disks/write`,
 `Microsoft.Compute/disks/delete`; `Microsoft.Compute/images/read`;
-`Microsoft.Compute/locations/*/read`; `Microsoft.Network/locations/*/read`;
+`Microsoft.Compute/galleries/read`, `Microsoft.Compute/galleries/images/read`,
+`Microsoft.Compute/galleries/images/versions/read` (needed only if
+`azure_image_id` points at a Compute Gallery image version rather than a
+classic managed image - see "Choosing a compatible `azure_vm_size`"
+above); `Microsoft.Compute/locations/*/read`; `Microsoft.Network/locations/*/read`;
 `Microsoft.Network/networkInterfaces/read`,
 `Microsoft.Network/networkInterfaces/write`,
 `Microsoft.Network/networkInterfaces/delete`,
