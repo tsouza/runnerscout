@@ -195,7 +195,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$RUNNERSCOUT_NETWORK_EXPECTED_GCP_PROJECT" ]; then
-            echo "::error::vars.GCP_NETWORK_PROVISIONER_PROJECT_ID is not set - this repository has no GCP network-provisioner identity provisioned yet; see docs/qualify-network.md's GCP section for what an operator must provision first"
+            echo "::error::vars.GCP_NETWORK_PROVISIONER_PROJECT_ID is not set - this repository has no GCP network-provisioner identity provisioned yet; see docs/qualify-network.md's 'Provisioning identities' section for what an operator must provision first"
             exit 1
           fi
           if [ "$RUNNERSCOUT_NETWORK_GCP_PROJECT" != "$RUNNERSCOUT_NETWORK_EXPECTED_GCP_PROJECT" ]; then
@@ -208,6 +208,26 @@ jobs:
         with:
           tofu_version: "1.11.4"
           tofu_wrapper: false
+
+      - name: "[AWS] Confirm OIDC role is provisioned"
+        if: matrix.provider == 'aws'
+        # Mirrors the Azure/GCP branches' own equivalent pre-check.
+        # Without this, an unset AWS_NETWORK_PROVISIONER_ROLE_ARN secret
+        # renders as an empty string (not absent) to
+        # aws-actions/configure-aws-credentials, which then falls through
+        # to attempting ambient AWS SDK default-chain credential
+        # resolution and fails with a generic, several-steps-removed
+        # "Credentials could not be loaded" SDK error instead of a clear,
+        # doc-pointing message for the identical "prerequisite secret not
+        # yet provisioned" situation Azure/GCP already handle explicitly.
+        env:
+          RUNNERSCOUT_NETWORK_AWS_ROLE_ARN: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RUNNERSCOUT_NETWORK_AWS_ROLE_ARN" ]; then
+            echo "::error::AWS_NETWORK_PROVISIONER_ROLE_ARN repository secret is not set - this repository has no AWS network-provisioner identity provisioned yet; see docs/qualify-network.md's 'Provisioning identities' section for what to provision before dispatching this workflow"
+            exit 1
+          fi
 
       - name: "[AWS] Configure credentials (OIDC role assumption)"
         if: matrix.provider == 'aws'
@@ -226,7 +246,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$RUNNERSCOUT_NETWORK_AZURE_CLIENT_ID" ] || [ -z "$RUNNERSCOUT_NETWORK_AZURE_TENANT_ID" ] || [ -z "$RUNNERSCOUT_NETWORK_AZURE_SUBSCRIPTION_ID" ]; then
-            echo "::error::AZURE_NETWORK_PROVISIONER_CLIENT_ID, AZURE_NETWORK_PROVISIONER_TENANT_ID and AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID repository variables must all be set - see docs/qualify-network.md's Azure section for what to provision before dispatching this workflow"
+            echo "::error::AZURE_NETWORK_PROVISIONER_CLIENT_ID, AZURE_NETWORK_PROVISIONER_TENANT_ID and AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID repository variables must all be set - see docs/qualify-network.md's 'Provisioning identities' section for what to provision before dispatching this workflow"
             exit 1
           fi
 
