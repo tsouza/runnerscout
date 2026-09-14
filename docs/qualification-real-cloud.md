@@ -182,6 +182,16 @@ Before dispatching this workflow, an operator must have already:
    secret pair above, granting the minimum permissions listed.
 4. Set `AWS_NETWORK_PROVISIONER_ROLE_ARN`, granting the separate network-
    provisioning permissions listed above.
+5. Confirmed the `AWSServiceRoleForEC2Spot` service-linked role already
+   exists in the target AWS account (`aws iam get-role --role-name
+   AWSServiceRoleForEC2Spot`) - a one-time, account-level prerequisite
+   for *any* identity to ever request a Spot Instance in that account,
+   unrelated to this workflow's own IAM setup. If it doesn't exist yet, an
+   operator with `iam:CreateServiceLinkedRole` (never the qualification
+   identity itself - see
+   [qualification-real-cloud.background.md](qualification-real-cloud.background.md))
+   must run `aws iam create-service-linked-role --aws-service-name
+   spot.amazonaws.com` once, directly.
 
 ### What AWS qualifies — and what it honestly does not
 

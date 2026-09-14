@@ -689,6 +689,44 @@ own logic, surfacing the bugs below:
   released/deleted directly within minutes of the failure, so real cost
   was negligible (a fraction of an hour's idle-EIP rate). Both gaps were
   fixed by adding the missing permissions to the live role.
+- **A third and fourth real AWS IAM gap**, found on a later re-dispatch,
+  once the compute-side AMI/instance-type inputs had also been resolved:
+  `ec2:DescribeNetworkInterfaces` (needed by `aws_subnet`'s and
+  `aws_security_group`'s own destroy logic, which lists and cleans up any
+  ENIs still attached before deleting the subnet/security group itself)
+  and `ec2:DisassociateAddress` (needed to detach the NAT EIP before
+  releasing it). Missing both meant `tofu destroy` failed outright,
+  leaving one orphaned, billable, unassociated Elastic IP and a full
+  leftover VPC/subnet-pair/internet-gateway/security-group behind -
+  manually verified (no running instance, no NAT Gateway - Terraform had
+  already deleted that one before hitting the ENI-listing error) and
+  cleaned up directly within minutes. Fixed by adding both permissions to
+  the live role.
+- **A real, one-time AWS-account-level bootstrap gap, not a workflow or
+  IAM-policy bug**: with the network-side gaps above all fixed, a dispatch
+  reached the actual `RunInstances` call - which failed with
+  `Client.AuthFailure.ServiceLinkedRoleCreationNotPermitted: The provided
+  credentials do not have permission to create the service-linked role for
+  EC2 Spot Instances` (found via CloudTrail, since `createAWS`'s own error
+  wrapping - `"AWS create commitment unknown"` - deliberately does not
+  leak the real provider error, the same discipline as `gcp_sdk.go`'s
+  wrapping). AWS auto-creates the `AWSServiceRoleForEC2Spot`
+  service-linked role the first time any identity in an account ever
+  requests a Spot Instance - and creating it requires
+  `iam:CreateServiceLinkedRole`, a permission the qualification identity
+  deliberately does not have (by the same least-privilege design as
+  everything else it's scoped to: it launches/observes/deletes compute,
+  never touches IAM). This is not a gap in this workflow's own design -
+  every AWS account that has never used EC2 Spot before needs this
+  one-time, account-level bootstrap regardless of what identity or tool
+  eventually requests the first Spot Instance, and granting an ongoing
+  qualification identity permission to create service-linked roles on
+  demand would be a real, unnecessary widening of its blast radius for a
+  need that only ever occurs once per account. Fixed the intended way:
+  `aws iam create-service-linked-role --aws-service-name spot.amazonaws.com`,
+  run once, directly, with the account's own root/administrator
+  credentials - after which every identity in the account can request Spot
+  Instances normally, this qualification identity included.
 - **A stale-credential bug in the AWS VM-level safety-net step**,
   surfaced by the AWS IAM gap above: when a network `tofu apply` failure
   causes every qualification-identity credential step after it to be
