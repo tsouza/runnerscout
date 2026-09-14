@@ -129,17 +129,17 @@ accepted contracts and migration paths. Never rewrite expected results or remove
 required tests automatically to accept a regression.
 
 The AWS, Azure and GCP pieces of the "Real GitHub-to-VM execution" line above
-are `.github/workflows/qualify-aws.yml`, `.github/workflows/qualify-azure.yml`
-and `.github/workflows/qualify-gcp.yml`, all `workflow_dispatch`-only,
-numerically bounded workflows that exercise the real AWS/Azure/GCP provider
-adapters against real EC2/Azure Compute/Compute Engine - see
-[qualification-real-cloud.md](qualification-real-cloud.md). All three
-workflows' qualification identities (AWS's `AWS_QUALIFICATION_ROLE_ARN`;
+are the three matrix branches of `.github/workflows/qualify.yml`, a single
+`workflow_dispatch`-only, numerically bounded workflow (a `provider` input
+selects `all` or one of `aws`/`azure`/`gcp`) that exercises the real
+AWS/Azure/GCP provider adapters against real EC2/Azure Compute/Compute
+Engine - see [qualification-real-cloud.md](qualification-real-cloud.md). All
+three providers' qualification identities (AWS's `AWS_QUALIFICATION_ROLE_ARN`;
 Azure's `AZURE_QUALIFICATION_CLIENT_ID`/`AZURE_QUALIFICATION_TENANT_ID`/
 `AZURE_QUALIFICATION_SUBSCRIPTION_ID`; GCP's `GCP_QUALIFICATION_PROJECT_ID`/
 `GCP_QUALIFICATION_SERVICE_ACCOUNT`/`GCP_QUALIFICATION_WORKLOAD_IDENTITY_PROVIDER`)
-are provisioned in this repository today, but none of the three workflows has
-ever actually been dispatched.
+are provisioned in this repository today, but this workflow has never
+actually been dispatched.
 
 ## Artifacts and promotion
 
