@@ -962,15 +962,79 @@ own logic, surfacing the bugs below:
   `RunnerScout Qualify` role. Both failures happened at or before the
   first cloud-credential-requiring step - zero leftover resources, zero
   cost, in both cases.
+- **The "fast poller failure" - two real dispatches (34859640398,
+  34860475618) both failed within seconds of `deploy()`'s
+  `BeginCreateOrUpdate` being accepted**, every time with the same generic
+  `"Azure deployment commitment unknown"` and no further detail, while
+  Azure's own Activity Log kept showing the NIC/VM/disk being created
+  normally for far longer than the client had waited. `createAzure`
+  discarded `deploy()`'s real error unconditionally (`errors.New(...)`
+  instead of wrapping it), so two full real dispatches produced zero
+  diagnostic information - fixed by wrapping instead of discarding
+  (`fmt.Errorf("...: %w", err)`, PR #108), which cost nothing (no test
+  matches the exact string, only a substring) and immediately paid off:
+  the very next dispatch's preserved error read `AuthorizationFailed` on
+  `Microsoft.Resources/deployments/operationStatuses/read` - a distinct
+  RBAC action from `Microsoft.Resources/deployments/operations/read`
+  (plural difference: "operations" vs "operationStatuses"), which the
+  `RunnerScout Qualify` role had, and which is a completely different
+  ARM endpoint from the one the SDK's `PollUntilDone` actually calls to
+  track an async operation's status. The role never needed the
+  `operationStatuses` action before because no earlier real dispatch had
+  ever gotten far enough into a deployment to poll it. Fixed by adding
+  `Microsoft.Resources/deployments/operationStatuses/read` to the live
+  role. This also disproved every timing-based hypothesis explored before
+  the wrap (a consumed 30-second context budget, a poller/SDK bug,
+  something specific to `WorkloadIdentityCredential`) - the whole test
+  ran and failed in 5.4 seconds total, far too fast for any of those, and
+  the cause was simply an authorization error on the wrong action name.
+- **Discovered while confirming the RBAC fix worked (dispatch
+  34862354547): the deployment's own asynchronous creation continued on
+  Azure's side for minutes after the client gave up polling it, and
+  nothing ever rechecked.** The qualification test's own `t.Cleanup` is
+  registered only after `CreateWithResources` succeeds (see this file's
+  "Why the workflow-level `if: always()` step is the *authoritative*
+  backstop" section above - this was already known and accepted as the
+  reason the workflow step exists), so a failed create leaves the Go test
+  with nothing to clean up. The workflow's own safety net checked
+  inventory a mere ~2 seconds after the failure and reported "zero
+  leftover billable resources" - true at that instant, but the ARM
+  deployment (`az deployment group show`) had not reached a terminal
+  provisioningState yet and kept creating the VM/NIC/disk in the
+  background for the rest of the job's runtime. By the time this was
+  caught (a manual, independent `az resource list` check run well after
+  the workflow had already completed and reported failure), a real VM,
+  NIC and OS disk had existed, fully billing, for the entire remainder of
+  the run - completely undetected by both the Go test and the safety net
+  that exists specifically to catch this. Fixed by having the safety net
+  poll the deployment's own `provisioningState` until it reaches a
+  terminal state (`Succeeded`/`Failed`/`Canceled`, or absent) before
+  trusting any inventory sweep, bounded at 15 minutes (60 attempts × 15s)
+  - comfortably inside the job's 45-minute `timeout-minutes`. This class
+  of race is specific to Azure's asynchronous ARM deployment model: AWS's
+  `RunInstances` and GCP's `insert` are synchronous-enough that their own
+  create-path retry loops (the `BlockDeviceMappings` eventual-consistency
+  retry, and GCP's deterministic `clientOperationId` matching) already
+  cover the equivalent risk without needing a matching safety-net change.
+  Manually confirmed and force-cleaned the exact VM/NIC/disk this exposed
+  (`qualify-azure-34862354547`, `-nic`, `-os`) before landing the fix -
+  the VM's `deleteOption: Delete` on both dependents meant deleting the VM
+  alone cascaded to the NIC and disk.
 
-Three of these bugs actually resulted in a real, billed resource being
+Four of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
 (existed for well under two minutes, cleanly deleted, real cost a
 fraction of a cent); the AWS Elastic IP left briefly unassociated by the
 second AWS IAM gap (released within minutes, real cost negligible); and
 the AWS Spot instance created by the `BlockDeviceMappings` race, force-
 terminated by the safety net moments later (real cost a fraction of a
-cent). GCP's own real dispatch (once every fix above landed) completed
+cent); and the Azure VM/NIC/disk created by dispatch 34862354547's
+authorization failure, which existed fully billing for the entire
+remainder of that run - undetected by both the Go test's cleanup and the
+safety net's own too-early inventory check - until found and force-
+cleaned manually (real cost a small fraction of a dollar for the ~15
+minutes it ran). GCP's own real dispatch (once every fix above landed)
+completed
 the full lifecycle cleanly end to end - `TestQualifyRealGCPSpotLifecycle`
 PASS, zero leftover resources - the first fully successful real-cloud
 qualification this repository has run. Every other bug's failure

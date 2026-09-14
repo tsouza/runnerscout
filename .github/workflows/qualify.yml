@@ -935,6 +935,30 @@ jobs:
             exit 0
           fi
           echo "Independent post-run inventory sweep for allocation $alloc in resource group $rg"
+          # An ARM deployment keeps creating its resources asynchronously on
+          # Azure's own side even after the client polling it gives up (a
+          # transport error, a missing RBAC action on the LRO endpoint, or
+          # this very safety net's own context) - a real, confirmed dispatch
+          # showed a deployment reach a genuine "Succeeded" state, with a
+          # real VM/NIC/disk fully created, MINUTES after the qualification
+          # test had already reported the create as failed and after this
+          # safety net's own inventory check had already run and declared
+          # zero leftover resources (see docs/qualification-real-cloud.background.md's
+          # "What real dispatches found" section). An inventory sweep taken
+          # before the deployment reaches a terminal provisioningState
+          # cannot be trusted, so wait for that first. A missing deployment
+          # (never submitted, or already cleaned up) counts as terminal.
+          deployment_terminal=false
+          for _ in $(seq 1 60); do
+            state="$(az deployment group show --resource-group "$rg" --name "$alloc" --query "properties.provisioningState" -o tsv 2>/dev/null || true)"
+            case "$state" in
+              Succeeded|Failed|Canceled|"") deployment_terminal=true; break ;;
+            esac
+            sleep 15
+          done
+          if [ "$deployment_terminal" != true ]; then
+            echo "::warning::deployment $alloc never reached a terminal state within the wait budget - inventory below may still be incomplete"
+          fi
           # `az resource list` rejects combining --resource-group with
           # --tag (a real, hard CLI incompatibility, discovered via an
           # actual dispatch - see docs/qualification-real-cloud.background.md's
