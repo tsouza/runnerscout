@@ -1020,6 +1020,23 @@ own logic, surfacing the bugs below:
   (`qualify-azure-34862354547`, `-nic`, `-os`) before landing the fix -
   the VM's `deleteOption: Delete` on both dependents meant deleting the VM
   alone cascaded to the NIC and disk.
+- **One more real-dispatch attempt (34864841602, after both fixes above)
+  got further than any previous Azure attempt - create, observe, a real
+  Spot price observation, and delete (confirmed by two independent,
+  type-specific checks) all genuinely succeeded - yet the test still
+  failed** on its very last check: an immediate `azureIndependentLeftovers`
+  call (ARM's generic, tag-indexed resource list) still listed the
+  VM/NIC/disk moments after those two type-specific checks had already
+  confirmed them gone. Confirmed as ARM's own tag-index propagation lag,
+  not a real leftover: this run's resource group tore down cleanly
+  afterward (which a genuine leftover would have blocked), and a fresh
+  independent check showed nothing. Fixed by polling the leftover check
+  the same way `waitForAzureVMAbsent` already polls the VM-specific API,
+  sharing the same fixed teardown budget. The very next dispatch
+  (34865859207) passed cleanly end to end - `TestQualifyRealAzureSpotLifecycle`
+  PASS, zero leftover resources, the safety-net step itself reporting
+  clean without any force-clean needed - Azure's first fully successful
+  real-cloud qualification, completing all three clouds.
 
 Four of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
