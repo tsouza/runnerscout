@@ -180,6 +180,20 @@ on:
           - "1"
           - "2"
           - "3"
+      azure_disk_controller_type:
+        description: >-
+          [Azure] Optional. Leave "unset" for Azure's own default
+          controller-type inference (correct for most VM sizes). Set to
+          "NVMe" or "SCSI" only if azure_vm_size requires a specific
+          controller type a classic managed image's own metadata doesn't
+          declare - see docs/qualification-real-cloud.md's Azure section.
+        required: false
+        type: choice
+        default: unset
+        options:
+          - unset
+          - NVMe
+          - SCSI
       gcp_project:
         description: "[GCP] Pinned GCP project id to qualify against. Must equal both vars.GCP_QUALIFICATION_PROJECT_ID and vars.GCP_NETWORK_PROVISIONER_PROJECT_ID. Required only when provider is gcp or all."
         required: false
@@ -722,6 +736,13 @@ jobs:
           RUNNERSCOUT_QUALIFY_IMAGE_ID: ${{ inputs.azure_image_id }}
           RUNNERSCOUT_QUALIFY_VM_SIZE: ${{ inputs.azure_vm_size }}
           RUNNERSCOUT_QUALIFY_ZONE: ${{ inputs.azure_availability_zone }}
+          # "unset" (this optional input's own sentinel default, same
+          # reason as azure_availability_zone's) becomes a genuinely empty
+          # string here - loadQualifyAzureEnv reads this directly via
+          # os.Getenv with no "unset" awareness of its own, since this
+          # field is optional (never enforced by the require() checks
+          # above, unlike every other Azure input).
+          RUNNERSCOUT_QUALIFY_AZURE_DISK_CONTROLLER_TYPE: ${{ inputs.azure_disk_controller_type == 'unset' && '' || inputs.azure_disk_controller_type }}
 
       - name: "[GCP] Real-provider qualification (creates ONE real billed Spot instance)"
         if: matrix.provider == 'gcp'

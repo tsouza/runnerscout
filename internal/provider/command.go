@@ -52,6 +52,19 @@ type Config struct {
 	// rather than discovered. Empty for every deployment that never opts
 	// into wireguard mode.
 	WireGuardControllerURL string `json:"wireGuardControllerURL,omitempty"`
+	// AzureDiskControllerType, when non-empty, is passed through verbatim
+	// as the deployed VM's storageProfile.diskControllerType ("SCSI" or
+	// "NVMe") - Azure ARM's own explicit-request mechanism for choosing a
+	// controller type independent of what a classic managed image (which
+	// carries no controller-type metadata of its own - see
+	// docs/qualification-real-cloud.background.md) implies by default.
+	// Empty (the default) omits the field entirely, preserving Azure's own
+	// default inference exactly as before this field existed - this is a
+	// purely additive, opt-in escape hatch for VM sizes whose only
+	// supported controller type (found operationally, not derivable from
+	// anything else in this Config) doesn't match that default, never a
+	// behavior change for anyone who doesn't set it.
+	AzureDiskControllerType string `json:"azureDiskControllerType,omitempty"`
 }
 type Command struct {
 	AWS       *AWSSDK

@@ -127,6 +127,15 @@ type qualifyAzureEnv struct {
 	nsgID, imageID, vmSize, zone, allocationID      string
 	evidenceDir                                     string
 	maxRuntime                                      time.Duration
+	// diskControllerType is deliberately optional (read directly via
+	// os.Getenv, never through this file's own get() helper below) -
+	// empty preserves Azure's own default controller-type inference
+	// exactly as before this field existed. See
+	// Config.AzureDiskControllerType's own doc comment for why this
+	// exists at all: a classic managed image carries no controller-type
+	// metadata of its own, and some VM size families only support one
+	// specific controller type Azure can't always infer correctly.
+	diskControllerType string
 }
 
 func loadQualifyAzureEnv(t *testing.T) qualifyAzureEnv {
@@ -157,6 +166,8 @@ func loadQualifyAzureEnv(t *testing.T) qualifyAzureEnv {
 		allocationID:   get("RUNNERSCOUT_QUALIFY_ALLOCATION_ID"),
 		evidenceDir:    get("RUNNERSCOUT_QUALIFY_EVIDENCE_DIR"),
 		maxRuntime:     time.Duration(minutes) * time.Minute,
+		// Optional: see this field's own doc comment on qualifyAzureEnv.
+		diskControllerType: os.Getenv("RUNNERSCOUT_QUALIFY_AZURE_DISK_CONTROLLER_TYPE"),
 	}
 	if id, err := uuid.Parse(env.subscriptionID); err != nil || id == uuid.Nil {
 		t.Fatalf("RUNNERSCOUT_QUALIFY_SUBSCRIPTION_ID must be a subscription GUID, got %q", env.subscriptionID)
@@ -385,13 +396,14 @@ func TestQualifyRealAzureSpotLifecycle(t *testing.T) {
 	}
 
 	p, cleanupCreds, err := NewCommand(Config{
-		Kind:          "azure",
-		Owner:         "runnerscout-qualify-azure",
-		Subscription:  env.subscriptionID,
-		ResourceGroup: env.resourceGroup,
-		Subnet:        env.subnetID,
-		SecurityGroup: env.nsgID,
-		SSHPublicKey:  sshPublicKey,
+		Kind:                    "azure",
+		Owner:                   "runnerscout-qualify-azure",
+		Subscription:            env.subscriptionID,
+		ResourceGroup:           env.resourceGroup,
+		Subnet:                  env.subnetID,
+		SecurityGroup:           env.nsgID,
+		SSHPublicKey:            sshPublicKey,
+		AzureDiskControllerType: env.diskControllerType,
 	}, nil) // nil environment: reads AZURE_* directly from this process's own env, exactly as the workflow's federated-token step populated it.
 	if err != nil {
 		evidence.record("adapter-setup", nil, err)
