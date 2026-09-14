@@ -66,9 +66,13 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 	}
 	tags := map[string]string{"runnerscout-owner": p.Config.Owner, "runnerscout-operation": a.ID}
 	nicID := p.azureID("Microsoft.Network/networkInterfaces", a.ID+"-nic")
+	storageProfile := map[string]any{"imageReference": map[string]string{"id": a.Offering.Image}, "osDisk": map[string]any{"name": a.ID + "-os", "createOption": "FromImage", "deleteOption": "Delete", "managedDisk": map[string]string{"storageAccountType": "StandardSSD_LRS"}}}
+	if p.Config.AzureDiskControllerType != "" {
+		storageProfile["diskControllerType"] = p.Config.AzureDiskControllerType
+	}
 	properties := map[string]any{
 		"hardwareProfile": map[string]string{"vmSize": a.Offering.Machine},
-		"storageProfile":  map[string]any{"imageReference": map[string]string{"id": a.Offering.Image}, "osDisk": map[string]any{"name": a.ID + "-os", "createOption": "FromImage", "deleteOption": "Delete", "managedDisk": map[string]string{"storageAccountType": "StandardSSD_LRS"}}},
+		"storageProfile":  storageProfile,
 		"osProfile":       map[string]any{"computerName": a.ID, "adminUsername": "runner", "customData": "[parameters('bootstrap')]", "linuxConfiguration": map[string]any{"disablePasswordAuthentication": true, "ssh": map[string]any{"publicKeys": []any{map[string]string{"path": "/home/runner/.ssh/authorized_keys", "keyData": p.Config.SSHPublicKey}}}}},
 		"networkProfile":  map[string]any{"networkInterfaces": []any{map[string]any{"id": nicID, "properties": map[string]any{"primary": true, "deleteOption": "Delete"}}}},
 	}

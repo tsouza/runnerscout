@@ -172,6 +172,61 @@ func TestAzureCreateUsesSecureBootstrapAndSpotDelete(t *testing.T) {
 	}
 }
 
+// TestAzureCreateDiskControllerTypeOptIn confirms Config.AzureDiskControllerType
+// is purely additive: empty (its zero value, and every real caller's value
+// today) omits storageProfile.diskControllerType from the ARM template
+// entirely - not present with an empty-string value - preserving Azure's
+// own default inference exactly as before this field existed. A non-empty
+// value is passed through verbatim.
+func TestAzureCreateDiskControllerTypeOptIn(t *testing.T) {
+	for _, controllerType := range []string{"", "NVMe", "SCSI"} {
+		t.Run("controllerType="+controllerType, func(t *testing.T) {
+			var storageProfile map[string]any
+			disk := azureCreationDisk()
+			p, _ := azureCreationFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "GET" {
+					if strings.HasSuffix(strings.ToLower(r.URL.Path), "/disks/rs-test-os") {
+						writeJSON(w, disk)
+					} else {
+						writeJSON(w, azureCreationVM())
+					}
+					return
+				}
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					w.WriteHeader(400)
+					return
+				}
+				if deploymentPath(r) {
+					resources := body["properties"].(map[string]any)["template"].(map[string]any)["resources"].([]any)
+					storageProfile = resources[1].(map[string]any)["properties"].(map[string]any)["storageProfile"].(map[string]any)
+					writeJSON(w, map[string]any{"properties": map[string]string{"provisioningState": "Succeeded"}})
+					return
+				}
+				disk["tags"] = body["tags"]
+				writeJSON(w, disk)
+			})
+			p.Config.AzureDiskControllerType = controllerType
+			a := allocation()
+			a.Offering.Image = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/test"
+			if _, err := p.Create(context.Background(), a); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			got, present := storageProfile["diskControllerType"]
+			if controllerType == "" {
+				if present {
+					t.Fatalf("expected diskControllerType omitted for empty Config value, got %q", got)
+				}
+				return
+			}
+			if !present || got != controllerType {
+				t.Fatalf("expected diskControllerType=%q, got %q (present=%v)", controllerType, got, present)
+			}
+		})
+	}
+}
+
 // azureFailedDeploymentFixture models a deployment that reaches a terminal
 // Failed provisioning state before any of its resources exist. residual lets
 // a test prove a surviving resource blocks capacity classification.

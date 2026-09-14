@@ -270,6 +270,7 @@ configured:
 | `azure_image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
 | `azure_vm_size` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
 | `azure_availability_zone` | `1`, `2` or `3`. Must be supported by both `azure_region` and `azure_vm_size`. |
+| `azure_disk_controller_type` | Optional, defaults to `unset`. Leave `unset` for Azure's own default controller-type inference (correct for most VM sizes). Set to `NVMe` or `SCSI` only if `azure_vm_size` requires a specific controller type - see "Choosing a compatible `azure_vm_size`" below. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
 
 The image/VM size/subscription are auto-discovered from nowhere -
@@ -283,6 +284,35 @@ from any other input, so it is its own required input here. The
 workflow provisions its own isolated resource group/VNet/subnet/NSG via
 OpenTofu at the start of the job and destroys it at the end (see "Network
 provisioning" below).
+
+### Choosing a compatible `azure_vm_size`
+
+A classic managed image (`Microsoft.Compute/images/...`, what
+`azure_image_id` must point to - see above) carries no disk-controller-type
+metadata of its own, unlike a Compute Gallery image. Most Azure VM size
+families let Azure infer a working controller type from the image anyway,
+but some newer families (e.g. the `Dv7`/`Ev7`/`Fv7` generations) only
+support `NVMe` and cannot boot such an image without `azure_disk_controller_type`
+set explicitly to `NVMe`. Confidential-computing families (`DCasv6`/`ECasv6`
+and similar) have a separate, unrelated incompatibility: they require an
+explicit `securityProfile.securityType` this workflow's VM deployment
+template does not set, and are not supported by `azure_disk_controller_type`
+or any other input here. Before picking `azure_vm_size`, confirm both:
+
+- Its supported disk controller type(s):
+  `az vm list-skus --location <region> --size <size> --resource-type
+  virtualMachines --query "[0].capabilities[?name=='DiskControllerTypes']"`.
+  If the result is `NVMe` only, set `azure_disk_controller_type=NVMe`; if it
+  includes `SCSI` (alone or alongside `NVMe`), leave `azure_disk_controller_type`
+  `unset`.
+- It isn't a confidential-computing family (`DC*`/`EC*`) - those need a
+  `securityProfile` change this workflow doesn't make, regardless of
+  `azure_disk_controller_type`.
+- Its Spot/low-priority core quota headroom in the target subscription/region
+  (`az vm list-usage --location <region> --query "[?name.value=='lowPriorityCores']"`)
+  covers the size's own vCPU count - a subscription's default quota can be
+  quite low (single digits), which rules out larger sizes (memory-optimized
+  `M`-series, for example) even when they're otherwise controller-compatible.
 
 ### Azure hard bounds
 

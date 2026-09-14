@@ -848,6 +848,49 @@ own logic, surfacing the bugs below:
   actually help production too would be a separate, broader change (it
   bounds every provider call in every phase, not just GCP's delete) - out
   of scope for this fix.
+- **A real Azure VM-size/managed-image compatibility gap, not a bug in
+  this workflow's code**: with the OIDC subject mismatch fixed, dispatches
+  reached real VM creation and hit a real Azure platform constraint
+  instead: `azure_vm_size=Standard_D2als_v7` (the size originally chosen
+  for the qualification image-build VM too) failed with `"The VM size
+  'Standard_D2als_v7' cannot boot with OS image or disk"` - the classic
+  managed image built for this qualification (`Microsoft.Compute/images/...`)
+  carries no disk-controller-type metadata of its own, and this VM size's
+  family only supports `NVMe`, which Azure won't infer for such an image
+  without being told explicitly. Checking every unrestricted VM size in
+  this subscription's `eastus` and `westus2` catalogs (`az vm list-skus`)
+  found the *entire* general-purpose catalog is `NVMe`-only in both
+  regions - the only families supporting `SCSI` at all are
+  confidential-computing (`DC*`/`EC*`, which then failed differently:
+  `"is not supported for creation of VMs and Virtual Machine Scale Set
+  with '<NULL>' security type"` - they require an explicit
+  `securityProfile.securityType` this workflow's ARM template does not
+  set) and memory-optimized `M`-series (`M12s_v3` and up, minimum 12
+  vCPUs) - which then hit a *third*, independent constraint: this
+  subscription's default Spot/low-priority core quota in `eastus` is only
+  3 vCPUs, well under `M12s_v3`'s 12.
+
+  Fixed with a new, purely additive, opt-in `Config.AzureDiskControllerType`
+  field (empty by default, omitting `storageProfile.diskControllerType`
+  from the ARM template entirely and preserving Azure's own default
+  inference exactly as before this field existed) rather than either of
+  the two options considered and rejected: unconditionally hardcoding
+  `"NVMe"` in `createAzure` (would have silently broken any VM size that
+  is genuinely `SCSI`-only, with no way to know from anything already in
+  `Config`/`Allocation` whether a given size supports `NVMe` at all -
+  real backward-compatibility risk to real production Azure users on
+  older size families, not justified just to unblock this qualification
+  run), or adding a `securityProfile.securityType` for confidential
+  computing (a materially different, riskier VM shape change, and
+  `azure_disk_controller_type=NVMe` on a plain `Dv7`-class size was
+  already sufficient once quota was accounted for - no need to also solve
+  the confidential-computing path). `qualify.yml` threads this through as
+  a new, optional `azure_disk_controller_type` input (`unset` by default,
+  same sentinel-default pattern as `azure_availability_zone`, since choice
+  inputs can't have an empty-string option) rather than something this
+  workflow infers on its own - matching this repository's consistent
+  "operator-supplied explicit configuration, no silent magic" convention
+  for every other pinned image/network/compute-shape input.
 
 Three of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
