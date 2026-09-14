@@ -297,8 +297,14 @@ func (p *Command) deleteGCP(ctx context.Context, a lifecycle.Allocation) error {
 	// genuinely take longer to reach DONE than creating one does - a
 	// timeout here doesn't mean the delete failed (GCP keeps processing it
 	// server-side regardless of whether this call is still watching), just
-	// that this one call couldn't confirm completion in time, forcing an
-	// avoidable extra reconciliation round-trip.
+	// that this one call couldn't confirm completion in time. This only
+	// actually matters for internal/provider/gcp_realcloud_test.go's own
+	// direct Delete call (its own 5-minute dedicatedTeardownBudget context
+	// has room for the full 60s) - operator.go's Step call wraps every
+	// production Delete in its own, tighter 30-second context, which caps
+	// this at ~30s regardless of the value here. Raising that shared,
+	// per-reconciliation-step budget is a separate, broader change than
+	// this one, out of scope here.
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := p.gcpCreateTerminal(ctx, a); err != nil {
