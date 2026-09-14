@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
-  name: runnerscalesets.runnerscout.io
+  name: capacitybudgets.runnerscout.io
 spec:
   group: runnerscout.io
   names:
-    kind: RunnerScaleSet
-    listKind: RunnerScaleSetList
-    plural: runnerscalesets
-    singular: runnerscaleset
+    kind: CapacityBudget
+    listKind: CapacityBudgetList
+    plural: capacitybudgets
+    singular: capacitybudget
   scope: Namespaced
   versions:
   - name: v1alpha1
@@ -36,111 +36,19 @@ spec:
           metadata:
             type: object
           spec:
+            description: |-
+              CapacityBudgetSpec holds only the worst-case daily spend ceiling. Running
+              spend is never persisted here: every RunnerScaleSet that references a
+              CapacityBudget recomputes its own spend from its own admitted allocations
+              on every reconcile pass.
             properties:
-              budgetRef:
-                description: |-
-                  BudgetRef bounds worst-case daily spend for this scale set. A
-                  CapacityBudget referenced by more than one RunnerScaleSet is not a
-                  shared pool: each referencing scale set enforces the same ceiling
-                  independently against only its own admitted allocations.
-                properties:
-                  name:
-                    maxLength: 63
-                    minLength: 1
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                required:
-                - name
-                type: object
-              github:
-                properties:
-                  auth:
-                    properties:
-                      appClientID:
-                        type: string
-                      appInstallationID:
-                        format: int64
-                        minimum: 1
-                        type: integer
-                      mode:
-                        enum:
-                        - pat
-                        - app
-                        type: string
-                      secretRef:
-                        properties:
-                          key:
-                            maxLength: 253
-                            minLength: 1
-                            pattern: ^[-._a-zA-Z0-9]+$
-                            type: string
-                          name:
-                            maxLength: 253
-                            minLength: 1
-                            pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
-                            type: string
-                        required:
-                        - key
-                        - name
-                        type: object
-                    required:
-                    - mode
-                    - secretRef
-                    type: object
-                    x-kubernetes-validations:
-                    - message: App authentication requires client and installation
-                        identity
-                      rule: self.mode != 'app' || (has(self.appClientID) && size(self.appClientID)
-                        > 0 && has(self.appInstallationID))
-                    - message: PAT authentication excludes App settings
-                      rule: self.mode != 'pat' || (!has(self.appClientID) && !has(self.appInstallationID))
-                  scaleSetID:
-                    minimum: 1
-                    type: integer
-                  url:
-                    type: string
-                required:
-                - auth
-                - scaleSetID
-                - url
-                type: object
-              maxLifetimeSeconds:
-                maximum: 21600
+              dailyBudgetMicros:
+                format: int64
                 minimum: 1
                 type: integer
-              maxRunners:
-                maximum: 10
-                minimum: 1
-                type: integer
-              provisioningSeconds:
-                maximum: 600
-                minimum: 1
-                type: integer
-              runnerClassRef:
-                description: |-
-                  LocalReference cannot name another namespace. Controllers must resolve it in
-                  the namespace of the referring resource.
-                properties:
-                  name:
-                    maxLength: 63
-                    minLength: 1
-                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                    type: string
-                required:
-                - name
-                type: object
-              suspend:
-                type: boolean
             required:
-            - github
-            - maxLifetimeSeconds
-            - maxRunners
-            - provisioningSeconds
-            - runnerClassRef
+            - dailyBudgetMicros
             type: object
-            x-kubernetes-validations:
-            - message: lifetime must cover provisioning deadline
-              rule: self.maxLifetimeSeconds >= self.provisioningSeconds
           status:
             description: ConfigurationStatus contains references and redacted conditions,
               never credentials.

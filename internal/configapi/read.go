@@ -93,6 +93,12 @@ func Read(ctx context.Context, reader Reader, namespace, name string) (Snapshot,
 			return s, nil, err
 		}
 	}
+	if s.ScaleSet.Spec.BudgetRef != nil {
+		s.Budget = new(api.CapacityBudget)
+		if err := get("capacitybudgets", "CapacityBudget", s.ScaleSet.Spec.BudgetRef.Name, s.Budget); err != nil {
+			return s, nil, err
+		}
+	}
 	if err := Recheck(ctx, reader, namespace, revisions); err != nil {
 		return s, nil, err
 	}

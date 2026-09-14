@@ -43,8 +43,8 @@ def main():
         return process
 
     try:
-        if len(result["schemas"]) != 5:
-            raise RuntimeError("complete five-CRD schema set required")
+        if len(result["schemas"]) != 6:
+            raise RuntimeError("complete six-CRD schema set required")
         with tempfile.TemporaryDirectory(prefix=identity + "-") as tmp:
             temp = Path(tmp)
             run("network-create", ["docker", "network", "create", "--internal", "--label", "runnerscout.test=" + identity, identity])

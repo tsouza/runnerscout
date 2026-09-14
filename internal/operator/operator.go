@@ -95,6 +95,14 @@ type Config struct {
 	// existing deployment's fleet ConfigMap binding hash (see
 	// bindingWithLimit) unchanged, exactly like NetworkProfile above.
 	NetworkOverlayCIDRs []string `json:"networkOverlayCIDRs,omitempty"`
+	// BudgetDailyMicros is a worst-case daily spend ceiling in USD micros, or
+	// 0 for unbounded (the default, matching every existing deployment's
+	// binding hash unchanged - see bindingWithLimit). Enforced independently
+	// per scale set from that scale set's own admitted allocations; a
+	// CapacityBudget (or mounted-config value) referenced by more than one
+	// scale set is not a shared pool - each scale set enforces the same
+	// ceiling against only its own spend.
+	BudgetDailyMicros int64 `json:"budgetDailyMicros,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -148,13 +156,19 @@ func (c Config) Validate() error {
 }
 
 type fleet struct {
-	BindingVersion int                             `json:"bindingVersion,omitempty"`
-	Condition      string                          `json:"condition,omitempty"`
-	Binding        string                          `json:"binding"`
-	Released       map[string]bool                 `json:"released"`
-	Admission      admission.State                 `json:"admission"`
-	Created        map[string]time.Time            `json:"created"`
-	Pending        map[string]lifecycle.Allocation `json:"pending"`
+	BindingVersion int                  `json:"bindingVersion,omitempty"`
+	Condition      string               `json:"condition,omitempty"`
+	Binding        string               `json:"binding"`
+	Released       map[string]bool      `json:"released"`
+	Admission      admission.State      `json:"admission"`
+	Created        map[string]time.Time `json:"created"`
+	// Reserved is a worst-case reservation in USD micros per allocation ID,
+	// keyed and populated at the same moment as Created (see
+	// HandleDesiredRunnerCount). Entries are never removed, matching
+	// Created's own lifetime - spentToday sums these, filtered by Created's
+	// date and each allocation's current Phase.
+	Reserved map[string]int64                `json:"reserved,omitempty"`
+	Pending  map[string]lifecycle.Allocation `json:"pending"`
 	// RetriesUsedByRun is keyed by GitHub workflow run ID, not allocation ID -
 	// a rerun keeps the same run ID but is reassigned as a brand new,
 	// otherwise unrelated allocation.
@@ -235,6 +249,7 @@ func (o *Operator) bindingWithLimit(limit int) string {
 	c.MaxRunners = limit
 	c.Catalog = placement.Catalog{}
 	c.CatalogPath = ""
+	c.BudgetDailyMicros = 0
 	b, _ := json.Marshal(c)
 	return fmt.Sprintf("%x", sha256.Sum256(b))
 }
@@ -311,6 +326,9 @@ func (o *Operator) readFleet(ctx context.Context, create bool) (*corev1.ConfigMa
 	if f.Created == nil {
 		f.Created = map[string]time.Time{}
 	}
+	if f.Reserved == nil {
+		f.Reserved = map[string]int64{}
+	}
 	if f.Pending == nil {
 		f.Pending = map[string]lifecycle.Allocation{}
 	}
@@ -374,6 +392,22 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 	n, e := f.Admission.Reconcile(count, active, o.Config.MaxRunners, active == 0)
 	if e != nil {
 		return active, e
+	}
+	if n > 0 && o.Config.BudgetDailyMicros > 0 {
+		unit := reservationMicros(o.Config.Requirements.MaxPriceMicros, o.Config.MaxLifetimeSeconds)
+		remaining := o.Config.BudgetDailyMicros - spentToday(f, allocs, time.Now())
+		affordable := 0
+		if unit > 0 && remaining > 0 {
+			affordable = int(remaining / unit)
+		}
+		if affordable < n {
+			f.Admission.Admitted -= n - affordable
+			n = affordable
+			if n == 0 {
+				f.Condition = "BudgetExhausted"
+				return active, o.saveFleet(ctx, cm, f)
+			}
+		}
 	}
 	if n > 0 && len(f.Created)+n > 1000 {
 		return active, errors.New("retained allocation limit reached; operator maintenance required")
@@ -447,6 +481,9 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 		id := "rs-" + uuid.NewString()
 		now := time.Now()
 		f.Created[id] = now
+		if o.Config.BudgetDailyMicros > 0 {
+			f.Reserved[id] = reservationMicros(o.Config.Requirements.MaxPriceMicros, o.Config.MaxLifetimeSeconds)
+		}
 		a := lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: catalog, Requirements: o.Config.Requirements, NetworkProfile: o.Config.NetworkProfile}
 		if i < len(overlayAddresses) {
 			a.WireGuardOverlayAddress = overlayAddresses[i]

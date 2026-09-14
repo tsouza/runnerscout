@@ -13,7 +13,7 @@ Choose one mode per release:
 | Mounted JSON | `config`, `github` | Existing mounted GitHub Secret and provider identities/files |
 | Named CRDs | `crd.scaleSetName`, `crd.secretNames` | Same-namespace Secret references in the CRDs |
 
-The [multicloud example](../../examples/multicloud/README.md) covers all five CRDs,
+The [multicloud example](../../examples/multicloud/README.md) covers all six CRDs,
 AWS/Azure/GCP, private subnets and an ordinary multistage workflow. For mounted
 mode, `tests/values.json` is a structural fixture with dummy accounts and no capacity.
 The chart does not create a GitHub scale set; use a dedicated existing one.

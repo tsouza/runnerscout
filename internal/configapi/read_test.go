@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	api "github.com/tsouza/runnerscout/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -73,6 +74,54 @@ func TestReadUsesOnlyLocalNamedDependenciesAndRechecksVersions(t *testing.T) {
 		}
 	}
 }
+func TestReadResolvesReferencedBudget(t *testing.T) {
+	r := readerFixture(t)
+	s := fixture()
+	s.ScaleSet.Spec.BudgetRef = &api.LocalReference{Name: "daily"}
+	raw, err := json.Marshal(s.ScaleSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content map[string]any
+	if err = json.Unmarshal(raw, &content); err != nil {
+		t.Fatal(err)
+	}
+	u := r.objects["runnerscalesets/build"]
+	u.Object = content
+	u.SetAPIVersion(api.Group + "/" + api.Version)
+	u.SetKind("RunnerScaleSet")
+	u.SetUID(types.UID("build-uid"))
+	u.SetResourceVersion("1")
+	u.SetGeneration(1)
+	budget := api.CapacityBudget{ObjectMeta: metav1.ObjectMeta{Name: "daily", Namespace: "test"}, Spec: api.CapacityBudgetSpec{DailyBudgetMicros: 1000}}
+	braw, err := json.Marshal(budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bcontent map[string]any
+	if err = json.Unmarshal(braw, &bcontent); err != nil {
+		t.Fatal(err)
+	}
+	bu := &unstructured.Unstructured{Object: bcontent}
+	bu.SetAPIVersion(api.Group + "/" + api.Version)
+	bu.SetKind("CapacityBudget")
+	bu.SetUID(types.UID("daily-uid"))
+	bu.SetResourceVersion("1")
+	bu.SetGeneration(1)
+	r.objects["capacitybudgets/daily"] = bu
+
+	got, revisions, err := Read(context.Background(), r, "test", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Budget == nil || got.Budget.Spec.DailyBudgetMicros != 1000 {
+		t.Fatal("budget not resolved", got.Budget)
+	}
+	if len(revisions) != 7 {
+		t.Fatal("budget revision not tracked for Recheck", revisions)
+	}
+}
+
 func TestReadRejectsConcurrentMutationAndObjectRecreation(t *testing.T) {
 	for _, recreate := range []bool{false, true} {
 		r := readerFixture(t)

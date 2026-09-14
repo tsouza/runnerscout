@@ -148,6 +148,11 @@ type RunnerScaleSetSpec struct {
 	// +kubebuilder:validation:Maximum=21600
 	MaxLifetimeSeconds int  `json:"maxLifetimeSeconds"`
 	Suspend            bool `json:"suspend,omitempty"`
+	// BudgetRef bounds worst-case daily spend for this scale set. A
+	// CapacityBudget referenced by more than one RunnerScaleSet is not a
+	// shared pool: each referencing scale set enforces the same ceiling
+	// independently against only its own admitted allocations.
+	BudgetRef *LocalReference `json:"budgetRef,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -231,6 +236,24 @@ type NetworkProfile struct {
 	Status            ConfigurationStatus `json:"status,omitempty"`
 }
 
+// CapacityBudgetSpec holds only the worst-case daily spend ceiling. Running
+// spend is never persisted here: every RunnerScaleSet that references a
+// CapacityBudget recomputes its own spend from its own admitted allocations
+// on every reconcile pass.
+type CapacityBudgetSpec struct {
+	// +kubebuilder:validation:Minimum=1
+	DailyBudgetMicros int64 `json:"dailyBudgetMicros"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+type CapacityBudget struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              CapacityBudgetSpec  `json:"spec"`
+	Status            ConfigurationStatus `json:"status,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 type ProviderConfigList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -264,4 +287,11 @@ type NetworkProfileList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []NetworkProfile `json:"items"`
+}
+
+// +kubebuilder:object:root=true
+type CapacityBudgetList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []CapacityBudget `json:"items"`
 }

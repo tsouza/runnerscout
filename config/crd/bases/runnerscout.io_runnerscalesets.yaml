@@ -37,6 +37,21 @@ spec:
             type: object
           spec:
             properties:
+              budgetRef:
+                description: |-
+                  BudgetRef bounds worst-case daily spend for this scale set. A
+                  CapacityBudget referenced by more than one RunnerScaleSet is not a
+                  shared pool: each referencing scale set enforces the same ceiling
+                  independently against only its own admitted allocations.
+                properties:
+                  name:
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
               github:
                 properties:
                   auth:

@@ -15,6 +15,7 @@ func AddToScheme(scheme *runtime.Scheme) error {
 		&RunnerScaleSet{}, &RunnerScaleSetList{},
 		&CapacityCatalog{}, &CapacityCatalogList{},
 		&NetworkProfile{}, &NetworkProfileList{},
+		&CapacityBudget{}, &CapacityBudgetList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

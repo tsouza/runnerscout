@@ -1,0 +1,7 @@
+apiVersion: runnerscout.io/v1alpha1
+kind: CapacityBudget
+metadata:
+  name: daily
+  namespace: runnerscout
+spec:
+  dailyBudgetMicros: 5000000 # $5.00/day
