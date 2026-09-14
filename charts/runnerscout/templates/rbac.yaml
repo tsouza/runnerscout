@@ -28,7 +28,7 @@ rules:
     resourceNames: [{{ .Values.crd.scaleSetName | quote }}]
     verbs: [get, update]
   - apiGroups: [runnerscout.io]
-    resources: [providerconfigs, runnerclasses, capacitycatalogs, networkprofiles]
+    resources: [providerconfigs, runnerclasses, capacitycatalogs, networkprofiles, capacitybudgets]
     verbs: [get]
   - apiGroups: [""]
     resources: [secrets]
