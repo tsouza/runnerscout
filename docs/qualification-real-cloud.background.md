@@ -670,14 +670,25 @@ own logic, surfacing the bugs below:
   subject mismatch above, on the very first attempt) - this specific step
   had simply never run yet. Fixed by moving the tag match into the
   `--query` JMESPath expression instead of the server-side `--tag` filter.
-- **A real AWS IAM gap**: the network-provisioner policy was missing
-  `ec2:DescribeVpcAttribute`, needed for `aws_vpc`'s own
-  `enable_dns_hostnames` reconciliation - `tofu apply` failed partway
-  through creating the VPC itself (leaving one orphaned, free VPC with no
-  subnet/NAT Gateway/route table ever created after it - manually verified
-  and cleaned up directly, zero ongoing cost), and the equivalent `tofu
-  destroy` failed the same way. Fixed by adding the missing permission to
-  the live role.
+- **Two real AWS IAM gaps, found across successive re-dispatches**: the
+  network-provisioner policy was first missing `ec2:DescribeVpcAttribute`,
+  needed for `aws_vpc`'s own `enable_dns_hostnames` reconciliation - `tofu
+  apply` failed partway through creating the VPC itself (leaving one
+  orphaned, free VPC with no subnet/NAT Gateway/route table ever created
+  after it - manually verified and cleaned up directly, zero ongoing
+  cost), and the equivalent `tofu destroy` failed the same way. With that
+  fixed, the next dispatch got further - creating the VPC, subnets and an
+  Elastic IP - before failing on the *second* gap:
+  `ec2:DescribeAddressesAttribute`, needed for `aws_eip`'s own domain-
+  attribute reconciliation (the same "Terraform reads back an attribute
+  after creating the resource, and that read needs its own permission"
+  shape as the VPC gap, and as GCP's `setLabels`/`setMetadata`/
+  `setScheduling` gaps below). This one briefly left a real, billable,
+  unassociated Elastic IP (AWS charges for an idle EIP) plus an orphaned
+  VPC/subnet pair/internet gateway/security group - manually verified and
+  released/deleted directly within minutes of the failure, so real cost
+  was negligible (a fraction of an hour's idle-EIP rate). Both gaps were
+  fixed by adding the missing permissions to the live role.
 - **A stale-credential bug in the AWS VM-level safety-net step**,
   surfaced by the AWS IAM gap above: when a network `tofu apply` failure
   causes every qualification-identity credential step after it to be
@@ -758,16 +769,19 @@ own logic, surfacing the bugs below:
   bounds every provider call in every phase, not just GCP's delete) - out
   of scope for this fix.
 
-Only one of these bugs actually resulted in a real, billed resource being
-created (the GCP Spot instance that hit the delete-timeout finding above -
-it existed for well under two minutes, cleanly deleted, real cost a
-fraction of a cent). Every other bug's failure happened before any
-billable VM was ever created, or left behind only a resource type that
-does not bill by itself (a bare VPC; an Azure NIC/VNet/NSG/subnet). Each
-was found, diagnosed against the real cloud APIs (Cloud Logging, in GCP's
-case, since the adapter's own errors are deliberately generic), and fixed
-as its own focused PR rather than folded silently into a larger change -
-matching this workflow's own one-focused-unit-per-provider review
+Two of these bugs actually resulted in a real, billed resource being
+created: the GCP Spot instance that hit the delete-timeout finding above
+(existed for well under two minutes, cleanly deleted, real cost a
+fraction of a cent), and the AWS Elastic IP left briefly unassociated by
+the second AWS IAM gap (released within minutes, real cost negligible).
+Every other bug's failure happened before any billable resource was ever
+created, or left behind only a resource type that does not bill by itself
+(a bare VPC/subnet/internet-gateway/security-group; an Azure
+NIC/VNet/NSG/subnet). Each was found, diagnosed against the real cloud
+APIs (Cloud Logging, in GCP's case, since the adapter's own errors are
+deliberately generic), and fixed as its own focused PR rather than folded
+silently into a larger change - matching this workflow's own
+one-focused-unit-per-provider review
 discipline from when it was first built.
 
 ## Provenance
