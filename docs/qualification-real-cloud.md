@@ -572,8 +572,8 @@ Named gaps, not covered by this piece:
   against synthesized operation payloads, by the existing unit test suite.
 - **Architecture/image compatibility.** `createGCP` never cross-validates
   `gcp_machine_type` against `gcp_image`'s real architecture the way AWS's
-  adapter does for `instance_type`/`ami_id` — an operator error here fails
-  at VM boot, not at this workflow's pre-flight.
+  adapter does for `aws_instance_type`/`aws_ami_id` — an operator error here
+  fails at VM boot, not at this workflow's pre-flight.
 
 See [qualification-real-cloud.background.md](qualification-real-cloud.background.md)
 for the reasoning behind these design choices.
