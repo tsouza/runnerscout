@@ -313,9 +313,22 @@ func TestQualifyRealGCPSpotLifecycle(t *testing.T) {
 	createCtx, cancelCreate := context.WithTimeout(context.Background(), env.maxRuntime)
 	defer cancelCreate()
 
-	initial, err := p.Observe(createCtx, a)
+	// p.Observe (observeGCP) is deliberately not used for this pre-create
+	// check: it unconditionally requires evidence of an already-committed
+	// create operation (gcpCreateTerminal) before reporting anything, by
+	// design - the real controller (internal/lifecycle.go) only ever calls
+	// Observe once a create has already been attempted (Allocation.Phase ==
+	// Creating or later), never before, so that precondition is correct for
+	// production but makes Observe unusable as a "does this ID already have
+	// leftover cloud resources" check against a virgin allocation ID -
+	// calling it here always failed with "GCP create commitment
+	// unconfirmed", regardless of whether anything actually existed.
+	// gcpInventory (the package-internal helper observeGCP itself calls,
+	// after its own gcpCreateTerminal gate) has no such precondition and is
+	// exactly the right-sized check for this purpose.
+	initial, err := p.gcpInventory(createCtx, a)
 	evidence.record("pre-create-inventory", initial, err)
-	if err != nil || !initial.Known || initial.Exists {
+	if err != nil || initial.vm != nil || initial.disk != nil {
 		t.Fatalf("pre-create inventory not clean: %+v %v", initial, err)
 	}
 
