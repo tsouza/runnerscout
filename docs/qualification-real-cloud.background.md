@@ -939,6 +939,29 @@ own logic, surfacing the bugs below:
   create --managed-image <classic-image-id>` - no VM rebuild needed),
   confirming the whole chain end-to-end against real Azure resources, not
   just unit-test fixtures.
+- **Two more real gaps, found by the first two dispatches against the new
+  gallery image version**: `qualify.yml`'s own bash pre-flight `case`
+  statement (validating `azure_image_id`'s shape before any cloud
+  credential is even configured) was never updated alongside
+  `validateAzureImage`'s new acceptance of a gallery image version - it
+  still only matched the classic `Microsoft.Compute/images/...` shape,
+  rejecting a genuinely valid gallery image version outright
+  (`"does not look like a Microsoft.Compute/images resource ID"`) before
+  the Go test ever ran. Fixed by adding the matching gallery-shape case
+  pattern, verified directly with a standalone bash test against the real
+  image ID. With that fixed, the next dispatch reached
+  `validateAzureImage` itself and failed there instead, with `"Azure image
+  identity or region unconfirmed"` - the qualification identity's RBAC
+  role had never needed `Microsoft.Compute/galleries/*` permissions before
+  (it only ever read classic managed images), so the new gallery-version
+  GET call failed with an authorization error the generic "identity or
+  region unconfirmed" error message doesn't distinguish from a genuine
+  identity mismatch. Fixed by adding `Microsoft.Compute/galleries/read`,
+  `Microsoft.Compute/galleries/images/read`, and
+  `Microsoft.Compute/galleries/images/versions/read` to the live
+  `RunnerScout Qualify` role. Both failures happened at or before the
+  first cloud-credential-requiring step - zero leftover resources, zero
+  cost, in both cases.
 
 Three of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
