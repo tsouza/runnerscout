@@ -87,19 +87,31 @@ This module intentionally has no IAM role, policy, or OIDC provider
 resource of its own - provisioning the identity this module runs under is a
 separate, human-driven bootstrap step, out of scope here.
 
-## One-time bootstrap, long-lived result
+## Ephemeral: apply before a run, destroy right after
 
-Run this once. The VPC/subnets/NAT Gateway/security group it creates are
-meant to live indefinitely and be reused by every future qualification/E2E
-run - this module has no destroy-on-idle, TTL, or other ephemeral lifecycle
-logic, and none should be added. Tearing it down is a deliberate, manual
-`tofu destroy` if this qualification network is ever retired.
+Unlike a truly free network (nothing here costs money by itself except the
+NAT Gateway), this module is meant to be **applied immediately before** a
+`qualify.yml`/E2E dispatch and **destroyed immediately after** - not applied
+once and left running indefinitely. The NAT Gateway bills hourly
+(~$0.045/hr plus data processing) whether or not anything is using it, so
+leaving it up permanently would turn a bounded, cheap qualification run into
+an unbounded, ongoing monthly cost. Provisioned and torn down around a
+single run instead, its real cost is a few cents, not tens of dollars a
+month. A future CI workflow (out of scope for this module) is expected to
+wrap `tofu apply` → dispatch `qualify.yml`/the E2E harness with this
+module's outputs → `tofu destroy` around every single real-cloud run.
+`tofu destroy -var region=...` (using the same `region` value `apply` was
+given) tears down every resource this module created.
 
 ## State
 
 This module uses local OpenTofu/Terraform state (a `terraform.tfstate` file
-next to these `.tf` files, gitignored). It is run rarely, by hand or from a
-single CI identity, so a remote state backend was deliberately not built
-for it. If you run `apply` more than once from different machines, make
-sure you're sharing the same state file, or you will create a second,
-duplicate network instead of updating the first.
+next to these `.tf` files, gitignored). Because the network is meant to be
+created and destroyed within a single run (see above) rather than persisted
+across separate invocations, the state file only needs to survive for the
+lifetime of that one apply-then-destroy cycle - a remote state backend was
+deliberately not built for it. If you ever do need to `apply` and `destroy`
+from different machines/CI jobs for the same run, make sure the state file
+produced by `apply` is passed through to the job that runs `destroy` (e.g.
+as a build artifact), or `destroy` will find nothing to tear down and the
+resources will be orphaned (billing until removed by hand).

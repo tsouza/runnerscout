@@ -45,7 +45,11 @@
 #     optional, for tools/e2e/bring-up.sh's real registration/job-polling
 #     use of this same network to actually work. (qualify.yml's own AWS
 #     lifecycle test does not itself require this - see above - but the
-#     network is shared with tools/e2e, which does.)
+#     network is shared with tools/e2e, which does.) That hourly cost is
+#     bounded to a few cents per real-cloud run, not an ongoing monthly
+#     bill: this module is meant to be applied immediately before a run and
+#     destroyed immediately after (see README.md's "Ephemeral" section),
+#     never left standing indefinitely.
 #
 # So this network needs zero inbound access and only outbound connectivity
 # (443 to GitHub, plus whatever the guest OS itself needs - package repos,
