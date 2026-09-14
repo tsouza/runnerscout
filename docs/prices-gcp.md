@@ -15,6 +15,8 @@ nothing: `Operator.HandleDesiredRunnerCount` passes GCP offerings through
 keep whatever `PriceMicros`, `Currency` and `ObservedAt` the static catalog
 already assigned them.
 
-Building this is currently not recommended. See
-[gcp.background.md](gcp.background.md) for the investigation and the
-reasoning behind that recommendation.
+This is a deliberate, permanent product decision for this project, not a
+deferral: GCP catalog offerings stay on static pricing indefinitely, unless
+Google later publishes a structured field this package could key off
+without guessing. See [gcp.background.md](gcp.background.md) for the
+investigation and the reasoning behind that decision.

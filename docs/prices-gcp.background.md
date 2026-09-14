@@ -105,23 +105,37 @@ rewords a SKU description, ships a new machine family, or changes a tiered
 rate boundary — with no error surfaced, because there is no authoritative
 signal to check the guess against.
 
-## Recommendation
+## Decision
 
-Do not build `internal/prices/gcp.go` now. Leave GCP catalog offerings on
-static pricing, as they are today, until one of the following changes:
+`internal/prices/gcp.go` will not be built. GCP catalog offerings stay on
+static pricing, as they are today, permanently — accepted as this
+project's product decision for issue #2, closing that issue's remaining
+scope rather than leaving it open indefinitely on a hypothetical future
+API change. Two paths that could justify revisiting this were considered
+and explicitly declined for now:
 
-- Google publishes a structured, documented, GA field that maps a specific
-  Compute Engine machine type and region (zone-level pricing does not
-  exist to map to) to exactly one SKU or exactly one deterministic
-  combination of SKUs — not observed in either API generation as of this
-  investigation; or
-- This project accepts a materially weaker contract than AWS/Azure's (e.g.
-  a region-level-only price, refreshed from a hand-maintained
-  family/shape table, explicitly documented as best-effort rather than
-  authoritative) as a deliberate, reviewed trade-off — a product decision
-  this document does not make on its own.
+- Waiting for Google to publish a structured, documented, GA field that
+  maps a specific Compute Engine machine type and region (zone-level
+  pricing does not exist to map to) to exactly one SKU or exactly one
+  deterministic combination of SKUs — not observed in either API
+  generation as of this investigation, and not something this project
+  controls the timeline of.
+- Accepting a materially weaker contract than AWS/Azure's (e.g. a
+  region-level-only price, refreshed from a hand-maintained family/shape
+  table, explicitly documented as best-effort rather than authoritative) —
+  declined because it would still be pattern-matching against prose
+  Google can reword at any time, the exact "usually works" inference this
+  project's provider adapters otherwise refuse to ship (see "Why this
+  fails this codebase's classification discipline" above).
 
-This mirrors two other places this session's line of work left something
-genuinely undone rather than faked: GCP real-cloud qualification and
-Azure's full Event Grid wiring, both tracked as open work rather than
-shipped as a false pass.
+If Google ever publishes the structured field described in the first
+option, revisiting this decision is a small, well-scoped follow-up: this
+document and issue #2 stay as the record of why it wasn't built sooner.
+
+This mirrors other places this session's line of work left something
+genuinely undone rather than faked, since resolved with the same
+discipline: GCP real-cloud qualification (see
+`docs/qualification-real-cloud.md`) and Azure's full Event Grid wiring
+(see `docs/azure-interruption-delivery.md`, issue #4, closed) were both
+tracked as real, honestly-scoped open work rather than shipped as a false
+pass, until actually built and verified.
