@@ -244,8 +244,8 @@ Azure Spot price the same way, via `internal/prices.AzureSpotClient`
 (`Command.Azure.SpotPrices()`), against Azure's public, unauthenticated
 retail-prices endpoint. No GCP equivalent exists anywhere in this
 codebase: this session's own investigation for issue #2 (see
-[../internal/prices/gcp.md](../internal/prices/gcp.md) and
-[../internal/prices/gcp.background.md](../internal/prices/gcp.background.md))
+[prices-gcp.md](prices-gcp.md) and
+[prices-gcp.background.md](prices-gcp.background.md))
 concluded that a GCP spot price client is not honestly buildable without
 guessing — Compute Engine's public Cloud Billing Catalog SKUs split
 Core/RAM pricing with no structured machine-type field, no zone-level

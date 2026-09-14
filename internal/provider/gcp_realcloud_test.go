@@ -45,7 +45,7 @@
 //     job is a separate, larger, not-yet-built qualification piece - see
 //     docs/qualification-real-cloud.md's "Known gaps" section.
 //   - Real GCP Spot price observation. internal/prices has no GCP client at
-//     all today (see internal/prices/gcp.md/gcp.background.md, written for
+//     all today (see docs/prices-gcp.md/prices-gcp.background.md, written for
 //     issue #2): Compute Engine's public pricing surface splits Core/RAM
 //     SKUs with no structured machine-type field, no zone-level pricing and
 //     no request-side filter, so a GCP spot price client was assessed as not
@@ -434,12 +434,12 @@ func TestQualifyRealGCPSpotLifecycle(t *testing.T) {
 		"forced_real_interruption": false,
 		"reason":                   `GCP provides no supported on-demand API to force a real Spot preemption; the closest tool ("gcloud compute instances simulate-maintenance-event") exercises host-maintenance/live-migration handling, not confirmed to produce the compute.instances.preempted zone operation gcpConfirmedPreemption looks for. gcpConfirmedPreemption is covered separately by synthesized-operation-payload unit tests, not by this real-cloud run.`,
 	}, nil)
-	// Named limit (see this file's header, and internal/prices/gcp.md/
-	// gcp.background.md for issue #2's investigation): no GCPSpotClient
+	// Named limit (see this file's header, and docs/prices-gcp.md/
+	// prices-gcp.background.md for issue #2's investigation): no GCPSpotClient
 	// exists in internal/prices, so no real price observation is attempted
 	// here, unlike aws_realcloud_test.go's real Spot price call.
 	evidence.record("real-spot-price-observation", map[string]any{
 		"attempted": false,
-		"reason":    "no internal/prices GCP client exists (issue #2): Compute Engine's SKU catalog splits Core/RAM with no structured machine-type field, no zone-level pricing and no request-side filter, so a GCP price client was assessed as not honestly buildable without guessing - see internal/prices/gcp.md/gcp.background.md",
+		"reason":    "no internal/prices GCP client exists (issue #2): Compute Engine's SKU catalog splits Core/RAM with no structured machine-type field, no zone-level pricing and no request-side filter, so a GCP price client was assessed as not honestly buildable without guessing - see docs/prices-gcp.md/prices-gcp.background.md",
 	}, nil)
 }
