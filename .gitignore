@@ -1,6 +1,11 @@
 /bin/
 /work/
-/evidence/
+# Not anchored to the repo root: `go test ./internal/provider/` runs with
+# that package directory as its own working directory, so real-cloud
+# qualification evidence (internal/provider/evidence/) lands there, not
+# at the repo root - see qualify.yml's "Upload qualification evidence"
+# step for the corresponding artifact-path fix.
+evidence/
 *.test
 coverage.out
 .env
