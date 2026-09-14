@@ -127,6 +127,13 @@ func TestCompileAcceptsSingleMappingWireGuardNetwork(t *testing.T) {
 	if r.Config.NetworkProfile != "mesh" {
 		t.Fatalf("expected NetworkProfile %q threaded into resolved config, got %q", "mesh", r.Config.NetworkProfile)
 	}
+	// The overlay allocator (internal/wireguard.NextOverlayAddress, wired in
+	// by internal/operator.HandleDesiredRunnerCount) needs the wireguard
+	// mode NetworkProfile's single NetworkMapping's own CIDRs as its address
+	// pool - see operator.Config.NetworkOverlayCIDRs's doc comment.
+	if len(r.Config.NetworkOverlayCIDRs) != 1 || r.Config.NetworkOverlayCIDRs[0] != "10.1.0.0/24" {
+		t.Fatalf("expected the NetworkMapping's own CIDRs threaded into NetworkOverlayCIDRs, got %v", r.Config.NetworkOverlayCIDRs)
+	}
 }
 
 func TestCompileSeparateModeNeverThreadsNetworkProfile(t *testing.T) {
@@ -143,6 +150,9 @@ func TestCompileSeparateModeNeverThreadsNetworkProfile(t *testing.T) {
 	}
 	if r.Config.NetworkProfile != "" {
 		t.Fatalf("separate mode must never set Allocation.NetworkProfile identity, got %q", r.Config.NetworkProfile)
+	}
+	if len(r.Config.NetworkOverlayCIDRs) != 0 {
+		t.Fatalf("separate mode must never set overlay CIDRs, got %v", r.Config.NetworkOverlayCIDRs)
 	}
 }
 

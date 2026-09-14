@@ -25,6 +25,14 @@
 > operator who never configures a `wireguard` mode `NetworkProfile` sees no
 > behavior change: every code path this document describes remains a
 > complete no-op for an allocation whose `NetworkProfile` is `""`.
+>
+> The remaining real gap this status line's earlier versions named -
+> "no code path assigns `lifecycle.Allocation.WireGuardOverlayAddress`" - is
+> now also closed: `internal/wireguard.NextOverlayAddress` allocates one from
+> the `NetworkProfile`'s own `NetworkMapping.CIDRs`, and
+> `internal/operator.HandleDesiredRunnerCount` assigns it to every new
+> wireguard-mode allocation at the same point it sets `NetworkProfile`. See
+> "5. Overlay address allocation" below.
 
 ## Recommendation
 
@@ -128,6 +136,84 @@ protocol-level properties a real two-container setup would, for this
 specific test, without container/network-namespace scaffolding no code
 path here actually depends on.
 
+### 5. Overlay address allocation: deterministic scan of the NetworkMapping's own CIDRs, no new CRD field
+
+A wireguard-mode `NetworkProfile`'s single `NetworkMapping` already carries
+`CIDRs []string` (`api/v1alpha1/types.go`), validated by `compile.go`'s
+`network()` as canonical, non-overlapping prefixes for every mode that uses
+it. Wireguard mode reuses that same field as its overlay address pool
+instead of introducing a second CIDR concept: `network()` now returns those
+CIDRs alongside the `NetworkProfile` identity it already returned, and
+`internal/configapi/compile.go`'s `Compile()` threads them onto
+`operator.Config.NetworkOverlayCIDRs` - a new field with the same
+emptiness rule as `NetworkProfile` (non-empty only for wireguard mode). The
+mounted-config entry point (`cmd/runnerscout/main.go`) needed no new code:
+`operator.Config` is decoded directly from JSON, so a mounted config file
+can already set this field, and `Config.Validate()` enforces the same
+canonical-prefix requirement `compile.go` enforces for the CRD path.
+
+`internal/wireguard.NextOverlayAddress(cidrs []string, taken map[string]bool)
+(string, error)` does the actual allocation: a deterministic linear scan,
+in the order the CIDRs are given and each CIDR's host range in ascending
+address order, skipping every address already in `taken` and excluding
+each CIDR's network and highest ("broadcast") address. It returns
+`ErrOverlayAddressesExhausted` when nothing is left. It is a pure function
+with no I/O and no persisted state of its own - collision avoidance is the
+caller's responsibility, by construction of what it passes as `taken`.
+
+`internal/operator.HandleDesiredRunnerCount` is that caller, and is where
+allocation actually happens: at the same point it already sets
+`NetworkProfile: o.Config.NetworkProfile` on every newly created `Pending`
+`lifecycle.Allocation`, it also computes `taken` from every currently
+active allocation sharing that `NetworkProfile` (from `o.Store.List`, the
+same source `wireguard.Snapshot` already reads, plus any allocation still
+sitting in the fleet ConfigMap's own `Pending` map from an earlier call
+that has not yet been materialized into the `Store` by `Tick`) and assigns
+every allocation admitted in the current batch a distinct address before
+any of them exists as a real `Store` record. The address is then
+checkpointed automatically: `lifecycle.Controller.Step`'s `save()` already
+serializes the full in-memory `Allocation` value on every transition, the
+same mechanism that already checkpoints `NetworkProfile` and (once a
+provider sets it) `WireGuardPublicKey` - no additional Store or Controller
+wiring was needed. Because the address is assigned exactly once, at
+creation, and never touched again by `Step` or anything else, an
+allocation's overlay address is stable for its entire lifetime by
+construction, not by an explicit idempotency check.
+
+Exhaustion (every CIDR fully assigned) is surfaced through the same
+admission-refusal path `HandleDesiredRunnerCount` already uses for
+`CatalogUnavailable`/`CatalogNotAdmissible`: the entire batch of newly
+requested allocations is refused, the fleet's `Condition` is set to
+`OverlayAddressPoolExhausted`, and the admission count `Reconcile` had
+provisionally incremented is rolled back - no allocation from an exhausted
+batch is partially created, and the next admission cycle (driven by the
+existing 5-second `Tick`/scale-set demand cycle, not a bespoke retry loop)
+naturally retries once capacity frees up, exactly like the two existing
+conditions it mirrors.
+
+Concurrency safety follows directly from how this codebase already
+serializes every other mutation `HandleDesiredRunnerCount` makes: a
+Kubernetes Lease ensures at most one leader `Operator` calls it at a time,
+an in-process mutex (`o.mu`) serializes it against this same `Operator`'s
+own `Tick`, and the fleet ConfigMap itself is read-then-written under
+`resourceVersion` compare-and-swap (`docs/architecture.md`'s "Recovery and
+cleanup" section) - a concurrent writer's conflicting update fails
+`saveFleet` outright, so no batch of overlay-address assignments is ever
+partially committed. No separate locking was added for this feature; it
+relies on the same guarantee every other field `HandleDesiredRunnerCount`
+sets on a new allocation already relies on.
+
+A `NetworkMapping`'s CIDRs changing after allocations already exist against
+it is not handled specially: an already-checkpointed
+`WireGuardOverlayAddress` is never re-validated against a possibly-changed
+CIDR, so an operator who shrinks or replaces a `NetworkMapping`'s `cidrs`
+while allocations are active can end up with a currently-active allocation
+whose checkpointed address falls outside the new CIDR. This mirrors how
+this codebase already treats every other `NetworkMapping` field
+(`subnetID`, `networkID`) - already-created cloud resources are never
+retroactively reconciled against a changed `NetworkProfile` - and is left
+as a real, undecided limitation rather than silently glossed over.
+
 ## Why
 
 | Requirement | How the recommendation satisfies it |
@@ -181,13 +267,16 @@ which would defeat the entire point of updating a live peer list.
 ## What this document does not decide
 
 The concrete wire schema of the poll endpoint and its response format, the
-polling interval and backoff policy, overlay IP address allocation and
-exhaustion handling, PSK rotation policy when `EnrollmentRef` is set, rate
-limiting or abuse protection on the new controller-hosted endpoint,
-observability for peer-convergence lag, and the VM-side systemd unit or
-other boot-time integration that would actually call
-`internal/wireguard/tunnel.BringUp` on a running instance are all real
-implementation decisions this document does not make.
+polling interval and backoff policy, PSK rotation policy when
+`EnrollmentRef` is set, rate limiting or abuse protection on the new
+controller-hosted endpoint, observability for peer-convergence lag, and the
+VM-side systemd unit or other boot-time integration that would actually
+call `internal/wireguard/tunnel.BringUp` on a running instance are all real
+implementation decisions this document does not make. (Overlay IP address
+allocation and exhaustion handling - previously listed here as
+undecided - is now decided; see "5. Overlay address allocation" above,
+including the one limitation it does not resolve: a `NetworkMapping`'s
+`cidrs` changing after allocations already exist against it.)
 
 How a VM-side peer learns another peer's outer transport endpoint (the real
 dialable network address:port for the underlying UDP socket a

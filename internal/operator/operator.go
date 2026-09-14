@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 	"log/slog"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -83,6 +84,17 @@ type Config struct {
 	// bindingWithLimit) unchanged, exactly like AzureInterruptionQueueURL
 	// above.
 	NetworkProfile string `json:"networkProfile,omitempty"`
+	// NetworkOverlayCIDRs is the wireguard-mode NetworkProfile's single
+	// NetworkMapping's own CIDRs (api/v1alpha1.NetworkMapping.CIDRs, as
+	// compiled by internal/configapi/compile.go's network()) - the address
+	// pool HandleDesiredRunnerCount allocates each new allocation's
+	// lifecycle.Allocation.WireGuardOverlayAddress from. It is only ever
+	// non-empty when NetworkProfile is also non-empty, and is always empty
+	// for "separate" mode or no NetworkProfile at all, matching
+	// NetworkProfile's own emptiness rule exactly. omitempty keeps every
+	// existing deployment's fleet ConfigMap binding hash (see
+	// bindingWithLimit) unchanged, exactly like NetworkProfile above.
+	NetworkOverlayCIDRs []string `json:"networkOverlayCIDRs,omitempty"`
 }
 
 func (c Config) Validate() error {
@@ -91,6 +103,20 @@ func (c Config) Validate() error {
 	}
 	if c.NetworkProfile != "" && len(validation.IsDNS1123Label(c.NetworkProfile)) != 0 {
 		return errors.New("invalid network profile name")
+	}
+	if c.NetworkProfile == "" && len(c.NetworkOverlayCIDRs) != 0 {
+		return errors.New("overlay CIDRs require a wireguard network profile")
+	}
+	if c.NetworkProfile != "" {
+		if len(c.NetworkOverlayCIDRs) == 0 {
+			return errors.New("wireguard network profile requires overlay CIDRs")
+		}
+		for _, cidr := range c.NetworkOverlayCIDRs {
+			prefix, err := netip.ParsePrefix(cidr)
+			if err != nil || prefix != prefix.Masked() {
+				return errors.New("invalid overlay CIDR")
+			}
+		}
 	}
 	if c.Namespace == "" || c.ScaleSetID < 1 || c.MaxRunners < 1 || c.MaxRunners > 10 || c.ProvisioningSeconds < 1 || c.ProvisioningSeconds > 600 || c.MaxLifetimeSeconds < c.ProvisioningSeconds || c.MaxLifetimeSeconds > 21600 {
 		return errors.New("invalid namespace, scale set, capacity or time limits")
@@ -370,12 +396,62 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 			return refuse("CatalogNotAdmissible")
 		}
 	}
+	// A wireguard-mode NetworkProfile needs a unique overlay address per new
+	// allocation, assigned once here (never reassigned - see
+	// lifecycle.Allocation.WireGuardOverlayAddress's own doc comment) and
+	// checkpointed as an ordinary field on the Pending record itself, no
+	// differently from NetworkProfile immediately below it. All n addresses
+	// for this batch are computed up front, before any allocation record is
+	// created, so that an exhausted pool refuses the whole batch through the
+	// same admission-failure path CatalogUnavailable/CatalogNotAdmissible
+	// already use above - never a partially admitted batch, never a silent
+	// skip. overlayTaken starts from every currently active allocation
+	// sharing this NetworkProfile (from the Store, via allocs already listed
+	// above) plus every not-yet-materialized entry in f.Pending (a previous
+	// HandleDesiredRunnerCount call may have assigned one and not yet had
+	// Tick move it into the Store) - the same two sources
+	// wireguard.Snapshot/HandleDesiredRunnerCount's own "represented" active
+	// count above already treats as the complete picture of what currently
+	// exists. Concurrent double-assignment across two overlapping calls to
+	// this method is prevented the same way every other mutation in this
+	// function already is: the single in-process o.mu lock, the Lease that
+	// keeps at most one leader Operator running this method at all, and
+	// saveFleet's own ConfigMap resourceVersion compare-and-swap, which
+	// fails the whole batch (this loop's addresses included) rather than
+	// partially commit if a concurrent writer raced it regardless.
+	var overlayAddresses []string
+	if n > 0 && o.Config.NetworkProfile != "" {
+		overlayTaken := map[string]bool{}
+		for _, a := range allocs {
+			if a.NetworkProfile == o.Config.NetworkProfile && a.Phase != lifecycle.Deleted && a.Phase != lifecycle.TimedOut && a.WireGuardOverlayAddress != "" {
+				overlayTaken[a.WireGuardOverlayAddress] = true
+			}
+		}
+		for _, a := range f.Pending {
+			if a.NetworkProfile == o.Config.NetworkProfile && a.WireGuardOverlayAddress != "" {
+				overlayTaken[a.WireGuardOverlayAddress] = true
+			}
+		}
+		overlayAddresses = make([]string, 0, n)
+		for range n {
+			addr, addrErr := wireguard.NextOverlayAddress(o.Config.NetworkOverlayCIDRs, overlayTaken)
+			if addrErr != nil {
+				return refuse("OverlayAddressPoolExhausted")
+			}
+			overlayTaken[addr] = true
+			overlayAddresses = append(overlayAddresses, addr)
+		}
+	}
 	f.Condition = "DemandObserved"
-	for range n {
+	for i := range n {
 		id := "rs-" + uuid.NewString()
 		now := time.Now()
 		f.Created[id] = now
-		f.Pending[id] = lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: catalog, Requirements: o.Config.Requirements, NetworkProfile: o.Config.NetworkProfile}
+		a := lifecycle.Allocation{ID: id, Phase: lifecycle.Pending, Deadline: now.Add(time.Duration(o.Config.ProvisioningSeconds) * time.Second), MaxAttempts: 3, Catalog: catalog, Requirements: o.Config.Requirements, NetworkProfile: o.Config.NetworkProfile}
+		if i < len(overlayAddresses) {
+			a.WireGuardOverlayAddress = overlayAddresses[i]
+		}
+		f.Pending[id] = a
 	}
 	if e = o.saveFleet(ctx, cm, f); e != nil {
 		return active, e
