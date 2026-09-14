@@ -870,27 +870,51 @@ own logic, surfacing the bugs below:
   subscription's default Spot/low-priority core quota in `eastus` is only
   3 vCPUs, well under `M12s_v3`'s 12.
 
-  Fixed with a new, purely additive, opt-in `Config.AzureDiskControllerType`
+  Added a new, purely additive, opt-in `Config.AzureDiskControllerType`
   field (empty by default, omitting `storageProfile.diskControllerType`
   from the ARM template entirely and preserving Azure's own default
-  inference exactly as before this field existed) rather than either of
-  the two options considered and rejected: unconditionally hardcoding
-  `"NVMe"` in `createAzure` (would have silently broken any VM size that
-  is genuinely `SCSI`-only, with no way to know from anything already in
-  `Config`/`Allocation` whether a given size supports `NVMe` at all -
-  real backward-compatibility risk to real production Azure users on
-  older size families, not justified just to unblock this qualification
-  run), or adding a `securityProfile.securityType` for confidential
-  computing (a materially different, riskier VM shape change, and
-  `azure_disk_controller_type=NVMe` on a plain `Dv7`-class size was
-  already sufficient once quota was accounted for - no need to also solve
-  the confidential-computing path). `qualify.yml` threads this through as
+  inference exactly as before this field existed) rather than
+  unconditionally hardcoding `"NVMe"` in `createAzure` (would have
+  silently broken any VM size that is genuinely `SCSI`-only, with no way
+  to know from anything already in `Config`/`Allocation` whether a given
+  size supports `NVMe` at all - real backward-compatibility risk to real
+  production Azure users on older size families, not justified just to
+  unblock this qualification run). `qualify.yml` threads this through as
   a new, optional `azure_disk_controller_type` input (`unset` by default,
   same sentinel-default pattern as `azure_availability_zone`, since choice
   inputs can't have an empty-string option) rather than something this
   workflow infers on its own - matching this repository's consistent
   "operator-supplied explicit configuration, no silent magic" convention
   for every other pinned image/network/compute-shape input.
+
+  **This field turned out narrower than hoped.** The next real dispatch,
+  with `azure_disk_controller_type=NVMe` set against the same classic
+  managed image, was rejected outright by Azure itself:
+  `InvalidParameter: "Disk controller type 'NVMe' not supported for user
+  VM image."` A classic managed image's own implicit `SCSI` default
+  cannot be overridden at VM-request time, no matter what
+  `diskControllerType` value is sent - the ARM API accepts the field
+  syntactically but still rejects the combination. So
+  `azure_disk_controller_type` cannot actually unlock an `NVMe`-only VM
+  size for a classic managed image; the field remains correctly-designed
+  and genuinely useful for the narrower case of a size that supports
+  *both* controller types where Azure's own inference picks the wrong one
+  (a real, if smaller, case), but does not solve the actual problem this
+  investigation set out to solve. With every unrestricted, non-
+  confidential-computing VM size in this subscription's `eastus`/
+  `westus2`/`centralus`/`eastus2`/`southcentralus`/`northeurope` catalogs
+  checked directly (`az vm list-skus`) and found to be either `NVMe`-only
+  or ARM-architected (`Dpxx`-class, incompatible with this qualification's
+  `amd64` image regardless of controller type), this subscription
+  genuinely has no compatible, cheap, `x86_64`, non-confidential VM size
+  for a classic managed image at all. The two real remaining fixes -
+  teaching `validateAzureImage` (`azure_image.go`) to also accept a
+  Compute Gallery image version's resource type (gallery images *do*
+  support declaring `NVMe` support at the image-definition level,
+  correctly, unlike a classic managed image), or adding
+  `securityProfile.securityType` support for confidential computing - are
+  each a materially larger, riskier adapter change than this opt-in field,
+  not attempted in this pass.
 
 Three of these bugs actually resulted in a real, billed resource being
 created: the GCP Spot instance that hit the delete-timeout finding above
