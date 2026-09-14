@@ -35,11 +35,14 @@ tofu apply -var project_id=<your-gcp-qualification-project> -var region=<e.g. us
 ```
 
 State is kept **local** (no remote backend) - this is a deliberate tradeoff
-for a module this small and this rarely run, not an oversight. Keep the
-resulting `terraform.tfstate` somewhere safe if you'll ever want to `tofu
-plan`/`destroy` through this module again instead of managing the network by
-hand from here on; losing it does not affect the already-created GCP
-resources, only this module's ability to manage them going forward.
+for a module this small and this rarely run, not an oversight. Since each
+`apply` is meant to be matched by a `destroy` for the same run (see below),
+the state file only needs to survive for the lifetime of that one
+apply-then-destroy cycle - if you split `apply` and `destroy` across
+different machines/CI jobs, make sure the state `apply` produced is passed
+through to whichever job runs `destroy` (e.g. as a build artifact), or
+`destroy` will find nothing to tear down and the resources will be
+orphaned.
 
 Copy the two outputs directly into whichever of the following you're
 provisioning for:
@@ -49,26 +52,34 @@ provisioning for:
 - `tools/e2e/env-gcp.example` (copied to your own untracked env file):
   `network_name` → `E2E_GCP_NETWORK`, `subnetwork_name` → `E2E_GCP_SUBNETWORK`.
 
-## Intended usage: one-time bootstrap, run via CI with Workload Identity Federation
+## Intended usage: apply before a run, destroy right after, run via CI with Workload Identity Federation
 
-This module is meant to be applied **once** per GCP qualification project,
-not on every qualification run - the network and subnetwork it creates are
-long-lived infrastructure, matching the fact that `qualify.yml` and
-`bring-up-gcp.sh` both treat `gcp_network`/`gcp_subnetwork` as pinned,
-pre-existing identifiers rather than something they provision themselves.
-There is deliberately no auto-destroy, TTL, or other ephemeral-lifecycle
-logic here.
+None of this module's resources (VPC network, subnetwork, firewall rules)
+bill by the hour the way the sibling `../aws` module's NAT Gateway does, so
+applying this once and leaving it standing indefinitely would not itself
+cost anything. It is nonetheless meant to follow the same apply-before/
+destroy-after-each-run lifecycle as the AWS and Azure siblings (see
+`../aws/README.md`'s "Ephemeral" section for the AWS module, where that
+lifecycle is cost-driven) - for consistency across all three providers, and
+so a single future CI workflow can wrap `tofu apply` → dispatch
+`qualify.yml`/the E2E harness with this module's outputs → `tofu destroy`
+identically for every provider, rather than needing provider-specific
+lifecycle handling. `qualify.yml`/`bring-up-gcp.sh` still treat
+`gcp_network`/`gcp_subnetwork` as pinned, pre-existing identifiers for the
+duration of one dispatch - "pinned" here means "fixed for that run," not
+"created once and never rebuilt."
 
 A future, separate piece of work (out of scope for this module) is expected
-to add a CI workflow that runs `tofu apply` for this module, authenticating
-via the same Workload Identity Federation approach `qualify.yml` already
-uses for the qualification service account (see
+to add that CI workflow, authenticating via the same Workload Identity
+Federation approach `qualify.yml` already uses for the qualification service
+account (see
 [docs/qualification-real-cloud.md](../../../../docs/qualification-real-cloud.md)'s
 GCP "credentials" section) - never a downloaded service account key JSON.
 Until that workflow exists, run this by hand as shown above, using your own
 `gcloud auth application-default login` or an impersonated-service-account
 ADC file, the same way `tools/e2e/env-gcp.example` documents for
-`E2E_GCP_CREDENTIALS_FILE`.
+`E2E_GCP_CREDENTIALS_FILE` - and run `tofu destroy` with the same `-var`
+values once you're done with a given qualification/E2E run.
 
 ## Judgment calls worth knowing about
 
