@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -85,7 +86,7 @@ func (p *Command) gcpInventory(ctx context.Context, a lifecycle.Allocation) (gcp
 	}
 	vm, err := service.Instances.Get(p.Config.Project, a.Offering.Zone, a.ID).Context(ctx).Do()
 	if err != nil && !missingGCP(err) {
-		return result, errors.New("GCP VM inventory unavailable")
+		return result, fmt.Errorf("GCP VM inventory unavailable: %w", err)
 	}
 	if err == nil {
 		if vm.Name != a.ID || vm.Id == 0 || !gcpMatches(vm.SelfLink, p.gcpResource(a, "instances", a.ID)) || !p.ownsGCP(a, vm.Labels) {
@@ -99,7 +100,7 @@ func (p *Command) gcpInventory(ctx context.Context, a lifecycle.Allocation) (gcp
 	diskName := a.ID
 	disk, err := service.Disks.Get(p.Config.Project, a.Offering.Zone, diskName).Context(ctx).Do()
 	if err != nil && !missingGCP(err) {
-		return result, errors.New("GCP disk inventory unavailable")
+		return result, fmt.Errorf("GCP disk inventory unavailable: %w", err)
 	}
 	if err == nil {
 		if disk.Name != diskName || disk.Id == 0 || !gcpMatches(disk.SelfLink, p.gcpResource(a, "disks", diskName)) || !p.ownsGCP(a, disk.Labels) {
@@ -178,7 +179,7 @@ func (p *Command) waitGCPOperation(ctx context.Context, a lifecycle.Allocation, 
 		}
 		op, err = service.ZoneOperations.Get(p.Config.Project, a.Offering.Zone, operationName).Context(ctx).Do()
 		if err != nil {
-			return errors.New("GCP operation observation unavailable")
+			return fmt.Errorf("GCP operation observation unavailable: %w", err)
 		}
 	}
 }
@@ -213,7 +214,7 @@ func (p *Command) createGCP(ctx context.Context, a lifecycle.Allocation, script 
 	}
 	op, err := service.Instances.Insert(p.Config.Project, a.Offering.Zone, instance).RequestId(p.gcpRequestID(a, "create")).Context(ctx).Do()
 	if err != nil {
-		return lifecycle.Creation{}, errors.New("GCP creation commitment unknown")
+		return lifecycle.Creation{}, fmt.Errorf("GCP creation commitment unknown: %w", err)
 	}
 	if err = p.waitGCPOperation(ctx, a, op, "create", "instances", a.ID); err != nil {
 		return lifecycle.Creation{}, err
@@ -335,7 +336,7 @@ func (p *Command) deleteGCP(ctx context.Context, a lifecycle.Allocation) error {
 		return nil
 	}
 	if err != nil {
-		return errors.New("GCP deletion commitment unknown")
+		return fmt.Errorf("GCP deletion commitment unknown: %w", err)
 	}
 	return p.waitGCPOperation(ctx, a, op, action, kind, name)
 }

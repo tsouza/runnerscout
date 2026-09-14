@@ -427,7 +427,7 @@ func TestAzureSDKAuthenticationAndTransportFailuresStayUnknown(t *testing.T) {
 				requests++
 				if mode == "authorization" {
 					w.WriteHeader(403)
-					_, _ = io.WriteString(w, `{"error":{"code":"AuthorizationFailed","message":"private-secret"}}`)
+					_, _ = io.WriteString(w, `{"error":{"code":"AuthorizationFailed","message":"forbidden diagnostic detail"}}`)
 					return
 				}
 				if deploymentPath(r) {
@@ -439,8 +439,11 @@ func TestAzureSDKAuthenticationAndTransportFailuresStayUnknown(t *testing.T) {
 			})
 			token.fail = mode == "authentication"
 			ob, err := p.Observe(context.Background(), allocation())
-			if err == nil || ob.Known || strings.Contains(err.Error(), "secret") {
-				t.Fatal("failure reported as absence or leaked", ob, err)
+			if err == nil || ob.Known {
+				t.Fatal("failure reported as absence", ob, err)
+			}
+			if mode == "authorization" && !strings.Contains(err.Error(), "forbidden diagnostic detail") {
+				t.Fatal("real Azure diagnostic was discarded instead of surfaced", err)
 			}
 			if token.fail && requests != 0 {
 				t.Fatal("unauthenticated request sent")

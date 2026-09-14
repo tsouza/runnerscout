@@ -48,7 +48,7 @@ func (p *Command) azureResources(ctx context.Context, a lifecycle.Allocation) ([
 func (p *Command) azureTerminal(ctx context.Context, a lifecycle.Allocation) (bool, error) {
 	terminal, err := p.azureClient().terminal(ctx, p.Config, a.ID)
 	if err != nil {
-		return false, errors.New("Azure deployment observation unavailable")
+		return false, fmt.Errorf("Azure deployment observation unavailable: %w", err)
 	}
 	return terminal, nil
 }
@@ -151,7 +151,7 @@ func (p *Command) finishAzureDiskOwnership(ctx context.Context, a lifecycle.Allo
 	binding.tags["runnerscout-owner"] = &p.Config.Owner
 	binding.tags["runnerscout-operation"] = &a.ID
 	if err := p.azureClient().tagDisk(ctx, p.Config, a.ID, binding.tags); err != nil {
-		return receipt, errors.New("Azure disk ownership tagging incomplete")
+		return receipt, fmt.Errorf("Azure disk ownership tagging incomplete: %w", err)
 	}
 	confirmed, err := p.azureDiskBinding(ctx, proof)
 	if err != nil || confirmed.vmUID != binding.vmUID || confirmed.diskUID != binding.diskUID || azureValue(confirmed.tags["runnerscout-owner"]) != p.Config.Owner || azureValue(confirmed.tags["runnerscout-operation"]) != a.ID {
@@ -170,7 +170,10 @@ func (p *Command) observeAzure(ctx context.Context, a lifecycle.Allocation) (lif
 		return lifecycle.Observation{}, errors.New("Azure allocation VM identity differs")
 	}
 	terminal, e := p.azureTerminal(ctx, a)
-	if e != nil || !terminal {
+	if e != nil {
+		return lifecycle.Observation{}, fmt.Errorf("Azure deployment commitment still unknown: %w", e)
+	}
+	if !terminal {
 		return lifecycle.Observation{}, errors.New("Azure deployment commitment still unknown")
 	}
 	resources, e := p.azureResources(ctx, a)
@@ -284,7 +287,7 @@ func (p *Command) deleteAzure(ctx context.Context, a lifecycle.Allocation) error
 					}
 				}
 				if err := p.azureClient().delete(ctx, p.Config, resource); err != nil {
-					return errors.New("Azure deletion commitment unknown")
+					return fmt.Errorf("Azure deletion commitment unknown: %w", err)
 				}
 				return nil
 			}
