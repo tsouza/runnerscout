@@ -51,8 +51,8 @@ variables identically regardless of which of its own input modes
 (`role-to-assume` via OIDC, or `aws-access-key-id`/`aws-secret-access-key`
 static) obtained them. So the only difference between the two credential
 modes lives entirely inside one `if`/`else` pair of
-`configure-aws-credentials` steps in the workflow (gated on whether
-`vars.AWS_QUALIFICATION_ROLE_ARN` is set); the Go test, the adapter, and
+`configure-aws-credentials` steps in the workflow (gated on whether the
+`AWS_QUALIFICATION_ROLE_ARN` repository secret is set); the Go test, the adapter, and
 every other step downstream of credential configuration have no branch at
 all. Supporting both was not "if clean, else defer" — it turned out to be
 strictly simpler than picking one and documenting the other as unsupported.

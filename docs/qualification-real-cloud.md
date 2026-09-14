@@ -96,7 +96,9 @@ cosign OIDC pattern (`release-build.yml`). A static-key fallback is also
 supported:
 
 - **OIDC** (preferred): set the `AWS_QUALIFICATION_ROLE_ARN` repository
-  variable to an IAM role ARN. The workflow assumes it via
+  secret to an IAM role ARN (a role ARN is not sensitive on its own, but it
+  is stored as a secret rather than a variable to match how it was actually
+  provisioned in this repository). The workflow assumes it via
   `aws-actions/configure-aws-credentials`'s `role-to-assume`, using the
   job's own GitHub Actions OIDC identity (`id-token: write`, granted only
   to this job).
