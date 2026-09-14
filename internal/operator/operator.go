@@ -129,6 +129,9 @@ func (c Config) Validate() error {
 	if c.Namespace == "" || c.ScaleSetID < 1 || c.MaxRunners < 1 || c.MaxRunners > 10 || c.ProvisioningSeconds < 1 || c.ProvisioningSeconds > 600 || c.MaxLifetimeSeconds < c.ProvisioningSeconds || c.MaxLifetimeSeconds > 21600 {
 		return errors.New("invalid namespace, scale set, capacity or time limits")
 	}
+	if c.BudgetDailyMicros < 0 {
+		return errors.New("budget ceiling cannot be negative")
+	}
 	u, e := url.Parse(c.GitHubURL)
 	if e != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Trim(u.Path, "/") == "" {
 		return errors.New("GitHub.com organization or repository HTTPS URL required")

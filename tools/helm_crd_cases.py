@@ -61,7 +61,7 @@ def qualify(root, temp, kubeconfig, archive, postrenderer, image_tag, manifest, 
     }
     for name, data in fixture_secrets.items():
         objects.append({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": namespace}, "stringData": data})
-    for name in ["providers.yaml", "class.yaml", "catalog.yaml", "network.yaml"]:
+    for name in ["providers.yaml", "class.yaml", "catalog.yaml", "network.yaml", "budget.yaml"]:
         for obj in yaml.safe_load_all((root / "examples/multicloud" / name).read_text()):
             obj["metadata"]["namespace"] = namespace
             if obj["kind"] == "RunnerScaleSet":

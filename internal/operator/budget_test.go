@@ -7,9 +7,37 @@ import (
 
 	"github.com/tsouza/runnerscout/internal/lifecycle"
 	"github.com/tsouza/runnerscout/internal/placement"
+	"github.com/tsouza/runnerscout/internal/provider"
 	"github.com/tsouza/runnerscout/internal/state"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+func validConfigFixture() Config {
+	cfg := Config{Name: "test", Namespace: "test", GitHubURL: "https://github.com/example", ScaleSetID: 1, MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}
+	cfg.Requirements = placement.Requirements{CPU: 1, MemoryMiB: 1, Architecture: "amd64", MaxPriceMicros: 1, Providers: []string{"p"}, Regions: []string{"r"}, Policy: "lowest-price"}
+	cfg.Providers = map[string]provider.Config{"p": {Kind: "gcp", Owner: "test", Subnet: "s", Project: "proj"}}
+	return cfg
+}
+
+func TestValidateRejectsNegativeBudget(t *testing.T) {
+	cfg := validConfigFixture()
+	// A negative ceiling must be rejected outright, never silently treated as
+	// unbounded - the admission gate only checks BudgetDailyMicros > 0, so a
+	// negative value would otherwise pass through Validate and behave
+	// identically to no budget at all, contradicting an operator's intent.
+	cfg.BudgetDailyMicros = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("negative BudgetDailyMicros must fail validation")
+	}
+	cfg.BudgetDailyMicros = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatal("zero (unbounded) BudgetDailyMicros must remain valid", err)
+	}
+	cfg.BudgetDailyMicros = 1
+	if err := cfg.Validate(); err != nil {
+		t.Fatal("positive BudgetDailyMicros must remain valid", err)
+	}
+}
 
 func TestReservationMicrosRoundsUpToNeverUnderReserve(t *testing.T) {
 	// 1000 micros/hour for exactly one hour reserves exactly 1000: no
