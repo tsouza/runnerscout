@@ -705,33 +705,61 @@ own logic, surfacing the bugs below:
   step never had this bug at all: it checks `az account show` succeeding,
   a live call against whichever identity is *currently* active, not a
   static env-var presence check.
-- **A second real GCP IAM gap**, found on the dispatch immediately after
-  the pre-create test bug was fixed: `gcp_sdk.go`'s `createGCP` sets
-  labels as part of the `instances.create`/`disks.create` insert calls
-  themselves, never via a distinct `setLabels` API call - which had led to
-  the (wrong) conclusion, during a documentation pass, that
-  `compute.instances.setLabels`/`compute.disks.setLabels` were therefore
-  unnecessary permissions. A real dispatch proved that reasoning wrong at
-  the IAM-permission level: GCE's own authorization check for setting
-  labels during instance/disk creation is still gated on the `setLabels`
-  permission, not just the `create` permission, even though no separate
-  `setLabels` API method is ever called. The create failed with a live
-  `Required 'compute.disks.setLabels' permission` error (found via Cloud
-  Logging, since `gcp_sdk.go`'s own error wrapping - `"GCP creation
+- **A second and third real GCP IAM gap**, found across the next two
+  dispatches after the pre-create test bug was fixed: `gcp_sdk.go`'s
+  `createGCP` sets labels, metadata (the startup-script) and Spot
+  scheduling as part of the `instances.create`/`disks.create` insert calls
+  themselves, never via distinct `setLabels`/`setMetadata`/`setScheduling`
+  API calls - which had led to the (wrong) conclusion, during a
+  documentation pass, that `compute.instances.setLabels`/
+  `compute.disks.setLabels` were therefore unnecessary permissions. Real
+  dispatches proved that reasoning wrong at the IAM-permission level: GCE's
+  own authorization checks for setting labels/metadata/scheduling during
+  instance/disk creation are still gated on their respective `setX`
+  permissions, not just the `create` permission, even though no separate
+  `setX` API method is ever called. Each create attempt failed with a live
+  `Required 'compute.<resource>.setX' permission` error in turn (found via
+  Cloud Logging, since `gcp_sdk.go`'s own error wrapping - `"GCP creation
   commitment unknown"` - deliberately does not leak the real provider
-  error). Fixed by adding both `compute.instances.setLabels` and
-  `compute.disks.setLabels` back to the live role (the disk-side one was
-  the one that actually failed; the instance-side one was added
-  proactively, on the same reasoning, before it could cause a second
-  failed round-trip).
+  error): `compute.disks.setLabels` first, then `compute.instances.setMetadata`.
+  Fixed by adding `compute.instances.setLabels`, `compute.disks.setLabels`,
+  `compute.instances.setMetadata` and `compute.instances.setScheduling` to
+  the live role (the last one added proactively, on the same reasoning,
+  once the pattern was clear, before it could cause a fourth failed
+  round-trip).
+- **A real GCP delete-timeout tuning gap, in production code**: with the
+  IAM gaps above fixed, a dispatch finally created a real Spot instance
+  successfully - and then failed at `p.Delete`, logging `"GCP operation
+  commitment unknown"`. This is `deleteGCP`'s own internal 30-second
+  `context.WithTimeout` (independent of any caller-supplied context)
+  expiring while still waiting for GCP's delete operation to reach `DONE`
+  - not a failed delete: GCP keeps processing an already-submitted
+  operation server-side regardless of whether the calling context is still
+  watching it, and this test's own independent, longer-timeout absence-wait
+  (and, in production, the next reconciliation tick's own fresh `Delete`
+  call) confirmed the instance and its boot disk really were gone shortly
+  after. Deleting a real instance - which includes detaching/deleting its
+  `PERSISTENT`, `AutoDelete` boot disk in the same async operation chain -
+  evidently can take longer to reach `DONE` than creating one does (which
+  completed well within its own, unchanged, 30-second budget in the same
+  run). Fixed by raising `deleteGCP`'s internal timeout to 60 seconds -
+  still well inside the 5-minute `dedicatedTeardownBudget` the test's own
+  outer retry/independent-wait logic budgets for, so this doesn't change
+  any bound this workflow already advertises, just avoids an avoidable
+  extra round-trip (and, in this qualification test's specific case, a
+  spurious test failure despite the real infrastructure behaving
+  correctly).
 
-None of these bugs cost any real money: in every case, the failure
-happened before any billable VM was ever created, or on a resource type
-that does not bill by itself (a bare VPC; an Azure NIC/VNet/NSG/subnet).
-Each was found, diagnosed against the real cloud APIs (Cloud Logging, in
-GCP's case, since the adapter's own errors are deliberately generic), and
-fixed as its own focused PR rather than folded silently into a larger
-change - matching this workflow's own one-focused-unit-per-provider review
+Only one of these bugs actually resulted in a real, billed resource being
+created (the GCP Spot instance that hit the delete-timeout finding above -
+it existed for well under two minutes, cleanly deleted, real cost a
+fraction of a cent). Every other bug's failure happened before any
+billable VM was ever created, or left behind only a resource type that
+does not bill by itself (a bare VPC; an Azure NIC/VNet/NSG/subnet). Each
+was found, diagnosed against the real cloud APIs (Cloud Logging, in GCP's
+case, since the adapter's own errors are deliberately generic), and fixed
+as its own focused PR rather than folded silently into a larger change -
+matching this workflow's own one-focused-unit-per-provider review
 discipline from when it was first built.
 
 ## Provenance

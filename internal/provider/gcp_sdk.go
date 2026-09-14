@@ -291,7 +291,15 @@ func (p *Command) gcpConfirmedPreemption(ctx context.Context, a lifecycle.Alloca
 	return err == nil && found
 }
 func (p *Command) deleteGCP(ctx context.Context, a lifecycle.Allocation) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// 60s, not createGCP's 30s: a real dispatch found that deleting a real
+	// instance (which includes detaching/deleting its PERSISTENT,
+	// AutoDelete boot disk in the same async operation chain) can
+	// genuinely take longer to reach DONE than creating one does - a
+	// timeout here doesn't mean the delete failed (GCP keeps processing it
+	// server-side regardless of whether this call is still watching), just
+	// that this one call couldn't confirm completion in time, forcing an
+	// avoidable extra reconciliation round-trip.
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := p.gcpCreateTerminal(ctx, a); err != nil {
 		return err
