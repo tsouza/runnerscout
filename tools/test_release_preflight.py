@@ -59,3 +59,17 @@ class RepositoryReleaseGates(unittest.TestCase):
     def test_malformed_evidence_cannot_pass(self):
         for snapshot in [{}, {'collected_at': 'invalid'}, {'collected_at': NOW.isoformat(), 'response': {}}]:
             self.assertFalse(assess(snapshot, SHA, NOW)['repository_gates_pass'])
+
+    def test_own_in_progress_check_does_not_block_itself(self):
+        # release.yml's own preflight job runs this exact query against the
+        # same commit it is itself a check on - at query time, its own
+        # "preflight" CheckRun is necessarily still IN_PROGRESS (a check
+        # cannot observe its own completion while running). "preflight" is
+        # not in REQUIRED, so this must never block the gate; only the
+        # named REQUIRED checks are load-bearing.
+        snapshot = fixture()
+        contexts = snapshot['response']['data']['repository']['defaultBranchRef']['target']['statusCheckRollup']['contexts']
+        contexts['nodes'].append({'__typename': 'CheckRun', 'name': 'preflight',
+                                   'status': 'IN_PROGRESS', 'conclusion': None,
+                                   'checkSuite': {'app': {'slug': 'github-actions'}}})
+        self.assertTrue(assess(snapshot, SHA, NOW)['repository_gates_pass'])
