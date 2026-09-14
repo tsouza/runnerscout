@@ -542,8 +542,8 @@ Named gaps, not covered by this piece:
   SKUs with no structured machine-type field, no zone-level pricing and no
   request-side filter, so a GCP price client was assessed as not honestly
   buildable without guessing — see
-  [../internal/prices/gcp.md](../internal/prices/gcp.md) and
-  [../internal/prices/gcp.background.md](../internal/prices/gcp.background.md).
+  [prices-gcp.md](prices-gcp.md) and
+  [prices-gcp.background.md](prices-gcp.background.md).
   This is a named, tracked gap, not a silently skipped step.
 - **A real Spot preemption.** GCP provides no supported, on-demand API to
   force one. This workflow can only confirm the adapter correctly reports
