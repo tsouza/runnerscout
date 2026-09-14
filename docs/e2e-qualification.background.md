@@ -1,5 +1,15 @@
 # Full end-to-end qualification: AWS, Azure and GCP - background
 
+> **Note on file references below:** this narrative was written while AWS,
+> Azure and GCP each had their own separate real-cloud qualification
+> workflow file (`qualify-aws.yml`/`qualify-azure.yml`/`qualify-gcp.yml`).
+> Those three were later consolidated into a single matrixed
+> `.github/workflows/qualify.yml` - see
+> [qualification-real-cloud.md](qualification-real-cloud.md) for the current
+> file layout. This E2E harness itself is unaffected by that consolidation
+> (it remains the separate local runbook described below); only the
+> upstream qualification workflows it names for comparison moved.
+
 ## Why this exists now, and why AWS then Azure then GCP
 
 Issue #3's own three real-cloud qualification workflows

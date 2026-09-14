@@ -2,15 +2,14 @@
 
 Part of [issue #80](https://github.com/tsouza/runnerscout/issues/80), the
 piece [issue #3](https://github.com/tsouza/runnerscout/issues/3)'s own
-real-cloud qualification (`qualify-aws.yml`/`qualify-azure.yml`/
-`qualify-gcp.yml`, see
-[qualification-real-cloud.md](qualification-real-cloud.md)) deliberately
-stopped short of: those three each use a synthetic, non-functional
-`Bootstrap` placeholder instead of a real GitHub JIT registration token, so
-none of them proves a real runner actually registers and executes a real
-workflow job. This harness closes that gap for all three providers - see
-each provider's own section below for what an operator must provision and
-what remains out of scope even after a passing run.
+real-cloud qualification (`qualify.yml`'s three provider matrix branches,
+see [qualification-real-cloud.md](qualification-real-cloud.md)) deliberately
+stopped short of: those each use a synthetic, non-functional `Bootstrap`
+placeholder instead of a real GitHub JIT registration token, so none of them
+proves a real runner actually registers and executes a real workflow job.
+This harness closes that gap for all three providers - see each provider's
+own section below for what an operator must provision and what remains out
+of scope even after a passing run.
 
 One run of this harness, for a given provider:
 
@@ -51,11 +50,10 @@ two speed bumps regardless of which cloud is being qualified:
 - **Explicit spend confirmation.** Every script that can reach a billable or
   GitHub-mutating call refuses to run unless `E2E_CONFIRM_REAL_SPEND` is
   exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY` - the same literal phrase
-  `qualify-aws.yml`/`qualify-azure.yml`/`qualify-gcp.yml` require for
-  `confirm_real_spend`.
+  `qualify.yml` requires for `confirm_real_spend`, on every provider branch.
 - **Hard numeric runtime ceiling.** `E2E_MAX_RUNTIME_MINUTES` must be a plain
   integer, 1-60 (`tools/e2e/lib.sh`'s hard-coded ceiling - higher than
-  `qualify-aws.yml`'s/`qualify-azure.yml`'s/`qualify-gcp.yml`'s 20, since
+  `qualify.yml`'s own 20 (shared across all three provider branches), since
   this harness does strictly more: cluster bring-up, scale-set registration,
   a real dispatched job, and real runner boot/registration/job pickup on top
   of VM creation). Every stage re-derives its own deadline from this value
@@ -164,9 +162,9 @@ Qualified, for real, by a passing run:
 
 Named gaps, not covered by this piece:
 
-- **Spot interruption during a real job.** Like `qualify-aws.yml`, this
-  harness cannot force a real Spot interruption on demand - it only exercises
-  the ordinary, uninterrupted completion path.
+- **Spot interruption during a real job.** Like `qualify.yml`'s AWS branch,
+  this harness cannot force a real Spot interruption on demand - it only
+  exercises the ordinary, uninterrupted completion path.
 - **Retry/rerun composition.** The resource graph's `RunnerClass.retry` stays
   disabled, matching every other qualification piece in this repository -
   `internal/recovery`'s retry composition has its own separate qualification
@@ -267,8 +265,8 @@ Qualified, for real, by a passing run:
 
 Named gaps, not covered by this piece:
 
-- **Spot eviction during a real job.** Like `qualify-azure.yml`, this harness
-  cannot force a real Spot eviction on demand (only the separate,
+- **Spot eviction during a real job.** Like `qualify.yml`'s Azure branch,
+  this harness cannot force a real Spot eviction on demand (only the separate,
   unintegrated Azure Chaos Studio service can) - it only exercises the
   ordinary, uninterrupted completion path.
 - **Retry/rerun composition.** The resource graph's `RunnerClass.retry` stays
@@ -318,7 +316,7 @@ own harness genuinely differs from AWS's: pricing.
    short-lived local ADC file (`impersonated_service_account`) - **never a
    static service account key JSON**. See
    [e2e-qualification.background.md](e2e-qualification.background.md)'s GCP
-   section for why this harness holds itself to `qualify-gcp.yml`'s WIF-only
+   section for why this harness holds itself to `qualify.yml`'s GCP branch's WIF-only
    philosophy even though it runs from an operator's own shell, not GitHub
    Actions. The identity needs the same minimum IAM permissions
    [qualification-real-cloud.md](qualification-real-cloud.md)'s GCP section
@@ -381,12 +379,12 @@ Named gaps, not covered by this piece:
   [prices-gcp.background.md](prices-gcp.background.md) (issue #2, closed).
   This harness's `CapacityCatalog` uses a fixed, operator-overridable static
   price (`E2E_GCP_PRICE_MICROS`, default `10000`), never a live quote - the
-  same honest gap `qualify-gcp.yml` already names in
+  same honest gap `qualify.yml`'s GCP branch already names in
   [qualification-real-cloud.md](qualification-real-cloud.md)'s GCP section,
   carried through here rather than silently reintroduced as a "harness-only"
   price observer.
 - **Spot interruption during a real job.** GCP provides no supported,
-  on-demand API to force one - like `qualify-gcp.yml`, this harness only
+  on-demand API to force one - like `qualify.yml`'s GCP branch, this harness only
   exercises the ordinary, uninterrupted completion path.
 - **Architecture/image compatibility.** `internal/provider/gcp_sdk.go`'s
   `createGCP` never cross-validates `E2E_GCP_MACHINE_TYPE` against
@@ -394,7 +392,7 @@ Named gaps, not covered by this piece:
   `E2E_AWS_INSTANCE_TYPE`/`E2E_AWS_AMI_ID` - a mismatch here fails at VM
   boot, not at this harness's pre-flight. See
   [qualification-real-cloud.md](qualification-real-cloud.md)'s GCP section,
-  which names the same adapter-level gap for `qualify-gcp.yml`.
+  which names the same adapter-level gap for `qualify.yml`'s GCP branch.
 - **Retry/rerun composition.** The resource graph's `RunnerClass.retry` stays
   disabled, matching every other qualification piece in this repository.
 - **WireGuard networking.** The resource graph uses `separate` mode - this

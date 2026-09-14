@@ -6,22 +6,24 @@ related "real provider pricing requires later qualification" ask. This covers
 the AWS, Azure and GCP provider adapters — see each provider's own "Known
 gaps" section below for what remains out of scope even after a passing run.
 
-All three workflows share one safety philosophy - `workflow_dispatch`-only,
-an exact-phrase spend confirmation checked before any cloud credential is
-configured, a hard-coded runtime ceiling no input can raise, pinned
-operator-supplied network identifiers cross-validated before any create call,
-and a two-layer teardown guarantee (the Go test's own `t.Cleanup` plus an
-`if: always()` workflow step that independently re-derives everything and
-re-queries the cloud API) - adapted to each cloud's real API shapes rather
-than copied blindly. See
+All three providers are matrix branches of the single
+`.github/workflows/qualify.yml` workflow (a `provider` input selects `all`
+or one of `aws`/`azure`/`gcp`), and share one safety philosophy -
+`workflow_dispatch`-only, an exact-phrase spend confirmation checked before
+any cloud credential is configured, a hard-coded runtime ceiling no input
+can raise, pinned operator-supplied network identifiers cross-validated
+before any create call, and a two-layer teardown guarantee (the Go test's
+own `t.Cleanup` plus an `if: always()` step that independently re-derives
+everything and re-queries the cloud API) - adapted to each cloud's real API
+shapes rather than copied blindly. See
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)
 for the reasoning behind each design choice, including where and why the
-three providers' workflows genuinely differ.
+three providers' steps genuinely differ.
 
 ## AWS
 
-`.github/workflows/qualify-aws.yml` drives the production
-`internal/provider` AWS adapter (`aws.go`, `aws_sdk.go`, `aws_inventory.go`,
+`.github/workflows/qualify.yml`'s `provider: aws` matrix branch drives the
+production `internal/provider` AWS adapter (`aws.go`, `aws_sdk.go`, `aws_inventory.go`,
 `internal/prices/aws.go`) against real AWS infrastructure, through
 `internal/provider/aws_realcloud_test.go` (built only with `-tags
 realcloud`, never part of any other build or test path). One run:
@@ -48,26 +50,32 @@ realcloud`, never part of any other build or test path). One run:
 
 ### AWS trigger and required inputs
 
-`workflow_dispatch` only — no schedule, no push, no pull_request. Every
-input below is required, with no default:
+`workflow_dispatch` only — no schedule, no push, no pull_request, on
+`qualify.yml` with `provider: aws` (or `all`). `confirm_real_spend` and
+`max_runtime_minutes` are required at the trigger level and shared across
+every selected provider; every other input below is `required: false` at
+the trigger level (GitHub Actions cannot make an input conditionally
+required on another input's value) but is enforced as required for AWS by
+the workflow's own first AWS-specific step, before any AWS credential is
+configured:
 
 | Input | Meaning |
 | --- | --- |
 | `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
 | `aws_region` | Region to qualify against. |
-| `vpc_id` | Pinned, pre-provisioned VPC. `subnet_id` and `security_group_id` must both belong to it (checked before any create call). |
-| `subnet_id` | Pinned subnet to launch into. |
-| `security_group_id` | Pinned security group to attach. |
-| `ami_id` | Pinned AMI. Must be `available`, EBS-backed, and match `architecture`. |
-| `instance_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
-| `architecture` | `amd64` or `arm64`; must match `ami_id`'s real architecture. |
+| `aws_vpc_id` | Pinned, pre-provisioned VPC. `aws_subnet_id` and `aws_security_group_id` must both belong to it (checked before any create call). |
+| `aws_subnet_id` | Pinned subnet to launch into. |
+| `aws_security_group_id` | Pinned security group to attach. |
+| `aws_ami_id` | Pinned AMI. Must be `available`, EBS-backed, and match `aws_architecture`. |
+| `aws_instance_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
+| `aws_architecture` | `amd64` or `arm64`; must match `aws_ami_id`'s real architecture. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
 
 Nothing is auto-discovered: the AMI and every network identifier are
 operator-supplied, per issue #3's "pinned images/networks" requirement. The
 instance's Availability Zone is not a separate input — it is read from
-`subnet_id` itself (a subnet lives in exactly one AZ), so it cannot drift
-from the pinned subnet.
+`aws_subnet_id` itself (a subnet lives in exactly one AZ), so it cannot
+drift from the pinned subnet.
 
 ### AWS hard bounds
 
@@ -178,8 +186,8 @@ Named gaps, not covered by this piece:
 
 ## Azure
 
-`.github/workflows/qualify-azure.yml` drives the production
-`internal/provider` Azure adapter (`azure.go`, `azure_sdk.go`,
+`.github/workflows/qualify.yml`'s `provider: azure` matrix branch drives the
+production `internal/provider` Azure adapter (`azure.go`, `azure_sdk.go`,
 `azure_inventory.go`, `azure_image.go`, `azure_binding.go`,
 `internal/prices/azure.go`) against real Azure infrastructure, through
 `internal/provider/azure_realcloud_test.go` (built only with `-tags
@@ -214,21 +222,24 @@ build or test path). One run:
 
 ### Azure trigger and required inputs
 
-`workflow_dispatch` only — no schedule, no push, no pull_request. Every
-input below is required, with no default:
+`workflow_dispatch` only — no schedule, no push, no pull_request, on
+`qualify.yml` with `provider: azure` (or `all`). As with AWS, only
+`confirm_real_spend` and `max_runtime_minutes` are required at the trigger
+level; every other input below is enforced as required for Azure by the
+workflow's own first Azure-specific step, before any Azure credential is
+configured:
 
 | Input | Meaning |
 | --- | --- |
 | `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
 | `azure_region` | Region to qualify against (e.g. `eastus`). |
-| `subscription_id` | Pinned Azure subscription GUID. |
-| `resource_group` | Pinned, pre-provisioned, dedicated qualification resource group. |
-| `vnet_id` | Pinned, pre-provisioned VNet. `subnet_id` must be one of its `/subnets/*` children (checked before any create call). |
-| `subnet_id` | Pinned subnet to attach the VM's NIC to. |
-| `nsg_id` | Pinned network security group to attach. |
-| `image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
-| `vm_size` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
-| `availability_zone` | `1`, `2` or `3`. Must be supported by both `azure_region` and `vm_size`. |
+| `azure_subscription_id` | Pinned Azure subscription GUID. |
+| `azure_resource_group` | Pinned, pre-provisioned, dedicated qualification resource group. |
+| `azure_subnet_id` | Pinned subnet resource ID to attach the VM's NIC to, ending in `/subnets/<name>`. |
+| `azure_nsg_id` | Pinned network security group to attach. |
+| `azure_image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
+| `azure_vm_size` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
+| `azure_availability_zone` | `1`, `2` or `3`. Must be supported by both `azure_region` and `azure_vm_size`. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
 
 Nothing is auto-discovered: the image and every network identifier are
@@ -236,8 +247,13 @@ operator-supplied, per issue #3's "pinned images/networks" requirement.
 Unlike AWS, Azure has no per-resource "architecture" concept to validate —
 the managed-image API this adapter requires has no architecture field at
 all (see `azure_image.go`) — and the Availability Zone is not derivable
-from any other input the way AWS derives it from `subnet_id`, so it is its
-own required input here.
+from any other input the way AWS derives it from `aws_subnet_id`, so it is
+its own required input here. There is no separate `azure_vnet_id` input:
+an Azure subnet resource ID's own path is literally
+`{vnet resource ID}/subnets/<name>`, so the VNet resource ID is always
+fully reconstructible from `azure_subnet_id` alone and is derived that way
+by the workflow rather than accepted as a second, independently-pasted
+value.
 
 ### Azure hard bounds
 
@@ -284,8 +300,8 @@ client ID and tenant ID are not sensitive on their own, matching
 `AWS_QUALIFICATION_ROLE_ARN`'s and the `GCP_QUALIFICATION_*` identifiers'
 own reasoning) to an Azure AD app registration's client ID and tenant ID,
 with a federated credential configured to trust this repository's GitHub
-Actions OIDC issuer (`https://token.actions.githubusercontent.com`) for the
-`qualify-azure.yml` workflow's `workflow_dispatch` runs, audience
+Actions OIDC issuer (`https://token.actions.githubusercontent.com`) for
+`qualify.yml`'s `workflow_dispatch` runs, audience
 `api://AzureADTokenExchange`.
 
 Two independent consumers of this same trust relationship are used side by
@@ -375,8 +391,8 @@ Named gaps, not covered by this piece:
 
 ## GCP
 
-`.github/workflows/qualify-gcp.yml` drives the production
-`internal/provider` GCP adapter (`gcp_sdk.go`, `gcp_credentials.go`) against
+`.github/workflows/qualify.yml`'s `provider: gcp` matrix branch drives the
+production `internal/provider` GCP adapter (`gcp_sdk.go`, `gcp_credentials.go`) against
 real GCP infrastructure, through `internal/provider/gcp_realcloud_test.go`
 (built only with `-tags realcloud`, alongside — never replacing —
 `aws_realcloud_test.go`). One run:
@@ -405,8 +421,12 @@ Real Spot **price** observation is not attempted — see "What GCP qualifies
 
 ### GCP trigger and required inputs
 
-`workflow_dispatch` only — no schedule, no push, no pull_request. Every
-input below is required, with no default:
+`workflow_dispatch` only — no schedule, no push, no pull_request, on
+`qualify.yml` with `provider: gcp` (or `all`). As with AWS and Azure, only
+`confirm_real_spend` and `max_runtime_minutes` are required at the trigger
+level; every other input below is enforced as required for GCP by the
+workflow's own first GCP-specific step, before any GCP credential is
+configured:
 
 | Input | Meaning |
 | --- | --- |
@@ -417,7 +437,7 @@ input below is required, with no default:
 | `gcp_network` | Pinned, pre-provisioned VPC network. `gcp_subnetwork` must belong to it (checked before any create call). |
 | `gcp_subnetwork` | Pinned subnetwork to launch into. |
 | `gcp_image` | Pinned boot image, as an exact image self-link — never a rolling `.../images/family/...` reference, which is not a pinned identifier. Resolved (existence-checked) before any create call. |
-| `machine_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
+| `gcp_machine_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe phase. |
 
 Nothing is auto-discovered: the image and every network identifier are
@@ -551,7 +571,7 @@ Named gaps, not covered by this piece:
   `gcpConfirmedPreemption` detection logic itself is covered separately,
   against synthesized operation payloads, by the existing unit test suite.
 - **Architecture/image compatibility.** `createGCP` never cross-validates
-  `machine_type` against `gcp_image`'s real architecture the way AWS's
+  `gcp_machine_type` against `gcp_image`'s real architecture the way AWS's
   adapter does for `instance_type`/`ami_id` — an operator error here fails
   at VM boot, not at this workflow's pre-flight.
 

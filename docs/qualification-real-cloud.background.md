@@ -1,5 +1,14 @@
 # Real-cloud qualification: AWS, Azure and GCP — background
 
+> **Note on file references below:** this narrative was written while AWS,
+> Azure and GCP each had their own separate workflow file
+> (`qualify-aws.yml`/`qualify-azure.yml`/`qualify-gcp.yml`). Those three were
+> later consolidated into a single matrixed `.github/workflows/qualify.yml`
+> (a `provider` input selects `all` or one of `aws`/`azure`/`gcp`) — see
+> [qualification-real-cloud.md](qualification-real-cloud.md) for the current
+> file layout. The reasoning below is unaffected: only where each check
+> lives changed, not why it exists.
+
 ## Why this exists now, and why AWS first
 
 Issue #3 named the exact remaining gap: "Final real-cloud qualification
