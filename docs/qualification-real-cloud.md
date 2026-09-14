@@ -62,27 +62,28 @@ configured:
 | Input | Meaning |
 | --- | --- |
 | `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
-| `aws_region` | Region to qualify against. |
-| `aws_vpc_id` | Pinned, pre-provisioned VPC. `aws_subnet_id` and `aws_security_group_id` must both belong to it (checked before any create call). |
-| `aws_subnet_id` | Pinned subnet to launch into. |
-| `aws_security_group_id` | Pinned security group to attach. |
+| `aws_region` | Region to qualify against - also where the qualification network (see below) is created and destroyed. |
 | `aws_ami_id` | Pinned AMI. Must be `available`, EBS-backed, and match `aws_architecture`. |
 | `aws_instance_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
 | `aws_architecture` | `amd64` or `arm64`; must match `aws_ami_id`'s real architecture. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
 
-Nothing is auto-discovered: the AMI and every network identifier are
+The AMI/instance type/architecture are auto-discovered from nowhere -
 operator-supplied, per issue #3's "pinned images/networks" requirement. The
-instance's Availability Zone is not a separate input — it is read from
-`aws_subnet_id` itself (a subnet lives in exactly one AZ), so it cannot
-drift from the pinned subnet.
+**network** is a different matter (issue #89): `aws_vpc_id`/`aws_subnet_id`/
+`aws_security_group_id` are not workflow inputs at all - this workflow
+provisions its own isolated VPC/subnet/security group via OpenTofu at the
+start of the job and destroys it at the end (see "Network provisioning"
+below), rather than requiring an operator to pin a pre-existing one. The
+instance's Availability Zone is not a separate input either — it is read
+directly from that freshly-created subnet's own AZ output.
 
 ### AWS hard bounds
 
 - `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
   **20** before anything else runs (before Go setup, before AWS credentials
   are even configured). No input can raise this ceiling.
-- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+- The job's own `timeout-minutes: 45` is a second, independent ceiling that
   does not derive from the input at all.
 - Deletion runs on its own fixed 5-minute budget, independent of
   `max_runtime_minutes` — a run that spent its whole create/observe/price
@@ -140,24 +141,49 @@ actually uses today.
 #### AWS minimum IAM permissions
 
 The assumed role or IAM user needs, scoped to the pinned region/account:
-`sts:GetCallerIdentity`; `ec2:DescribeSubnets`, `ec2:DescribeSecurityGroups`,
-`ec2:DescribeImages`, `ec2:DescribeInstances`, `ec2:DescribeVolumes`,
-`ec2:DescribeNetworkInterfaces`, `ec2:DescribeSpotPriceHistory`;
-`ec2:RunInstances`, `ec2:TerminateInstances`, `ec2:DeleteVolume`,
-`ec2:DeleteNetworkInterface`. No IAM, VPC-creation or billing permissions
-are needed — the VPC/subnet/security group are pre-provisioned and only
-ever read, never created or modified, by this workflow.
+`sts:GetCallerIdentity`; `ec2:DescribeImages`, `ec2:DescribeInstances`,
+`ec2:DescribeVolumes`, `ec2:DescribeNetworkInterfaces`,
+`ec2:DescribeSpotPriceHistory`; `ec2:RunInstances`, `ec2:CreateTags`,
+`ec2:TerminateInstances`, `ec2:DeleteVolume`, `ec2:DeleteNetworkInterface`.
+No IAM or VPC-creation permissions are needed — this identity only ever
+launches into and deletes from a network a *separate* identity created
+(see "Network provisioning" below), never creating or modifying the
+network itself.
+
+### Network provisioning (issue #89)
+
+Unlike the compute side above, this workflow's qualification network is
+not an operator-pinned input at all: `tools/tofu/qualify-network/aws/`
+(an OpenTofu module) is applied at the start of this provider's job and
+destroyed at the end of the same job, creating a fresh, isolated VPC,
+subnet, NAT Gateway and security group exclusively for that one run. See
+that module's own `README.md` for exactly what it creates, and
+[qualification-real-cloud.background.md](qualification-real-cloud.background.md)
+for why this replaced an earlier, separately-exposed provision/destroy
+workflow.
+
+This uses a **deliberately separate** identity from
+`AWS_QUALIFICATION_ROLE_ARN` above: the `AWS_NETWORK_PROVISIONER_ROLE_ARN`
+repository secret, an OIDC role scoped to exactly
+`ec2:CreateVpc`/`DeleteVpc`, `ec2:CreateInternetGateway`/
+`DeleteInternetGateway`, `ec2:CreateSubnet`/`DeleteSubnet`,
+`ec2:AllocateAddress`/`ReleaseAddress`, `ec2:CreateNatGateway`/
+`DeleteNatGateway`, `ec2:CreateRouteTable`/`DeleteRouteTable`+route/
+association actions, `ec2:CreateSecurityGroup`/`DeleteSecurityGroup`+
+security-group-rule actions, plus the matching `Describe*`/tagging actions
+- nothing the qualification identity above also needs, and nothing that
+identity is granted.
 
 ### AWS operator prerequisites
 
 Before dispatching this workflow, an operator must have already:
 
-1. Provisioned an isolated VPC, subnet and security group dedicated to
-   qualification (never a production network).
-2. Chosen a pinned, EBS-backed AMI and confirmed its real architecture.
-3. Chosen a cheap instance type consistent with that architecture.
-4. Set either `AWS_QUALIFICATION_ROLE_ARN` (preferred) or the static-key
+1. Chosen a pinned, EBS-backed AMI and confirmed its real architecture.
+2. Chosen a cheap instance type consistent with that architecture.
+3. Set either `AWS_QUALIFICATION_ROLE_ARN` (preferred) or the static-key
    secret pair above, granting the minimum permissions listed.
+4. Set `AWS_NETWORK_PROVISIONER_ROLE_ARN`, granting the separate network-
+   provisioning permissions listed above.
 
 ### What AWS qualifies — and what it honestly does not
 
@@ -232,28 +258,24 @@ configured:
 | Input | Meaning |
 | --- | --- |
 | `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
-| `azure_region` | Region to qualify against (e.g. `eastus`). |
+| `azure_region` | Region to qualify against (e.g. `eastus`) - also where the qualification network (see below) is created and destroyed. |
 | `azure_subscription_id` | Pinned Azure subscription GUID. |
-| `azure_resource_group` | Pinned, pre-provisioned, dedicated qualification resource group. |
-| `azure_subnet_id` | Pinned subnet resource ID to attach the VM's NIC to, ending in `/subnets/<name>`. |
-| `azure_nsg_id` | Pinned network security group to attach. |
 | `azure_image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
 | `azure_vm_size` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
 | `azure_availability_zone` | `1`, `2` or `3`. Must be supported by both `azure_region` and `azure_vm_size`. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
 
-Nothing is auto-discovered: the image and every network identifier are
+The image/VM size/subscription are auto-discovered from nowhere -
 operator-supplied, per issue #3's "pinned images/networks" requirement.
 Unlike AWS, Azure has no per-resource "architecture" concept to validate —
 the managed-image API this adapter requires has no architecture field at
 all (see `azure_image.go`) — and the Availability Zone is not derivable
-from any other input the way AWS derives it from `aws_subnet_id`, so it is
-its own required input here. There is no separate `azure_vnet_id` input:
-an Azure subnet resource ID's own path is literally
-`{vnet resource ID}/subnets/<name>`, so the VNet resource ID is always
-fully reconstructible from `azure_subnet_id` alone and is derived that way
-by the workflow rather than accepted as a second, independently-pasted
-value.
+from any other input, so it is its own required input here. The
+**network** is a different matter (issue #89): `azure_resource_group`/
+`azure_subnet_id`/`azure_nsg_id` are not workflow inputs at all - this
+workflow provisions its own isolated resource group/VNet/subnet/NSG via
+OpenTofu at the start of the job and destroys it at the end (see "Network
+provisioning" below).
 
 ### Azure hard bounds
 
@@ -261,7 +283,7 @@ value.
   **20** before anything else runs (before Go setup, before any Azure
   credential is even configured) — the same ceiling AWS uses. No input can
   raise this ceiling.
-- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+- The job's own `timeout-minutes: 45` is a second, independent ceiling that
   does not derive from the input at all.
 - Deletion runs on its own fixed 5-minute budget, independent of
   `max_runtime_minutes`.
@@ -343,24 +365,64 @@ resource group, if narrower):
 `Microsoft.Network/virtualNetworks/subnets/join/action`;
 `Microsoft.Network/networkSecurityGroups/read`,
 `Microsoft.Network/networkSecurityGroups/join/action`. No subscription-wide,
-resource-group-creation or billing permissions are needed — the resource
-group/VNet/subnet/NSG are pre-provisioned and only ever read or attached
-to, never created, by this workflow.
+resource-group-creation or billing permissions are needed — this identity
+only ever reads and attaches to a resource group/VNet/subnet/NSG a
+*separate* identity created (see "Network provisioning" below), never
+creating or modifying the network itself.
+
+### Network provisioning (issue #89)
+
+Unlike the compute side above, this workflow's qualification network is
+not an operator-pinned input at all: `tools/tofu/qualify-network/azure/`
+(an OpenTofu module) is applied at the start of this provider's job and
+destroyed at the end of the same job, creating a fresh, isolated resource
+group, VNet, subnet and network security group exclusively for that one
+run. See that module's own `README.md` for exactly what it creates, and
+[qualification-real-cloud.background.md](qualification-real-cloud.background.md)
+for why this replaced an earlier, separately-exposed provision/destroy
+workflow.
+
+This uses a **deliberately separate** identity from
+`AZURE_QUALIFICATION_CLIENT_ID` above: the `AZURE_NETWORK_PROVISIONER_CLIENT_ID`/
+`AZURE_NETWORK_PROVISIONER_TENANT_ID`/`AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID`
+repository variables, backing an Azure AD app registration and federated
+credential with its own custom role scoped to exactly
+`Microsoft.Resources/subscriptions/resourceGroups/read`,
+`Microsoft.Resources/subscriptions/resourceGroups/write`,
+`Microsoft.Resources/subscriptions/resourceGroups/delete`;
+`Microsoft.Network/virtualNetworks/read`,
+`Microsoft.Network/virtualNetworks/write`,
+`Microsoft.Network/virtualNetworks/delete`;
+`Microsoft.Network/virtualNetworks/subnets/read`,
+`Microsoft.Network/virtualNetworks/subnets/write`,
+`Microsoft.Network/virtualNetworks/subnets/delete`,
+`Microsoft.Network/virtualNetworks/subnets/join/action`;
+`Microsoft.Network/networkSecurityGroups/read`,
+`Microsoft.Network/networkSecurityGroups/write`,
+`Microsoft.Network/networkSecurityGroups/delete`,
+`Microsoft.Network/networkSecurityGroups/join/action`;
+`Microsoft.Network/networkSecurityGroups/securityRules/read`,
+`Microsoft.Network/networkSecurityGroups/securityRules/write`,
+`Microsoft.Network/networkSecurityGroups/securityRules/delete`;
+`Microsoft.Network/locations/*/read` - nothing the qualification identity
+above also needs, and nothing that identity is granted.
 
 ### Azure operator prerequisites
 
 Before dispatching this workflow, an operator must have already:
 
-1. Provisioned an isolated resource group, VNet, subnet and network
-   security group dedicated to qualification (never a production network).
-2. Chosen a pinned, generalized Linux managed image with only an OS disk,
+1. Chosen a pinned, generalized Linux managed image with only an OS disk,
    and confirmed it is available in the target region.
-3. Chosen a cheap VM size available in the target region and Availability
+2. Chosen a cheap VM size available in the target region and Availability
    Zone.
-4. Registered an Azure AD app registration with a federated credential
+3. Registered an Azure AD app registration with a federated credential
    trusting this repository's GitHub Actions OIDC issuer, granted the
    minimum RBAC permissions above, and set `AZURE_QUALIFICATION_CLIENT_ID`/
    `AZURE_QUALIFICATION_TENANT_ID`/`AZURE_QUALIFICATION_SUBSCRIPTION_ID`.
+4. Set `AZURE_NETWORK_PROVISIONER_CLIENT_ID`/
+   `AZURE_NETWORK_PROVISIONER_TENANT_ID`/
+   `AZURE_NETWORK_PROVISIONER_SUBSCRIPTION_ID`, granting the separate
+   network-provisioning permissions listed above.
 
 ### What Azure qualifies — and what it honestly does not
 
@@ -431,21 +493,23 @@ configured:
 | Input | Meaning |
 | --- | --- |
 | `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
-| `gcp_project` | Project to qualify against. Must equal `vars.GCP_QUALIFICATION_PROJECT_ID` (checked before any credential is configured). |
+| `gcp_project` | Project to qualify against. Must equal `vars.GCP_QUALIFICATION_PROJECT_ID` (checked before any credential is configured). Also where the qualification network (see below) is created and destroyed. |
 | `gcp_region` | Region to qualify against. |
 | `gcp_zone` | Zone to launch into. Must belong to `gcp_region` (checked before any create call). |
-| `gcp_network` | Pinned, pre-provisioned VPC network. `gcp_subnetwork` must belong to it (checked before any create call). |
-| `gcp_subnetwork` | Pinned subnetwork to launch into. |
 | `gcp_image` | Pinned boot image, as an exact image self-link — never a rolling `.../images/family/...` reference, which is not a pinned identifier. Resolved (existence-checked) before any create call. |
 | `gcp_machine_type` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
 | `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe phase. |
 
-Nothing is auto-discovered: the image and every network identifier are
+The image/machine type/project are auto-discovered from nowhere -
 operator-supplied, per issue #3's "pinned images/networks" requirement.
 Unlike AWS, GCP zones are not derivable from a subnetwork (a GCP subnetwork
 is regional, not zonal, so any zone in the region is valid for it) — `gcp_zone`
 is therefore its own required input, cross-checked against `gcp_region`
-directly rather than read from another pinned identifier.
+directly rather than read from another pinned identifier. The **network**
+is a different matter (issue #89): `gcp_network`/`gcp_subnetwork` are not
+workflow inputs at all - this workflow provisions its own isolated VPC
+network/subnetwork via OpenTofu at the start of the job and destroys it at
+the end (see "Network provisioning" below).
 
 There is no `architecture` input: `internal/provider/gcp_sdk.go`'s
 `createGCP` never reads `Offering.Architecture` at all (unlike AWS's
@@ -460,7 +524,7 @@ for why this is named as a real adapter-level gap rather than papered over.
 - `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
   **20** before anything else runs (before Go setup, before GCP credentials
   are even configured). No input can raise this ceiling.
-- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+- The job's own `timeout-minutes: 45` is a second, independent ceiling that
   does not derive from the input at all.
 - Deletion runs on its own fixed 5-minute budget, independent of
   `max_runtime_minutes` — a run that spent its whole create/observe budget
@@ -516,28 +580,63 @@ a nil environment map, so no branching is needed anywhere below that step.
 #### GCP minimum IAM permissions
 
 The impersonated service account needs, scoped to the pinned
-project/region/zone: `compute.zones.get`, `compute.subnetworks.get`,
-`compute.images.get`, `compute.instances.get`, `compute.instances.list`,
-`compute.disks.get`, `compute.disks.list`, `compute.addresses.list`,
-`compute.zoneOperations.get`, `compute.zoneOperations.list`;
-`compute.instances.create`, `compute.instances.delete`,
-`compute.disks.create`, `compute.disks.delete`,
-`compute.instances.setLabels`, `compute.disks.setLabels`,
-`compute.subnetworks.use`. No project-creation, IAM, VPC-creation or
-billing permissions are needed — the network/subnetwork are pre-provisioned
-and only ever read, never created or modified, by this workflow.
+project/region/zone: `compute.zones.get`, `compute.images.get`,
+`compute.images.useReadOnly`, `compute.machineTypes.get`,
+`compute.instances.get`, `compute.instances.list`, `compute.disks.get`,
+`compute.disks.list`, `compute.addresses.list`, `compute.zoneOperations.get`,
+`compute.zoneOperations.list`; `compute.instances.create`,
+`compute.instances.delete`, `compute.disks.create`, `compute.disks.delete`,
+`compute.subnetworks.use`. Labels are set as part of the `instances.create`/
+`disks.create` insert calls themselves (`gcp_sdk.go`'s `createGCP`), never
+via a separate `setLabels` call, so no `compute.instances.setLabels`/
+`compute.disks.setLabels` is needed. No project-creation, IAM, VPC-creation
+or billing permissions are needed — this identity only ever launches into a
+network/subnetwork a *separate* identity created (see "Network
+provisioning" below), never creating or modifying the network itself.
+
+### Network provisioning (issue #89)
+
+Unlike the compute side above, this workflow's qualification network is
+not an operator-pinned input at all: `tools/tofu/qualify-network/gcp/`
+(an OpenTofu module) is applied at the start of this provider's job and
+destroyed at the end of the same job, creating a fresh, isolated VPC
+network and subnetwork exclusively for that one run. See that module's own
+`README.md` for exactly what it creates, and
+[qualification-real-cloud.background.md](qualification-real-cloud.background.md)
+for why this replaced an earlier, separately-exposed provision/destroy
+workflow.
+
+This uses a **deliberately separate** identity from
+`GCP_QUALIFICATION_*` above: the `GCP_NETWORK_PROVISIONER_PROJECT_ID`/
+`GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT`/
+`GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER` repository variables,
+backing a service account with its own custom role scoped to exactly
+`compute.networks.create`/`compute.networks.delete`/`compute.networks.get`/
+`compute.networks.list`, `compute.subnetworks.create`/
+`compute.subnetworks.delete`/`compute.subnetworks.get`/
+`compute.subnetworks.list`/`compute.subnetworks.use`,
+`compute.firewalls.create`/`compute.firewalls.delete`/
+`compute.firewalls.get`/`compute.firewalls.list`, plus
+`compute.regions.get`/`compute.regions.list`/`compute.zones.get`/
+`compute.zones.list`/`compute.regionOperations.get`/
+`compute.globalOperations.get` for OpenTofu's own polling - nothing the
+qualification identity above also needs, and nothing that identity is
+granted.
 
 ### GCP operator prerequisites
 
 Before dispatching this workflow, an operator must have already:
 
-1. Provisioned an isolated VPC network and subnetwork dedicated to
-   qualification (never a production network).
-2. Chosen a pinned boot image self-link.
-3. Chosen a cheap machine type.
-4. Provisioned the Workload Identity Federation pool/provider, the
+1. Chosen a pinned boot image self-link.
+2. Chosen a cheap machine type.
+3. Provisioned the Workload Identity Federation pool/provider, the
    qualification service account, and set the three repository variables
    above, granting the minimum permissions listed.
+4. Provisioned the separate network-provisioner service account and set
+   `GCP_NETWORK_PROVISIONER_PROJECT_ID`/
+   `GCP_NETWORK_PROVISIONER_SERVICE_ACCOUNT`/
+   `GCP_NETWORK_PROVISIONER_WORKLOAD_IDENTITY_PROVIDER`, granting the
+   separate network-provisioning permissions listed above.
 
 ### What GCP qualifies — and what it honestly does not
 
