@@ -1,13 +1,12 @@
-# Real-cloud qualification: AWS and GCP
+# Real-cloud qualification: AWS, Azure and GCP
 
 Part of [issue #3](https://github.com/tsouza/runnerscout/issues/3)'s remaining
 "Final real-cloud qualification" scope, plus [issue #2](https://github.com/tsouza/runnerscout/issues/2)'s
 related "real provider pricing requires later qualification" ask. This covers
-the AWS and GCP provider adapters. Azure is a separate, later, not-yet-built
-piece of the same remaining scope — see each provider's "Known gaps" section
-below.
+the AWS, Azure and GCP provider adapters — see each provider's own "Known
+gaps" section below for what remains out of scope even after a passing run.
 
-Both workflows share one safety philosophy - `workflow_dispatch`-only,
+All three workflows share one safety philosophy - `workflow_dispatch`-only,
 an exact-phrase spend confirmation checked before any cloud credential is
 configured, a hard-coded runtime ceiling no input can raise, pinned
 operator-supplied network identifiers cross-validated before any create call,
@@ -16,8 +15,8 @@ and a two-layer teardown guarantee (the Go test's own `t.Cleanup` plus an
 re-queries the cloud API) - adapted to each cloud's real API shapes rather
 than copied blindly. See
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)
-for the reasoning behind each design choice, including where and why the two
-providers' workflows genuinely differ.
+for the reasoning behind each design choice, including where and why the
+three providers' workflows genuinely differ.
 
 ## AWS
 
@@ -47,7 +46,7 @@ realcloud`, never part of any other build or test path). One run:
    post-delete inventory query) as a workflow artifact, at
    `evidence/qualify-aws-<run>-<attempt>/manifest.json`.
 
-### Trigger and required inputs
+### AWS trigger and required inputs
 
 `workflow_dispatch` only — no schedule, no push, no pull_request. Every
 input below is required, with no default:
@@ -70,7 +69,7 @@ instance's Availability Zone is not a separate input — it is read from
 `subnet_id` itself (a subnet lives in exactly one AZ), so it cannot drift
 from the pinned subnet.
 
-### Hard bounds
+### AWS hard bounds
 
 - `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
   **20** before anything else runs (before Go setup, before AWS credentials
@@ -85,7 +84,7 @@ from the pinned subnet.
   one real-cloud run at a time; a second dispatch queues rather than races
   or cancels an in-flight one.
 
-### Guaranteed cleanup
+### AWS guaranteed cleanup
 
 Two independent layers, either one alone sufficient for the common case:
 
@@ -102,7 +101,7 @@ Two independent layers, either one alone sufficient for the common case:
    anything found, then fails the job loudly (that condition is a real bug,
    never a normal outcome).
 
-### Credentials
+### AWS credentials
 
 OIDC role assumption is preferred, matching this repo's existing GHCR/
 cosign OIDC pattern (`release-build.yml`). A static-key fallback is also
@@ -130,7 +129,7 @@ not. Referencing the static-key secrets by name is inert until an operator
 deliberately provisions them — the OIDC path above is what a dispatch
 actually uses today.
 
-#### Minimum IAM permissions
+#### AWS minimum IAM permissions
 
 The assumed role or IAM user needs, scoped to the pinned region/account:
 `sts:GetCallerIdentity`; `ec2:DescribeSubnets`, `ec2:DescribeSecurityGroups`,
@@ -141,7 +140,7 @@ The assumed role or IAM user needs, scoped to the pinned region/account:
 are needed — the VPC/subnet/security group are pre-provisioned and only
 ever read, never created or modified, by this workflow.
 
-### Operator prerequisites
+### AWS operator prerequisites
 
 Before dispatching this workflow, an operator must have already:
 
@@ -152,7 +151,7 @@ Before dispatching this workflow, an operator must have already:
 4. Set either `AWS_QUALIFICATION_ROLE_ARN` (preferred) or the static-key
    secret pair above, granting the minimum permissions listed.
 
-### What this qualifies — and what it honestly does not
+### What AWS qualifies — and what it honestly does not
 
 Qualified, for real, by a passing run:
 
@@ -176,7 +175,203 @@ Named gaps, not covered by this piece:
   `Server.SpotInstanceTermination` detection logic itself is covered
   separately, against synthesized state payloads, by the existing unit
   test suite.
-- **Azure.** A separate, later piece of issue #3's same remaining scope.
+
+## Azure
+
+`.github/workflows/qualify-azure.yml` drives the production
+`internal/provider` Azure adapter (`azure.go`, `azure_sdk.go`,
+`azure_inventory.go`, `azure_image.go`, `azure_binding.go`,
+`internal/prices/azure.go`) against real Azure infrastructure, through
+`internal/provider/azure_realcloud_test.go` (built only with `-tags
+realcloud`, alongside `aws_realcloud_test.go`, never part of any other
+build or test path). One run:
+
+1. Creates one real, billed Azure Spot Virtual Machine — plus its dependent
+   network interface and OS disk, provisioned together in one ARM template
+   deployment — via the adapter's own `CreateWithResources`.
+2. Independently confirms it reaches a real `PowerState/running` state,
+   using a typed `armcompute.VirtualMachinesClient` built through Azure's
+   plain `DefaultAzureCredential` chain — never the adapter's own session —
+   so this confirmation never depends on the exact code path under
+   qualification also certifying its own success. This typed client is
+   necessary here specifically: the generic ARM resource client the
+   production adapter itself uses for every other read cannot report a
+   VM's real runtime power state at all, only static ARM properties.
+3. Confirms the adapter's `Observe` reports the running VM as not
+   interrupted.
+4. Observes a real Spot price for the same pinned VM size/region via
+   `internal/prices.AzureSpotClient` (through `Command.Azure.SpotPrices()`)
+   — a public, unauthenticated endpoint, unlike AWS's.
+5. Deletes the VM by driving the adapter's own `Observe`/`Delete` in a
+   bounded loop (Azure's `Delete` tears down one dependent resource per
+   call, not all three at once — see
+   [qualification-real-cloud.background.md](qualification-real-cloud.background.md)),
+   then independently re-queries the ARM API (the same independent client)
+   for any resource still tagged to this run's allocation — never just
+   trusting `Delete`'s or `Observe`'s own report of success.
+6. Uploads everything observed as a workflow artifact, at
+   `evidence/qualify-azure-<run>-<attempt>/manifest.json`.
+
+### Azure trigger and required inputs
+
+`workflow_dispatch` only — no schedule, no push, no pull_request. Every
+input below is required, with no default:
+
+| Input | Meaning |
+| --- | --- |
+| `confirm_real_spend` | Must equal exactly `I-UNDERSTAND-THIS-COSTS-REAL-MONEY`. |
+| `azure_region` | Region to qualify against (e.g. `eastus`). |
+| `subscription_id` | Pinned Azure subscription GUID. |
+| `resource_group` | Pinned, pre-provisioned, dedicated qualification resource group. |
+| `vnet_id` | Pinned, pre-provisioned VNet. `subnet_id` must be one of its `/subnets/*` children (checked before any create call). |
+| `subnet_id` | Pinned subnet to attach the VM's NIC to. |
+| `nsg_id` | Pinned network security group to attach. |
+| `image_id` | Pinned managed-image resource ID (`Microsoft.Compute/images/...`). Must be an available, generalized Linux image with only an OS disk. |
+| `vm_size` | Keep this cheap — it directly bounds real spend alongside `max_runtime_minutes`. |
+| `availability_zone` | `1`, `2` or `3`. Must be supported by both `azure_region` and `vm_size`. |
+| `max_runtime_minutes` | Plain integer, 1–20. Bounds the create/observe/price phase. |
+
+Nothing is auto-discovered: the image and every network identifier are
+operator-supplied, per issue #3's "pinned images/networks" requirement.
+Unlike AWS, Azure has no per-resource "architecture" concept to validate —
+the managed-image API this adapter requires has no architecture field at
+all (see `azure_image.go`) — and the Availability Zone is not derivable
+from any other input the way AWS derives it from `subnet_id`, so it is its
+own required input here.
+
+### Azure hard bounds
+
+- `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
+  **20** before anything else runs (before Go setup, before any Azure
+  credential is even configured) — the same ceiling AWS uses. No input can
+  raise this ceiling.
+- The job's own `timeout-minutes: 40` is a second, independent ceiling that
+  does not derive from the input at all.
+- Deletion runs on its own fixed 5-minute budget, independent of
+  `max_runtime_minutes`.
+- `concurrency: { group: qualify-azure, cancel-in-progress: false }` — only
+  one real-cloud Azure run at a time; a second dispatch queues rather than
+  races or cancels an in-flight one.
+
+### Azure guaranteed cleanup
+
+Two independent layers, either one alone sufficient for the common case:
+
+1. The Go test's own `t.Cleanup`, registered immediately once a real VM
+   exists, running on its own fresh 5-minute context. It drives the
+   adapter's own `Observe`/`Delete` to completion (Azure's `Delete` removes
+   one dependent resource per call — see "What it does" above), then
+   independently re-queries for anything still tagged to this run.
+2. The workflow's own final step, gated `if: always()` — the authoritative
+   backstop, since it runs even if the job was killed by its own timeout or
+   cancelled before the Go process's `t.Cleanup` could run. It re-derives
+   everything it needs (resource group, allocation id, owner tag) directly
+   from job inputs/env, never from a prior step's output, reuses the `az`
+   CLI session `azure/login` already established earlier in the same job,
+   independently re-queries for anything still tagged to this run's
+   allocation across the whole resource group, force-cleans anything found
+   (VMs first, then whatever remains), and fails the job loudly (that
+   condition is a real bug, never a normal outcome).
+
+### Azure credentials
+
+Azure Workload Identity Federation (OIDC) is the **only** supported path —
+there is no client-secret fallback here, unlike AWS's static-key fallback
+(see [qualification-real-cloud.background.md](qualification-real-cloud.background.md)
+for why). Set the `AZURE_QUALIFICATION_CLIENT_ID` and
+`AZURE_QUALIFICATION_TENANT_ID` repository variables (not secrets — a
+client ID and tenant ID are not sensitive on their own, matching
+`AWS_QUALIFICATION_ROLE_ARN`'s and the `GCP_QUALIFICATION_*` identifiers'
+own reasoning) to an Azure AD app registration's client ID and tenant ID,
+with a federated credential configured to trust this repository's GitHub
+Actions OIDC issuer (`https://token.actions.githubusercontent.com`) for the
+`qualify-azure.yml` workflow's `workflow_dispatch` runs, audience
+`api://AzureADTokenExchange`.
+
+Two independent consumers of this same trust relationship are used side by
+side in the workflow: `azure/login` authenticates the `az` CLI used by this
+workflow's own pre-flight and cleanup steps, and a separately-fetched
+GitHub OIDC token is written to its own file and exposed as
+`AZURE_FEDERATED_TOKEN_FILE`/`AZURE_CLIENT_ID`/`AZURE_TENANT_ID` for the Go
+test step — the exact environment variable shape
+`internal/provider/credentials.go`'s `azureCredential` already resolves via
+`azidentity.NewWorkloadIdentityCredential` when `NewCommand` is given a
+`nil` environment map.
+
+Both `AZURE_QUALIFICATION_CLIENT_ID` and `AZURE_QUALIFICATION_TENANT_ID`
+already exist in this repository today (confirmed via `gh-tsouza variable
+list`), alongside `AZURE_QUALIFICATION_SUBSCRIPTION_ID`.
+
+#### Azure minimum RBAC permissions
+
+The federated identity needs, scoped to the pinned subscription (or
+resource group, if narrower):
+`Microsoft.Resources/subscriptions/resourceGroups/read`;
+`Microsoft.Resources/deployments/read`,
+`Microsoft.Resources/deployments/write`,
+`Microsoft.Resources/deployments/delete`,
+`Microsoft.Resources/deployments/operations/read`,
+`Microsoft.Resources/deployments/exportTemplate/action`;
+`Microsoft.Compute/virtualMachines/read`,
+`Microsoft.Compute/virtualMachines/write`,
+`Microsoft.Compute/virtualMachines/delete`;
+`Microsoft.Compute/disks/read`, `Microsoft.Compute/disks/write`,
+`Microsoft.Compute/disks/delete`; `Microsoft.Compute/images/read`;
+`Microsoft.Compute/locations/*/read`; `Microsoft.Network/locations/*/read`;
+`Microsoft.Network/networkInterfaces/read`,
+`Microsoft.Network/networkInterfaces/write`,
+`Microsoft.Network/networkInterfaces/delete`,
+`Microsoft.Network/networkInterfaces/join/action`;
+`Microsoft.Network/virtualNetworks/read`,
+`Microsoft.Network/virtualNetworks/subnets/read`,
+`Microsoft.Network/virtualNetworks/subnets/join/action`;
+`Microsoft.Network/networkSecurityGroups/read`,
+`Microsoft.Network/networkSecurityGroups/join/action`. No subscription-wide,
+resource-group-creation or billing permissions are needed — the resource
+group/VNet/subnet/NSG are pre-provisioned and only ever read or attached
+to, never created, by this workflow.
+
+### Azure operator prerequisites
+
+Before dispatching this workflow, an operator must have already:
+
+1. Provisioned an isolated resource group, VNet, subnet and network
+   security group dedicated to qualification (never a production network).
+2. Chosen a pinned, generalized Linux managed image with only an OS disk,
+   and confirmed it is available in the target region.
+3. Chosen a cheap VM size available in the target region and Availability
+   Zone.
+4. Registered an Azure AD app registration with a federated credential
+   trusting this repository's GitHub Actions OIDC issuer, granted the
+   minimum RBAC permissions above, and set `AZURE_QUALIFICATION_CLIENT_ID`/
+   `AZURE_QUALIFICATION_TENANT_ID`/`AZURE_QUALIFICATION_SUBSCRIPTION_ID`.
+
+### What Azure qualifies — and what it honestly does not
+
+Qualified, for real, by a passing run:
+
+- Real Azure Spot VM creation (with its dependent NIC and OS disk), a real
+  transition to `PowerState/running`, real Spot price observation, real
+  deletion, and independently re-verified cleanup — all through the exact
+  production adapter code path.
+
+Named gaps, not covered by this piece:
+
+- **Real GitHub Actions job execution** (issue #3's "ordinary runs-on,
+  actual VM job execution"). The VM boots with a synthetic, non-functional
+  placeholder in place of a real GitHub JIT registration token — the
+  image's cloud-init runner-registration step is expected to fail
+  harmlessly inside the guest. Confirming a real runner registers and
+  executes a real workflow job needs a live scale set and a real ephemeral
+  registration token — a separate, larger qualification piece this
+  workflow does not attempt.
+- **A real Spot eviction.** Azure's generally available Compute API
+  provides no way to force one on demand either (only the separate,
+  unintegrated Azure Chaos Studio service can). This workflow can only
+  confirm the adapter correctly reports "not interrupted" against a real,
+  healthy running instance; `azureConfirmedPreemption`'s Event Grid/Storage
+  Queue-fed detection logic itself is covered separately, against
+  synthesized payloads, by the existing unit test suite.
 
 ## GCP
 
@@ -205,10 +400,10 @@ real GCP infrastructure, through `internal/provider/gcp_realcloud_test.go`
    query) as a workflow artifact, at
    `evidence/qualify-gcp-<run>-<attempt>/manifest.json`.
 
-Real Spot **price** observation is not attempted — see "What this qualifies
+Real Spot **price** observation is not attempted — see "What GCP qualifies
 — and what it honestly does not" below.
 
-### Trigger and required inputs
+### GCP trigger and required inputs
 
 `workflow_dispatch` only — no schedule, no push, no pull_request. Every
 input below is required, with no default:
@@ -240,7 +435,7 @@ document a safety property this piece does not actually have. See
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)
 for why this is named as a real adapter-level gap rather than papered over.
 
-### Hard bounds
+### GCP hard bounds
 
 - `max_runtime_minutes` is checked against a hard-coded workflow ceiling of
   **20** before anything else runs (before Go setup, before GCP credentials
@@ -255,7 +450,7 @@ for why this is named as a real adapter-level gap rather than papered over.
   one real-cloud run at a time; a second dispatch queues rather than races
   or cancels an in-flight one.
 
-### Guaranteed cleanup
+### GCP guaranteed cleanup
 
 Two independent layers, either one alone sufficient for the common case:
 
@@ -272,7 +467,7 @@ Two independent layers, either one alone sufficient for the common case:
    force-cleans anything found, then fails the job loudly (that condition is
    a real bug, never a normal outcome).
 
-### Credentials
+### GCP credentials
 
 Workload Identity Federation only — deliberately no service account key
 fallback (see
@@ -298,7 +493,7 @@ credential file — exactly the environment shape
 `internal/provider/gcp_credentials.go`'s `gcpCredential` already reads from
 a nil environment map, so no branching is needed anywhere below that step.
 
-#### Minimum IAM permissions
+#### GCP minimum IAM permissions
 
 The impersonated service account needs, scoped to the pinned
 project/region/zone: `compute.zones.get`, `compute.subnetworks.get`,
@@ -312,7 +507,7 @@ project/region/zone: `compute.zones.get`, `compute.subnetworks.get`,
 billing permissions are needed — the network/subnetwork are pre-provisioned
 and only ever read, never created or modified, by this workflow.
 
-### Operator prerequisites
+### GCP operator prerequisites
 
 Before dispatching this workflow, an operator must have already:
 
@@ -324,7 +519,7 @@ Before dispatching this workflow, an operator must have already:
    qualification service account, and set the three repository variables
    above, granting the minimum permissions listed.
 
-### What this qualifies — and what it honestly does not
+### What GCP qualifies — and what it honestly does not
 
 Qualified, for real, by a passing run:
 
@@ -359,7 +554,6 @@ Named gaps, not covered by this piece:
   `machine_type` against `gcp_image`'s real architecture the way AWS's
   adapter does for `instance_type`/`ami_id` — an operator error here fails
   at VM boot, not at this workflow's pre-flight.
-- **Azure.** A separate, later piece of issue #3's same remaining scope.
 
 See [qualification-real-cloud.background.md](qualification-real-cloud.background.md)
 for the reasoning behind these design choices.
