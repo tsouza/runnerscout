@@ -36,13 +36,71 @@ modes; see the [complete CRD example](examples/multicloud/README.md).
 - Durable allocation identities preserve recovery and cleanup across restarts.
 - GitHub retains job-result authority when local provisioning times out.
 
+## Quickstart
+
+Install the chart and bound spend with a `CapacityBudget` - the highest-value
+thing to set up first. This assumes an existing Kubernetes cluster and
+`kubectl`/`helm` access.
+
+**1. Install the CRDs and chart** (installs suspended by default - no
+admission happens yet):
+
+```sh
+kubectl create namespace runnerscout
+kubectl apply --server-side -f charts/runnerscout/crds/
+helm upgrade --install runnerscout charts/runnerscout --namespace runnerscout
+```
+
+**2. Set a daily spend ceiling.** A `CapacityBudget`'s spec is one field -
+the worst-case daily ceiling, in USD micros (1,000,000 micros = \$1.00):
+
+```yaml
+# budget.yaml
+apiVersion: runnerscout.io/v1alpha1
+kind: CapacityBudget
+metadata:
+  name: daily
+  namespace: runnerscout
+spec:
+  dailyBudgetMicros: 5000000 # $5.00/day
+```
+
+```sh
+kubectl apply -f budget.yaml
+```
+
+**3. Reference it from your `RunnerScaleSet`** (alongside the provider,
+class and catalog manifests from the [worked example](examples/multicloud/README.md)):
+
+```yaml
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerScaleSet
+metadata:
+  name: build
+  namespace: runnerscout
+spec:
+  runnerClassRef:
+    name: linux-amd64
+  budgetRef:
+    name: daily
+  # github, maxRunners, provisioningSeconds, maxLifetimeSeconds, suspend: ...
+```
+
+From here, the controller bounds admission by both `maxRunners` and the
+budget's ceiling - whichever is more restrictive on a given day wins. No
+`budgetRef` at all leaves admission unbounded by spend. See
+[capacity-budget.md](docs/capacity-budget.md) for exactly what the ceiling
+does and does not cover.
+
+**4. Unsuspend.** Once catalog prices, network and provider credentials are
+in place (see the worked example's own walkthrough), set `spec.suspend:
+false` on the `RunnerScaleSet` and wait for its `Ready` condition.
+
 ## Get started
 
-Follow the [quickstart](docs/quickstart.md) to install the chart and bound
-spend with a `CapacityBudget`. Use the [Helm chart](charts/runnerscout/README.md)
-for development installation, and [operations guide](docs/operations.md) for
-configuration and recovery. See [architecture](docs/architecture.md) for
-placement and lifecycle contracts.
+Use the [Helm chart](charts/runnerscout/README.md) for development installation,
+and [operations guide](docs/operations.md) for configuration and recovery.
+See [architecture](docs/architecture.md) for placement and lifecycle contracts.
 
 To build locally, install the Go version in `go.mod` and Python 3:
 
