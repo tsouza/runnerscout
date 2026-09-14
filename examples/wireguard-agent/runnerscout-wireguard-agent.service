@@ -1,0 +1,59 @@
+# Reference systemd unit for cmd/runnerscout-wireguard-agent.
+#
+# This is example/reference material, not something this repository installs
+# automatically. See examples/wireguard-agent/README.md for where to place
+# this file, where the binary must live, and how to enable it in a runner
+# image. It intentionally does not gate on a specific cloud's init service
+# (e.g. cloud-final.service) by name, since the three supported providers
+# invoke their boot script through different guest agents; ConditionPathExists
+# below is what actually makes start order safe regardless of which one ran
+# first.
+#
+# IMPORTANT: installing and enabling this unit alone does not make
+# wireguard-mode networking usable end-to-end. As of this writing no code
+# path in this repository ever assigns
+# lifecycle.Allocation.WireGuardOverlayAddress, so the cloud-init-delivered
+# payload this agent reads has an empty OverlayAddress field, which the
+# agent's LoadPayload step hard-rejects on every boot. This unit gives the
+# agent binary somewhere to run once that separate, tracked gap (see
+# docs/operations.md's wireguard-mode section and issue #16) is closed - it
+# does not close it.
+
+[Unit]
+Description=runnerscout WireGuard VM-side overlay agent
+Documentation=https://github.com/tsouza/runnerscout/blob/main/docs/operations.md
+# Runs after the network is usable and after cloud-init's final stage has had
+# a chance to write /run/runnerscout/wireguard.json. Both are best-effort
+# orderings, not correctness guarantees - ConditionPathExists below is what
+# actually prevents a doomed early start when a provider's boot script runs
+# later or through a different mechanism than expected.
+After=network-online.target cloud-final.service
+Wants=network-online.target
+# Skips (not fails) activation entirely on a VM whose allocation was never
+# provisioned for wireguard mode - the payload file is only ever written by
+# provider.BootstrapWithWireGuard when NetworkProfile intends wireguard mode.
+ConditionPathExists=/run/runnerscout/wireguard.json
+
+[Service]
+Type=simple
+# Runs as the same unprivileged "runner" user that owns
+# /run/runnerscout (see provider.Bootstrap's cloud-init script) and therefore
+# already has read access to wireguard.json without widening its permissions.
+# The agent needs no elevated capability: its WireGuard tunnel is a userspace
+# netstack device (gVisor), not a kernel TUN interface, and its outer UDP
+# socket binds wireguard.DefaultListenPort (51820), which is unprivileged.
+User=runner
+Group=runner
+ExecStart=/usr/local/bin/runnerscout-wireguard-agent -payload /run/runnerscout/wireguard.json
+# LoadPayload's required-field checks currently fail every real allocation
+# (see the [Unit] caveat above) - Restart=on-failure keeps retrying rather
+# than leaving the unit permanently failed, in case a future boot's payload
+# is complete. RestartSec bounds how fast those retries loop.
+Restart=on-failure
+RestartSec=5s
+# The runner VM's own retirement/shutdown already tears this process down;
+# no separate stop hook is needed.
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
