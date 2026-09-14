@@ -1,0 +1,37 @@
+# Rendered by tools/e2e/bring-up-azure.sh via envsubst. One real,
+# operator-supplied Azure ProviderConfig - modeled on
+# examples/multicloud/providers.yaml's "azure" entry, Azure-only per this
+# piece's own scoping (issue #80). Every identifier below except
+# sshPublicKey is a required operator input (see docs/e2e-qualification.md);
+# nothing is hardcoded or discovered.
+#
+# sshPublicKey is the one field bring-up-azure.sh itself generates - a
+# fresh, throwaway ed25519 key pair, discarded after encoding the public
+# half - rather than an operator input. See
+# docs/e2e-qualification.background.md's Azure section for why: nothing in
+# this harness ever needs to actually log into the VM (the dispatched job
+# reaches it only via a real GitHub Actions runner registration, never SSH),
+# mirroring azure_realcloud_test.go's identical choice for the same reason.
+apiVersion: runnerscout.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: azure
+  namespace: ${E2E_NAMESPACE}
+spec:
+  connection:
+    kind: azure
+    subscription: "${E2E_AZURE_SUBSCRIPTION_ID}"
+    resourceGroup: ${E2E_AZURE_RESOURCE_GROUP}
+    subnet: ${E2E_AZURE_SUBNET_ID}
+    securityGroup: ${E2E_AZURE_NSG_ID}
+    sshPublicKey: "${E2E_AZURE_SSH_PUBLIC_KEY}"
+  credentialEnvironment:
+    AZURE_CLIENT_ID:
+      name: azure-identity
+      key: client-id
+    AZURE_TENANT_ID:
+      name: azure-identity
+      key: tenant-id
+    AZURE_FEDERATED_TOKEN_FILE:
+      name: azure-identity
+      key: token-file

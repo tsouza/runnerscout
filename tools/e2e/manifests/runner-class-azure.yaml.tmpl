@@ -1,0 +1,40 @@
+# Rendered by tools/e2e/bring-up-azure.sh via envsubst. One eligible pool
+# (the real Azure Spot offering in capacity-catalog-azure.yaml.tmpl);
+# allowOnDemand stays false - this harness never authorizes on-demand
+# fallback spend.
+#
+# maxPriceMicros is a normal, finite cap - NOT Azure's `-1` "no price
+# cap" sentinel azure_realcloud_test.go sets directly on a hand-built
+# Allocation (see docs/qualification-real-cloud.background.md's Azure
+# section, "Why Requirements.MaxPriceMicros is set to Azure's -1
+# sentinel"). That sentinel cannot be expressed through this CRD:
+# api/v1alpha1/types.go's PlacementPolicy.MaxPriceMicros carries its own
+# `+kubebuilder:validation:Minimum=1`, so a CRD-driven resource graph can
+# only ever express a real finite ceiling - exactly like the AWS piece's own
+# maxPriceMicros already does.
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerClass
+metadata:
+  name: e2e-azure
+  namespace: ${E2E_NAMESPACE}
+spec:
+  resources:
+    cpu: ${E2E_AZURE_OFFERING_CPU}
+    memoryMiB: ${E2E_AZURE_OFFERING_MEMORY_MIB}
+    architecture: ${E2E_AZURE_ARCHITECTURE}
+    capabilities: []
+  placement:
+    policy: lowest-price
+    regions: [${E2E_AZURE_REGION}]
+    maxPriceMicros: ${E2E_AZURE_MAX_PRICE_MICROS}
+    allowOnDemand: false
+  providers:
+    - name: azure
+  catalogRef:
+    name: e2e-azure
+  networkRef:
+    name: e2e-azure
+  retry:
+    enabled: false
+    maxRetries: 0
+    acknowledgeRepeatedEffects: false
