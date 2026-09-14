@@ -1,0 +1,20 @@
+# Rendered by tools/e2e/bring-up.sh via envsubst. "separate" mode (not
+# "wireguard" - see docs/operations.md's "Known limitations": wireguard mode
+# is not yet functionally usable end-to-end, so this harness, like
+# examples/multicloud, uses the mode that actually works). One AWS mapping,
+# reusing the same pinned qualification network documented in
+# docs/qualification-real-cloud.md's AWS section.
+apiVersion: runnerscout.io/v1alpha1
+kind: NetworkProfile
+metadata:
+  name: e2e-aws
+  namespace: ${E2E_NAMESPACE}
+spec:
+  mode: separate
+  mappings:
+    - providerRef:
+        name: aws
+      region: ${E2E_AWS_REGION}
+      networkID: ${E2E_AWS_VPC_ID}
+      subnetID: ${E2E_AWS_SUBNET_ID}
+      cidrs: [${E2E_AWS_SUBNET_CIDR}]

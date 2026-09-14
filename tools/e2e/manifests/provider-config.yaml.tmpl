@@ -1,0 +1,21 @@
+# Rendered by tools/e2e/bring-up.sh via envsubst. One real, operator-supplied
+# AWS ProviderConfig - modeled on examples/multicloud/providers.yaml's "aws"
+# entry, AWS-only per issue #80's own first-pass scoping. Every identifier
+# below is a required input (see docs/e2e-qualification.md); nothing is
+# hardcoded or discovered.
+apiVersion: runnerscout.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: aws
+  namespace: ${E2E_NAMESPACE}
+spec:
+  connection:
+    kind: aws
+    accountID: "${E2E_AWS_ACCOUNT_ID}"
+    profile: runnerscout
+    subnet: ${E2E_AWS_SUBNET_ID}
+    securityGroup: ${E2E_AWS_SECURITY_GROUP_ID}
+  credentialEnvironment:
+    AWS_SHARED_CREDENTIALS_FILE:
+      name: aws-credentials
+      key: path

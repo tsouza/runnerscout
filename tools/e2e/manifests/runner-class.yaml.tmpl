@@ -1,0 +1,29 @@
+# Rendered by tools/e2e/bring-up.sh via envsubst. One eligible pool (the
+# real AWS Spot offering in capacity-catalog.yaml.tmpl); allowOnDemand stays
+# false - this harness never authorizes on-demand fallback spend.
+apiVersion: runnerscout.io/v1alpha1
+kind: RunnerClass
+metadata:
+  name: e2e-aws
+  namespace: ${E2E_NAMESPACE}
+spec:
+  resources:
+    cpu: ${E2E_AWS_OFFERING_CPU}
+    memoryMiB: ${E2E_AWS_OFFERING_MEMORY_MIB}
+    architecture: ${E2E_AWS_ARCHITECTURE}
+    capabilities: []
+  placement:
+    policy: lowest-price
+    regions: [${E2E_AWS_REGION}]
+    maxPriceMicros: ${E2E_AWS_MAX_PRICE_MICROS}
+    allowOnDemand: false
+  providers:
+    - name: aws
+  catalogRef:
+    name: e2e-aws
+  networkRef:
+    name: e2e-aws
+  retry:
+    enabled: false
+    maxRetries: 0
+    acknowledgeRepeatedEffects: false

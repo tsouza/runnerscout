@@ -1,0 +1,36 @@
+# Rendered by tools/e2e/bring-up.sh via envsubst, using a REAL price
+# observation and a fresh observedAt timestamp - never the illustrative,
+# permanently-expired quotes examples/multicloud/catalog.yaml ships (see that
+# file's own "Illustrative, deliberately expired quotes" header comment).
+#
+# CRD-driven mode has no equivalent of operator.Config.AWSPriceRefresh (that
+# flag is only ever set by cmd/runnerscout's mounted-JSON path - see
+# internal/configapi/runtime.go, which never reads it from any CRD field) -
+# so this catalog's price goes stale (internal/placement.MaxPriceAge, 5
+# minutes) if dispatch does not follow shortly after this is applied.
+# tools/e2e/dispatch-and-wait.sh re-renders and re-applies this exact file
+# immediately before dispatching, specifically to keep this window from
+# being a real failure mode - see docs/e2e-qualification.background.md.
+apiVersion: runnerscout.io/v1alpha1
+kind: CapacityCatalog
+metadata:
+  name: e2e-aws
+  namespace: ${E2E_NAMESPACE}
+spec:
+  offerings:
+    - id: aws-spot-e2e
+      provider: aws
+      region: ${E2E_AWS_REGION}
+      zone: ${E2E_AWS_ZONE}
+      machine: ${E2E_AWS_INSTANCE_TYPE}
+      image: ${E2E_AWS_AMI_ID}
+      cpu: ${E2E_AWS_OFFERING_CPU}
+      memoryMiB: ${E2E_AWS_OFFERING_MEMORY_MIB}
+      architecture: ${E2E_AWS_ARCHITECTURE}
+      capabilities: []
+      spot: true
+      priceMicros: ${E2E_AWS_PRICE_MICROS}
+      currency: USD
+      observedAt: "${E2E_AWS_PRICE_OBSERVED_AT}"
+  complete:
+    aws: false
