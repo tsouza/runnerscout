@@ -59,8 +59,10 @@ unambiguous runner/run/attempt correlation, bounded fresh retries and explicit
 acknowledgment of repeated workflow effects; composition is tracked in
 [#4](https://github.com/tsouza/runnerscout/issues/4).
 
-Separate provider networks are the default. Optional shared private connectivity
-via a single-mapping WireGuard overlay is also supported, retaining each
-provider's native network boundary; see [operations.md](operations.md) for
-setup. Cross-region/cross-provider overlay peering and VM-boot integration
-remain tracked in [#16](https://github.com/tsouza/runnerscout/issues/16).
+Separate provider networks are the default. A single-mapping WireGuard overlay
+mode exists in the configuration surface, retaining each provider's native
+network boundary, but is not yet functionally usable: no allocation is ever
+assigned an overlay IP address, so a wireguard-mode VM's boot-time agent
+cannot start. Overlay IP address allocation, VM-boot integration, and
+cross-region/cross-provider overlay peering all remain tracked in
+[#16](https://github.com/tsouza/runnerscout/issues/16).
