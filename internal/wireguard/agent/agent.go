@@ -62,22 +62,30 @@ func LoadPayload(path string) (wireguard.CloudInitPayload, error) {
 // wireguard.DefaultListenPort, never zero/ephemeral: Peer.Endpoint (this
 // allocation's own outer address, as every OTHER peer would compute it) is
 // only correct if this side actually listens where every other peer assumes
-// it does. A malformed peer in payload.Peers is skipped (matching
-// Reconcile's own tolerance) with its error aggregated and returned
-// alongside the otherwise-valid config - non-fatal, since one bad entry
-// should not prevent bringing up connectivity to every other peer.
-func InitialConfig(payload wireguard.CloudInitPayload) (tunnel.Config, map[wireguard.PublicKey]wireguard.Peer, error) {
+// it does.
+//
+// The two returned errors are never interchangeable. err is fatal: a
+// malformed top-level field (PrivateKey, OverlayAddress) leaves cfg a
+// useless zero value, and the caller must stop before ever calling
+// bringUp with it - treating this as "skipped peers" once produced a
+// misleading log line ("some initial peers were skipped") immediately
+// followed by an unrelated tunnel.BringUp failure ("overlay address is
+// required"), masking the real cause. skipped is the opposite: a
+// malformed peer in payload.Peers (matching Reconcile's own tolerance)
+// leaves cfg otherwise fully valid, and is purely informational - one bad
+// entry must never prevent bringing up connectivity to every other peer.
+func InitialConfig(payload wireguard.CloudInitPayload) (cfg tunnel.Config, current map[wireguard.PublicKey]wireguard.Peer, skipped, err error) {
 	raw, err := base64.StdEncoding.DecodeString(payload.PrivateKey)
 	if err != nil || len(raw) != wireguard.KeySize {
-		return tunnel.Config{}, nil, fmt.Errorf("agent: payload has a malformed private key: %v", err)
+		return tunnel.Config{}, nil, nil, fmt.Errorf("agent: payload has a malformed private key: %v", err)
 	}
 	var priv wireguard.PrivateKey
 	copy(priv[:], raw)
 	overlay, err := netip.ParseAddr(payload.OverlayAddress)
 	if err != nil {
-		return tunnel.Config{}, nil, fmt.Errorf("agent: payload has a malformed overlay address %q: %w", payload.OverlayAddress, err)
+		return tunnel.Config{}, nil, nil, fmt.Errorf("agent: payload has a malformed overlay address %q: %w", payload.OverlayAddress, err)
 	}
-	current := make(map[wireguard.PublicKey]wireguard.Peer, len(payload.Peers))
+	current = make(map[wireguard.PublicKey]wireguard.Peer, len(payload.Peers))
 	var peers []tunnel.Peer
 	var errs []error
 	for _, p := range payload.Peers {
@@ -89,8 +97,8 @@ func InitialConfig(payload wireguard.CloudInitPayload) (tunnel.Config, map[wireg
 		peers = append(peers, decoded)
 		current[decoded.PublicKey] = p
 	}
-	cfg := tunnel.Config{PrivateKey: priv, OverlayAddress: overlay, ListenPort: wireguard.DefaultListenPort, Peers: peers}
-	return cfg, current, errors.Join(errs...)
+	cfg = tunnel.Config{PrivateKey: priv, OverlayAddress: overlay, ListenPort: wireguard.DefaultListenPort, Peers: peers}
+	return cfg, current, errors.Join(errs...), nil
 }
 
 // Closer is the subset of *tunnel.Tunnel Run needs beyond Tunnel: releasing
@@ -154,9 +162,12 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	cfg, current, err := InitialConfig(payload)
+	cfg, current, skipped, err := InitialConfig(payload)
 	if err != nil {
-		opts.Logf("agent: some initial peers were skipped: %v", err)
+		return fmt.Errorf("agent: initial config: %w", err)
+	}
+	if skipped != nil {
+		opts.Logf("agent: some initial peers were skipped: %v", skipped)
 	}
 	tun, err := bringUp(cfg)
 	if err != nil {
