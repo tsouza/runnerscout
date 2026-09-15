@@ -234,7 +234,7 @@ func (p *Command) reconcileAzureCreation(ctx context.Context, a lifecycle.Alloca
 		return lifecycle.Observation{}, err
 	}
 	for _, resource := range resources {
-		if strings.EqualFold(resource.Type, "Microsoft.Compute/virtualMachines") || strings.EqualFold(resource.Type, "Microsoft.Compute/disks") && (resource.Tags["runnerscout-owner"] != p.Config.Owner || resource.Tags["runnerscout-operation"] != a.ID) {
+		if (strings.EqualFold(resource.Type, "Microsoft.Compute/virtualMachines") || strings.EqualFold(resource.Type, "Microsoft.Compute/disks")) && (resource.Tags["runnerscout-owner"] != p.Config.Owner || resource.Tags["runnerscout-operation"] != a.ID) {
 			receipt, err := p.finishAzureDiskOwnership(ctx, a)
 			if err != nil {
 				return lifecycle.Observation{ResourceID: receipt.ResourceID, Resources: receipt.Resources}, err

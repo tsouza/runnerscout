@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import time
@@ -13,6 +14,18 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 NODE = "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"
+
+
+def expected_crd_count():
+    """The number of CRD kinds api/v1alpha1/register.go declares in its
+    canonical CRDKinds list - read from source rather than duplicated here as
+    a separate literal, since a duplicated CRD count has already drifted
+    silently once when a CRD was added."""
+    register = (ROOT / "api/v1alpha1/register.go").read_text()
+    match = re.search(r"var CRDKinds = \[\]string\{([^}]*)\}", register)
+    if not match:
+        raise RuntimeError("could not find CRDKinds in api/v1alpha1/register.go")
+    return len(re.findall(r'"[^"]+"', match.group(1)))
 
 
 def main():
@@ -43,8 +56,9 @@ def main():
         return process
 
     try:
-        if len(result["schemas"]) != 6:
-            raise RuntimeError("complete six-CRD schema set required")
+        expected = expected_crd_count()
+        if len(result["schemas"]) != expected:
+            raise RuntimeError(f"complete {expected}-CRD schema set required, found {len(result['schemas'])}")
         with tempfile.TemporaryDirectory(prefix=identity + "-") as tmp:
             temp = Path(tmp)
             run("network-create", ["docker", "network", "create", "--internal", "--label", "runnerscout.test=" + identity, identity])

@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -198,6 +199,50 @@ func TestInterruptionRetryAmbiguousRerunBlocksSecondAttemptUntilReconciled(t *te
 	}
 	if gh.rerunCalled != 1 {
 		t.Fatal("a second retry must not be requested while the first is unresolved", gh)
+	}
+}
+
+func TestInterruptionRetryDefinitiveRejectionClosesOutImmediately(t *testing.T) {
+	ctx := context.Background()
+	gh := &fakeGitHubJobs{jobs: []recovery.RESTJob{matchingTerminalJob}, rerunErr: fmt.Errorf("%w: status 422", githubjobs.ErrRerunRejected)}
+	policy := recovery.Policy{Enabled: true, MaxRetries: 2, AcknowledgeRepeatedEffects: true}
+	o, s := retryOperator(t, gh, policy)
+	seedAllocation(t, ctx, s, interruptedAllocation())
+
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if gh.rerunCalled != 1 {
+		t.Fatal("expected exactly one rerun attempt", gh)
+	}
+	_, f, e := o.loadFleet(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := f.PendingReruns[99]; ok {
+		t.Fatal("a definitive rejection must not be parked as ambiguous", f)
+	}
+	if f.RetriesUsedByRun[99] != 0 {
+		t.Fatal("a definitively rejected rerun must not be counted as a used retry", f)
+	}
+	got, e := s.Load(ctx, "rs-test")
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Unlike an ambiguous transport failure - which stays unresolved for
+	// rerunReconciliationPolls passes before self-resolving - a definitive
+	// rejection means GitHub already told us there is nothing to rerun, so
+	// this interruption's evaluation is complete on the very first pass.
+	if !got.RetryProcessed {
+		t.Fatal("a definitive rejection must close out the interruption immediately, not wait on reconciliation", got)
+	}
+
+	// A closed-out allocation is never revisited: no further rerun request.
+	if e := o.processInterruptionRetries(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if gh.rerunCalled != 1 {
+		t.Fatal("a closed-out interruption must not be retried again", gh)
 	}
 }
 

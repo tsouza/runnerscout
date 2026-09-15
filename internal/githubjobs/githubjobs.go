@@ -67,6 +67,14 @@ type attemptJobsResponse struct {
 // non-200 response the same way.
 var ErrAttemptNotFound = errors.New("GitHub reports no such workflow run attempt")
 
+// ErrRerunRejected reports that GitHub received the rerun-failed-jobs
+// request and definitively rejected it (any synchronous non-201 status,
+// e.g. 422 "no failed jobs to rerun"). Unlike a transport error - where
+// GitHub may have accepted the POST before the response was lost, and the
+// outcome stays genuinely unknown - this means the request certainly did
+// not land, so callers must not treat it as ambiguous.
+var ErrRerunRejected = errors.New("GitHub rejected the rerun-failed-jobs request")
+
 // AttemptJobs fetches the jobs recorded for one attempt of one workflow run.
 func (c *Client) AttemptJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]recovery.RESTJob, error) {
 	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs", owner, repo, runID, attempt)
@@ -101,7 +109,7 @@ func (c *Client) RerunFailedJobs(ctx context.Context, owner, repo string, runID 
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
-		return fmt.Errorf("GitHub rerun-failed-jobs request failed with status %d", response.StatusCode)
+		return fmt.Errorf("%w: status %d", ErrRerunRejected, response.StatusCode)
 	}
 	return nil
 }
