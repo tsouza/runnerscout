@@ -1,4 +1,7 @@
-# Explicit image coordinates are required until a verified release is published.
+# Explicit image coordinates are always required - this chart never assumes
+# a default registry or tag, and values.schema.json enforces a non-empty
+# repository. Set these to a published image, e.g.
+# ghcr.io/tsouza/runnerscout:v1.0.0.
 image:
   repository: ""
   tag: ""

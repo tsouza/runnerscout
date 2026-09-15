@@ -179,10 +179,20 @@ jobs:
             helm package charts/runnerscout --destination release-artifacts
           fi
 
+      # Deliberately not `sha256sum -- *`: this directory also holds
+      # runnerscout-image-multiarch.oci.tar (built above, workflow-artifact
+      # only, uploaded for ad hoc workflow_dispatch review - never a
+      # downloadable release asset, per this file's own header and
+      # docs/releases.md's "publish" section: image distribution and
+      # verification go through ghcr.io + cosign instead). A bare `*` glob
+      # previously swept it into checksums.txt anyway, producing a manifest
+      # that promised an asset the `release` job's own `gh release create`
+      # call (below) never attached. This list must name exactly the files
+      # that call attaches, no more.
       - name: Generate SHA256 checksums for every artifact
         working-directory: release-artifacts
         run: |
-          sha256sum -- * > checksums.txt
+          sha256sum -- *.tgz runnerscout-sbom.spdx.json > checksums.txt
           cat checksums.txt
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -346,6 +356,9 @@ jobs:
       # (`--generate-notes`); this repo has no CHANGELOG or release-notes
       # template of its own (checked: none exists), so auto-generation is
       # used as a reasonable default rather than a bespoke convention.
+      # This asset list must name exactly the files the build job's own
+      # "Generate SHA256 checksums for every artifact" step hashes into
+      # checksums.txt (see that step's comment) - keep both in sync.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
