@@ -169,9 +169,19 @@ func (o *Operator) processInterruptionRetries(ctx context.Context) error {
 		if fetchErr == nil {
 			evidence := recovery.Evidence{ScaleSetJobID: a.ScaleSetJobID, RunnerName: a.ID, RunID: a.RunID, Attempt: attempt, ProviderInterrupted: true, Jobs: jobs, RetriesUsed: retriesUsed, RequestPending: stillPending}
 			if j, eligErr := recovery.Eligible(o.Config.Retry, evidence); eligErr == nil {
-				if rerunErr := o.GitHubJobs.RerunFailedJobs(ctx, a.Owner, a.Repo, a.RunID); rerunErr == nil {
+				switch rerunErr := o.GitHubJobs.RerunFailedJobs(ctx, a.Owner, a.Repo, a.RunID); {
+				case rerunErr == nil:
 					f.RetriesUsedByRun[a.RunID] = attempt
-				} else {
+				case errors.Is(rerunErr, githubjobs.ErrRerunRejected):
+					// Definitive: GitHub received and synchronously rejected
+					// this request (e.g. no failed jobs to rerun), so it
+					// certainly did not land and there is nothing left to
+					// retry. Leave the retry budget untouched and don't
+					// park it as ambiguous - RetryProcessed closes this
+					// interruption out below immediately, rather than
+					// waiting rerunReconciliationPolls passes the way a
+					// genuinely ambiguous transport failure must.
+				default:
 					// Ambiguous: GitHub may have accepted this POST before
 					// the transport failed. Guessing either way here would
 					// violate this codebase's definitive-classification

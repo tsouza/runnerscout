@@ -73,13 +73,17 @@ needed, even in project rules" - is what this split implements: `verify`
 and `vulnerability` gate every merge; the other five checks validate
 `main` immediately after each merge instead.
 
-This repo has no distinct release event yet (`release-build.yml` is
-`workflow_dispatch`-only, never automated - see `docs/releases.md`), so
-"prior to releasing" is approximated today as "immediately after merging
-to main," the earliest point after landing where a release could actually
-be cut. Wiring the full suite as an explicit pre-release gate is real,
-separate scope belonging to issue #17 (build a release pipeline that
-blocks regressions and unqualified promotion), not invented here.
+At the time this split was made, the repo had no distinct release event yet
+(`release-build.yml` was `workflow_dispatch`-only, never automated), so
+"prior to releasing" was approximated as "immediately after merging to
+main," the earliest point after landing where a release could actually be
+cut. Wiring the full suite as an explicit pre-release gate was tracked as
+separate scope under issue #17 (build a release pipeline that blocks
+regressions and unqualified promotion) rather than invented here; that
+pipeline now exists and is what `docs/releases.md` describes - a tag push
+runs `preflight`, which requires all seven checks (not just `verify`/
+`vulnerability`) completed and successful against the exact tagged commit,
+closing the gap this section originally accepted as a trade-off.
 
 The trade-off this accepts: a regression the full suite would have caught
 can be live on `main`, however briefly, before the post-merge run flags

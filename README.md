@@ -24,10 +24,12 @@ requirements and ordinary `runs-on` targeting. It can run alongside
 [Actions Runner Controller](https://github.com/actions/actions-runner-controller)
 with separate scale-set ownership.
 
-**Pre-1.0; APIs remain experimental.** Real GitHub-to-VM execution, interruption
+**Pre-1.0; APIs remain experimental.** Real VM creation, interruption reporting
 and cleanup have each been independently qualified against live AWS, Azure and
 GCP spot capacity - see [qualification-real-cloud.md](docs/qualification-real-cloud.md)
-for what that qualification covers and how to re-run it. The controller supports
+for what that qualification covers (and its named gaps, including that real
+GitHub Actions job execution is a separate, larger piece it does not attempt)
+and how to re-run it. The controller supports
 mounted configuration or a named RunnerScaleSet CRD. The Helm chart supports both
 modes; see the [complete CRD example](examples/multicloud/README.md).
 
@@ -83,7 +85,8 @@ spec:
     name: linux-amd64
   budgetRef:
     name: daily
-  # github, maxRunners, provisioningSeconds, maxLifetimeSeconds, suspend: ...
+  suspend: true # unsuspended in step 4, once the rest below is wired up
+  # github, maxRunners, provisioningSeconds, maxLifetimeSeconds: ...
 ```
 
 From here, the controller bounds admission by both `maxRunners` and the

@@ -39,6 +39,24 @@ func TestValidateRejectsNegativeBudget(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsMaxPriceMicrosAboveOverflowCeiling(t *testing.T) {
+	// Without an upper bound, an extreme maxPriceMicros times the maximum
+	// allowed lifetime (21600s) overflows reservationMicros's int64
+	// multiplication and goes negative, which would make the budget gate
+	// wrongly refuse every admission as BudgetExhausted even though the
+	// real budget is not exhausted. Validate must reject the input outright
+	// rather than let that silent overflow happen downstream.
+	cfg := validConfigFixture()
+	cfg.Requirements.MaxPriceMicros = 100_000_000_001
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("maxPriceMicros above the overflow ceiling must fail validation")
+	}
+	cfg.Requirements.MaxPriceMicros = 100_000_000_000
+	if err := cfg.Validate(); err != nil {
+		t.Fatal("maxPriceMicros at the ceiling must remain valid", err)
+	}
+}
+
 func TestReservationMicrosRoundsUpToNeverUnderReserve(t *testing.T) {
 	// 1000 micros/hour for exactly one hour reserves exactly 1000: no
 	// rounding needed when the lifetime is an even multiple of an hour.

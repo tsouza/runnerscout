@@ -69,6 +69,7 @@ spec:
                     type: boolean
                   maxPriceMicros:
                     format: int64
+                    maximum: 100000000000
                     minimum: 1
                     type: integer
                   policy:

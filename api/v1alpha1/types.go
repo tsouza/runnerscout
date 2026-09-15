@@ -84,6 +84,7 @@ type PlacementPolicy struct {
 	// +kubebuilder:validation:MaxItems=64
 	Regions []string `json:"regions"`
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100000000000
 	MaxPriceMicros int64 `json:"maxPriceMicros"`
 	AllowOnDemand  bool  `json:"allowOnDemand"`
 }

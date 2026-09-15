@@ -9,15 +9,13 @@
 # below is what actually makes start order safe regardless of which one ran
 # first.
 #
-# IMPORTANT: installing and enabling this unit alone does not make
-# wireguard-mode networking usable end-to-end. As of this writing no code
-# path in this repository ever assigns
-# lifecycle.Allocation.WireGuardOverlayAddress, so the cloud-init-delivered
-# payload this agent reads has an empty OverlayAddress field, which the
-# agent's LoadPayload step hard-rejects on every boot. This unit gives the
-# agent binary somewhere to run once that separate, tracked gap (see
-# docs/operations.md's wireguard-mode section and issue #16) is closed - it
-# does not close it.
+# Wireguard mode is functionally usable end-to-end: internal/operator
+# assigns each new allocation a unique overlay IP address
+# (lifecycle.Allocation.WireGuardOverlayAddress, issue #16, closed), so a
+# correctly wired-up copy of this unit gets the agent running successfully,
+# not just ready. See docs/operations.md's wireguard-mode section and
+# examples/wireguard-agent/README.md for the authoritative statement of what
+# is and is not usable today.
 
 [Unit]
 Description=runnerscout WireGuard VM-side overlay agent
@@ -45,10 +43,9 @@ Type=simple
 User=runner
 Group=runner
 ExecStart=/usr/local/bin/runnerscout-wireguard-agent -payload /run/runnerscout/wireguard.json
-# LoadPayload's required-field checks currently fail every real allocation
-# (see the [Unit] caveat above) - Restart=on-failure keeps retrying rather
-# than leaving the unit permanently failed, in case a future boot's payload
-# is complete. RestartSec bounds how fast those retries loop.
+# Restart=on-failure keeps retrying rather than leaving the unit permanently
+# failed if the agent exits unexpectedly (e.g. a transient payload read or
+# tunnel setup error). RestartSec bounds how fast those retries loop.
 Restart=on-failure
 RestartSec=5s
 # The runner VM's own retirement/shutdown already tears this process down;

@@ -26,11 +26,19 @@ PR gets fast feedback regardless of size, and a small or docs-only change
 is never charged the cost of a full cloud-adjacent suite just to land.
 The other five checks — `kubernetes-integration`, `analyze` (CodeQL),
 `cloud-emulators`, `chart`, `runtime-image` — are not a merge gate; they
-run automatically on every push to `main`, immediately after a merge, so
-`main` stays continuously and non-bypassably validated. Nobody can skip
-these running on `main`, but a merge is no longer blocked on them first:
-a regression they catch is fixed forward on `main` within roughly the run
-time that check used to add to every PR, rather than never having landed.
+run automatically on every push to `main` that touches anything other than
+`**/*.md` (a docs-only push skips them, since there is nothing for them to
+validate), immediately after a merge, so `main` stays continuously and
+non-bypassably validated for every code-touching change. Nobody can waive
+these by editing a local script, but a merge is no longer blocked on them
+first: a regression they catch is fixed forward on `main` within roughly
+the run time that check used to add to every PR, rather than never having
+landed. A tag pushed for release still requires all seven checks completed
+and successful against its exact commit (see
+[releases.md](releases.md#required-acceptance)) — if `main`'s head is
+currently a docs-only commit, cutting a release needs a further,
+code-touching push first so the five skipped checks run for real against
+the eventual release candidate.
 This is a deliberate trade against the previous all-seven-before-merge
 model — see
 [qualification.background.md](qualification.background.md) for why.

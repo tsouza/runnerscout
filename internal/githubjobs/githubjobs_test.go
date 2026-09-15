@@ -91,7 +91,8 @@ func TestRerunFailedJobsRejectsNonCreatedStatus(t *testing.T) {
 		w.WriteHeader(422)
 		writeJSON(w, map[string]any{"message": "no failed jobs"})
 	})
-	if err := c.RerunFailedJobs(context.Background(), "acme", "widgets", 99); err == nil {
-		t.Fatal("expected error for non-201 response")
+	err := c.RerunFailedJobs(context.Background(), "acme", "widgets", 99)
+	if !errors.Is(err, ErrRerunRejected) {
+		t.Fatal("expected a non-201 response to report ErrRerunRejected", err)
 	}
 }

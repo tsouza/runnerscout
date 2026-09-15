@@ -1,7 +1,8 @@
 # Releases
 
-RunnerScout has no accepted release baseline. Version tags use
-`vMAJOR.MINOR.PATCH`; pre-1.0 APIs remain experimental.
+Version tags use `vMAJOR.MINOR.PATCH`; pre-1.0 APIs remain experimental. A
+`v0.x.y` tag is always released as a GitHub prerelease; `v1.0.0` and later
+never is.
 
 ## Automated pipeline
 
@@ -103,13 +104,14 @@ preflight retains its read-only repository snapshot under ignored `evidence/`
 and does not publish or certify the remaining qualification requirements
 below — those stay human/process steps, not something automation performs.
 
-Before 0.1.0, complete the requested runtime, all six CRDs and worked examples,
-Helm lifecycle, optional networking and provider/retry behavior. Complete a
-full project-wide adversarial critic pass immediately before cutting the
-release, against the final candidate: challenge correctness, DRY, KISS,
-code/document/test consistency, reasoning, unjustified deferrals, contradictions
-and tests that do not prove their claimed behavior. Fix findings and retain
-re-review evidence outside the source tree.
+Every release requires the requested runtime, all six CRDs and worked
+examples, Helm lifecycle, optional networking and provider/retry behavior
+complete and current for the candidate commit. Complete a full project-wide
+critical review immediately before cutting the release, against the final
+candidate: challenge correctness, DRY, KISS, code/document/test consistency,
+reasoning, unjustified deferrals, contradictions and tests that do not prove
+their claimed behavior. Fix findings and retain re-review evidence outside
+the source tree.
 
 Publication requires successful evidence for the exact source commit and artifact
 digests. Missing, skipped, cancelled, stale, failing or inconclusive required

@@ -54,9 +54,17 @@ var ErrExhausted = errors.New("eligible capacity exhausted")
 
 const MaxPriceAge = 5 * time.Minute
 
+// maxPriceMicrosCeiling mirrors api/v1alpha1's
+// PlacementPolicy.MaxPriceMicros kubebuilder Maximum marker (keep both in
+// sync by hand - kubebuilder markers can't reference a Go constant). It
+// exists to keep reservationMicros's maxPriceMicros*maxLifetimeSeconds
+// multiplication (maxLifetimeSeconds itself independently capped at 21600)
+// well clear of int64 overflow, not merely to reject implausible prices.
+const maxPriceMicrosCeiling = 100_000_000_000
+
 func (r Requirements) Validate() error {
-	if r.CPU < 1 || r.MemoryMiB < 1 || r.MaxPriceMicros < 1 {
-		return errors.New("positive cpu, memoryMiB and maxPriceMicros required")
+	if r.CPU < 1 || r.MemoryMiB < 1 || r.MaxPriceMicros < 1 || r.MaxPriceMicros > maxPriceMicrosCeiling {
+		return fmt.Errorf("positive cpu, memoryMiB and maxPriceMicros required, maxPriceMicros must not exceed %d", int64(maxPriceMicrosCeiling))
 	}
 	if r.Architecture != "amd64" && r.Architecture != "arm64" {
 		return errors.New("architecture must be amd64 or arm64")
