@@ -53,7 +53,18 @@ func (p *Command) azureTerminal(ctx context.Context, a lifecycle.Allocation) (bo
 	return terminal, nil
 }
 func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, script string) (lifecycle.Creation, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Unlike this file's other 30-second budgets (inventory GETs, delete
+	// submissions), deploy() below blocks on PollUntilDone for the entire
+	// NIC+VM ARM template deployment to reach a terminal state - a real
+	// deployment routinely takes well over 30 seconds, confirmed live
+	// (a real dispatch's own deployment converged at ~26s, right at that
+	// margin, and a second real dispatch exceeded it outright). A 30s
+	// budget here was making "commitment unknown" - meant for genuine
+	// transport ambiguity - the routine outcome instead, needlessly
+	// relying on Observe-driven reconciliation (or, for the one-shot
+	// qualification harness, the external safety net) to pick up
+	// resources a merely-slow-but-healthy deployment already created.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	if !strings.HasPrefix(strings.ToLower(a.Offering.Image), "/subscriptions/") {
 		return lifecycle.Creation{}, errors.New("Azure requires a pinned managed-image resource ID")
