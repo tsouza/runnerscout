@@ -375,6 +375,52 @@ func TestVersionFlagRunExitsBeforeAnyClusterOrConfigAccess(t *testing.T) {
 	}
 }
 
+// client-go's own library defaults (QPS=5, Burst=10) are sized for a generic
+// client, not this controller's own per-Tick call volume - see issue #165.
+// Defaults must already be raised without requiring an operator to know to
+// pass the new flags.
+func TestKubeClientRateLimitDefaultsAreRaised(t *testing.T) {
+	o, err := parseOptions([]string{"-config=config.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.kubeQPS <= 5 || o.kubeBurst <= 10 {
+		t.Fatal("defaults must exceed client-go's own library defaults", o.kubeQPS, o.kubeBurst)
+	}
+}
+
+func TestKubeClientRateLimitFlagsOverrideDefaults(t *testing.T) {
+	o, err := parseOptions([]string{"-config=config.json", "-kube-client-qps=42.5", "-kube-client-burst=100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.kubeQPS != 42.5 || o.kubeBurst != 100 {
+		t.Fatal("flags did not override defaults", o.kubeQPS, o.kubeBurst)
+	}
+}
+
+func TestKubeClientRateLimitRejectsNonPositiveValues(t *testing.T) {
+	for _, args := range [][]string{
+		{"-config=config.json", "-kube-client-qps=0"},
+		{"-config=config.json", "-kube-client-qps=-1"},
+		{"-config=config.json", "-kube-client-burst=0"},
+		{"-config=config.json", "-kube-client-burst=-1"},
+	} {
+		if _, err := parseOptions(args); err == nil {
+			t.Errorf("accepted non-positive rate limit: %v", args)
+		}
+	}
+}
+
+// -version must bypass every mode-specific validation, including the new
+// rate-limit bounds - the same contract TestVersionFlagBypassesConfigRequirement
+// already establishes for the configuration/mode flags.
+func TestVersionFlagBypassesRateLimitValidation(t *testing.T) {
+	if _, err := parseOptions([]string{"-version", "-kube-client-qps=0"}); err != nil {
+		t.Fatal("-version rejected despite an otherwise-invalid rate limit", err)
+	}
+}
+
 func TestCRDChecksRequireOneExplicitMode(t *testing.T) {
 	for _, args := range [][]string{
 		{"-check-crd"}, {"-config=config.json", "-check-uninstall"},
