@@ -61,6 +61,10 @@ RUNS = [
      "retry.go's bounded-rerun protocol respects MaxRetries=2"),
     ("RetryBound_max3.cfg", "RetryBound.tla", None,
      "retry.go's bounded-rerun protocol respects MaxRetries=3"),
+    ("AdmissionSlot_pre174.cfg", "AdmissionSlot.tla", "EveryTerminalIsReleasable",
+     "issue #174 as it shipped in v1.2.0: TimedOut never released its slot"),
+    ("AdmissionSlot_post175.cfg", "AdmissionSlot.tla", None,
+     "PR #175: both terminal phases release their slot"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)

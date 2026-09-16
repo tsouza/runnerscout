@@ -50,6 +50,8 @@ java -jar spec/.tools/tla2tools.jar -deadlock -cleanup -config spec/<name>.cfg s
 | `BudgetAdmission.tla` | `budget.go`'s admission-gating arithmetic (`spentToday`, the ceiling check) | `ceiling` | Clean (the gate itself is internally consistent) |
 | | | `lockout_witness` | **Violates** `NeverFullyLockedOutWhileIdle` (a real, reachable trade-off: an all-interrupted day can show the ceiling as fully spent while real utilization is zero) |
 | `RetryBound.tla` | `retry.go`'s bounded interruption-rerun protocol | `max1`/`max2`/`max3` | Clean for every value `recovery.go` actually allows (`MaxRetries \in 1..3`) |
+| `AdmissionSlot.tla` | `admission.State`/`fleet.Released`'s per-allocation slot-release discipline (distinct from `BudgetAdmission.tla`'s aggregate spend ceiling) | `pre174` | **Violates** `EveryTerminalIsReleasable` (reproduces issue #174 exactly as it shipped in v1.2.0: a TimedOut allocation had no path back to a usable slot) |
+| | | `post175` | Clean (PR #175: both terminal phases release their slot) |
 
 Every "Violates" row above is a **deliberate** counterexample or witness
 config - see each `.tla` file's own header comment for what it demonstrates
