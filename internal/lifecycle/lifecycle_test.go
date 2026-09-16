@@ -94,19 +94,77 @@ func TestIntentConflictPreventsCloudCall(t *testing.T) {
 		t.Fatal("cloud side effect before durable ownership")
 	}
 }
+
+// A resource that stays unobservable (Known: false) must never make the
+// controller blindly retry creation for the same allocation on its own -
+// it just keeps surfacing an error and waiting. Confirmed absence (Known:
+// true, Exists: false) is a different, more resolved case - see
+// TestConfirmedAbsenceDuringCreatingReleasesTheAllocation below.
 func TestUnknownAbsenceNeverBlindlyCreates(t *testing.T) {
 	c, s, p, now := setup()
 	p.loseResponse = true
 	_ = c.Step(context.Background(), "rs-test")
-	p.exists = false
+	p.unknown = true
 	*now = now.Add(10 * time.Minute)
 	for range 5 {
-		if e := c.Step(context.Background(), "rs-test"); e != nil {
-			t.Fatal(e)
+		if e := c.Step(context.Background(), "rs-test"); e == nil {
+			t.Fatal("an unknown observation must surface as an error, not silently succeed")
 		}
 	}
-	if p.created != 1 || s.a.Phase != l.Creating || s.a.Condition != "LocalProvisioningTimeoutCommitmentUnknown" {
+	if p.created != 1 || s.a.Phase != l.Creating {
 		t.Fatal(s.a)
+	}
+}
+
+// Once Create()'s own attempt is ambiguous (any error other than
+// ErrNoEffect/ErrCapacity with an empty result), the allocation is
+// committed to Creating - but a later Observe can still definitively
+// confirm the resource never existed at all (e.g. a client-side rejection
+// that never reached the cloud API). That confirmation must not park the
+// allocation in Creating forever with no way back: Deleted already means
+// exactly this ("cloud resource confirmed gone"), regardless of Retire, so
+// the allocation releases and a fresh admission cycle can replace it.
+func TestConfirmedAbsenceDuringCreatingReleasesTheAllocation(t *testing.T) {
+	c, s, cloud, _ := setup()
+	cloud.loseResponse = true
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("ambiguous create must surface as an error")
+	}
+	if s.a.Phase != l.Creating || cloud.created != 1 {
+		t.Fatal("expected ambiguous create to leave the allocation in Creating", s.a)
+	}
+	// The create call never actually reached the provider - Observe now
+	// confirms the resource genuinely never existed, well within the
+	// deadline (not an expiry-driven path).
+	cloud.exists = false
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Deleted {
+		t.Fatal("confirmed absence during Creating must not park the allocation forever", s.a)
+	}
+	if cloud.created != 1 {
+		t.Fatal("must never blindly retry creation for the same allocation", cloud.created)
+	}
+}
+
+// The same recovery must apply after the local provisioning deadline has
+// also passed - confirmed absence during Creating is not itself a
+// deadline-driven case, so expiry must not change the outcome.
+func TestConfirmedAbsenceDuringCreatingReleasesTheAllocationAfterExpiry(t *testing.T) {
+	c, s, cloud, now := setup()
+	cloud.loseResponse = true
+	_ = c.Step(context.Background(), "rs-test")
+	cloud.exists = false
+	*now = now.Add(10 * time.Minute)
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Deleted {
+		t.Fatal("confirmed absence during Creating must release even past the deadline", s.a)
+	}
+	if cloud.created != 1 {
+		t.Fatal("must never blindly retry creation for the same allocation", cloud.created)
 	}
 }
 func TestDeadlineInclusiveNoCloudEffect(t *testing.T) {

@@ -356,10 +356,16 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return errors.New("create reconciliation unknown")
 		}
 		if !ob.Exists {
-			a.Condition = "CreateAbsenceNotCommitmentProof"
-			if expired {
-				a.Condition = "LocalProvisioningTimeoutCommitmentUnknown"
-			}
+			// Confirmed absence (Known, !Exists) is a more resolved outcome
+			// than the ambiguity that put this allocation in Creating in
+			// the first place: the resource provably never existed, so
+			// there is nothing to clean up. Deleted already means exactly
+			// this elsewhere in this method - release unconditionally
+			// (independent of Retire or expiry) so a fresh admission cycle
+			// can replace this allocation instead of parking it here
+			// forever with no recovery path.
+			a.Phase = Deleted
+			a.Condition = "CreateConfirmedAbsent"
 			return save()
 		}
 		a.ResourceID = ob.ResourceID
