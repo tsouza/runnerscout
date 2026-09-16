@@ -65,6 +65,12 @@ spec:
             - -github-token-file=/etc/runnerscout/github/token
             {{- end }}
             {{- end }}
+            {{- if .Values.kubeClient.qps }}
+            - {{ printf "-kube-client-qps=%s" .Values.kubeClient.qps | quote }}
+            {{- end }}
+            {{- if .Values.kubeClient.burst }}
+            - {{ printf "-kube-client-burst=%s" .Values.kubeClient.burst | quote }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -17,10 +17,12 @@ type runnerDeregistrar struct {
 }
 
 // DeregisterRunner looks up the claimed runner registration by name (the
-// allocation ID) and removes it. A nil client is a complete no-op: it only
-// happens in tests that construct an Operator without GitHub wiring, never in
-// a real deployment (see New/NewWithCredentials, both of which always receive
-// a real client from cmd/runnerscout).
+// allocation ID) and removes it. A nil client is a complete no-op - New
+// never actually constructs a runnerDeregistrar around a nil client (it
+// leaves Controller.Runners nil instead - see New's own comment), so this
+// case is unreachable through that path today, but the guard is kept as
+// defense in depth for any future or test-only construction of this type
+// directly.
 func (d *runnerDeregistrar) DeregisterRunner(ctx context.Context, id string) error {
 	if d.client == nil {
 		return nil

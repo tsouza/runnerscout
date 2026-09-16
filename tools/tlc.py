@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Runs every TLA+ spec/config pair under spec/ against TLC and checks each
-one's actual outcome (clean vs. invariant violation) against its declared
-expectation below. Not wired into CI: these are hand-written models of
-runnerscout's own domain logic, not a check against the real Go code, so a
-clean run here is not a substitute for `make test` - see spec/README.md.
+one's actual outcome against its declared expectation below: either a clean
+run, or a specific named invariant violation - not just "some invariant
+failed," since a config with multiple listed invariants could have the wrong
+one break and still look superficially like a pass. Not wired into CI: these
+are hand-written models of runnerscout's own domain logic, not a check
+against the real Go code, so a clean run here is not a substitute for
+`make test` - see spec/README.md.
 
 Self-contained: downloads tla2tools.jar into spec/.tools/ on first run if not
 already present there. The download is unpinned (tracks whatever TLC
@@ -23,35 +26,40 @@ TOOLS_DIR = SPEC_DIR / ".tools"
 JAR_PATH = TOOLS_DIR / "tla2tools.jar"
 JAR_URL = "https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar"
 
-# (config file, module file, expect_violation, invariant this run is about)
+# (config file, module file, expected invariant violation or None, description)
 #
-# expect_violation=True entries are deliberate counterexample/witness
-# configs - they exist to prove a gap is real and reachable (or, for
-# *_pending_only/*_buggy/*_unknown_leak, to reproduce an already-fixed
-# historical bug or an explicitly-unsafe design), not to be fixed. See
-# spec/README.md's coverage matrix for what each one means.
+# The third field is None for a config expected to run clean, or the exact
+# invariant name TLC must report as violated - never a bare True/False, so a
+# config listing multiple INVARIANTs (e.g. TypeOK plus a real property) can't
+# silently "pass" by violating the wrong one.
+#
+# A named-violation entry is a deliberate counterexample/witness config - it
+# exists to prove a gap is real and reachable (or, for *_pending_only/*_buggy/
+# *_unknown_leak, to reproduce an already-fixed historical bug or an
+# explicitly-unsafe design), not to be fixed. See spec/README.md's coverage
+# matrix for what each one means.
 RUNS = [
-    ("RunnerRegistration_pending_only.cfg", "RunnerRegistration.tla", True,
+    ("RunnerRegistration_pending_only.cfg", "RunnerRegistration.tla", "NoOrphanedRegistration",
      "PR #163 as it shipped: only Pending->TimedOut deregisters, age-only pruning"),
-    ("RunnerRegistration_all_four.cfg", "RunnerRegistration.tla", False,
+    ("RunnerRegistration_all_four.cfg", "RunnerRegistration.tla", None,
      "PR #168 + the current re-verifying prune design, no unknown leak"),
-    ("RunnerRegistration_unknown_leak.cfg", "RunnerRegistration.tla", True,
+    ("RunnerRegistration_unknown_leak.cfg", "RunnerRegistration.tla", "NoIrrecoverableOrphan",
      "#168 plus an unpatched fifth path plus #161's original age-only pruning"),
-    ("RunnerRegistration_reverifying_prune.cfg", "RunnerRegistration.tla", False,
+    ("RunnerRegistration_reverifying_prune.cfg", "RunnerRegistration.tla", None,
      "same unpatched fifth path, but pruning re-verifies before deleting"),
-    ("TickConcurrency_buggy.cfg", "TickConcurrency.tla", True,
+    ("TickConcurrency_buggy.cfg", "TickConcurrency.tla", "MuReleasedOnlyWhenIdle",
      "pre-#157: an early return could release o.mu with goroutines running"),
-    ("TickConcurrency_fixed.cfg", "TickConcurrency.tla", False,
+    ("TickConcurrency_fixed.cfg", "TickConcurrency.tla", None,
      "PR #157: every path out of Tick's loop joins before releasing o.mu"),
-    ("BudgetAdmission_ceiling.cfg", "BudgetAdmission.tla", False,
+    ("BudgetAdmission_ceiling.cfg", "BudgetAdmission.tla", None,
      "budget.go's admission-gating arithmetic never exceeds the ceiling"),
-    ("BudgetAdmission_lockout_witness.cfg", "BudgetAdmission.tla", True,
+    ("BudgetAdmission_lockout_witness.cfg", "BudgetAdmission.tla", "NeverFullyLockedOutWhileIdle",
      "finding #6: an all-interrupted day can still show the ceiling as full"),
-    ("RetryBound_max1.cfg", "RetryBound.tla", False,
+    ("RetryBound_max1.cfg", "RetryBound.tla", None,
      "retry.go's bounded-rerun protocol respects MaxRetries=1"),
-    ("RetryBound_max2.cfg", "RetryBound.tla", False,
+    ("RetryBound_max2.cfg", "RetryBound.tla", None,
      "retry.go's bounded-rerun protocol respects MaxRetries=2"),
-    ("RetryBound_max3.cfg", "RetryBound.tla", False,
+    ("RetryBound_max3.cfg", "RetryBound.tla", None,
      "retry.go's bounded-rerun protocol respects MaxRetries=3"),
 ]
 
@@ -64,11 +72,23 @@ def ensure_jar() -> pathlib.Path:
         return JAR_PATH
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"fetching {JAR_URL} -> {JAR_PATH}", file=sys.stderr)
-    urllib.request.urlretrieve(JAR_URL, JAR_PATH)
+    # Download to a sibling temp path and rename into place atomically, so an
+    # interrupted download (Ctrl-C, network drop) never leaves a truncated
+    # jar at JAR_PATH that a later run would treat as already-fetched and
+    # silently try to use.
+    partial = JAR_PATH.with_suffix(JAR_PATH.suffix + ".part")
+    with urllib.request.urlopen(JAR_URL, timeout=60) as response, open(partial, "wb") as out:
+        out.write(response.read())
+    partial.rename(JAR_PATH)
     return JAR_PATH
 
 
-def run_one(jar: pathlib.Path, cfg: str, module: str) -> tuple[Optional[bool], str]:
+def run_one(jar: pathlib.Path, cfg: str, module: str) -> tuple[Optional[str], str]:
+    """Returns (violated_invariant_or_None, raw_output). The first element is
+    a sentinel string "<clean>" when TLC reported no violation, or None when
+    neither a violation nor a clean-completion message could be recognized in
+    the output at all (a hard failure - unexpected TLC output shape, a crash,
+    or a timeout)."""
     try:
         result = subprocess.run(
             # -deadlock disables TLC's deadlock check: every spec here is a
@@ -85,30 +105,33 @@ def run_one(jar: pathlib.Path, cfg: str, module: str) -> tuple[Optional[bool], s
         )
     except subprocess.TimeoutExpired:
         return None, f"TLC did not finish within the 120s timeout for {cfg}"
+    except FileNotFoundError as exc:
+        return None, f"could not run java (is a JRE installed and on PATH?): {exc}"
     output = result.stdout + result.stderr
     violated = VIOLATION_RE.search(output)
-    clean = CLEAN_RE.search(output)
     if violated:
-        return True, violated.group(1)
-    if clean:
-        return False, ""
+        return violated.group(1), output
+    if CLEAN_RE.search(output):
+        return "<clean>", output
     return None, output  # neither pattern matched - treat as a hard failure
 
 
 def main() -> int:
     jar = ensure_jar()
     failures = 0
-    for cfg, module, expect_violation, description in RUNS:
+    for cfg, module, expect_invariant, description in RUNS:
         outcome, detail = run_one(jar, cfg, module)
+        expected = expect_invariant or "<clean>"
         if outcome is None:
             print(f"FAIL  {cfg}: TLC produced no recognizable result\n{detail}")
             failures += 1
             continue
-        ok = outcome == expect_violation
+        ok = outcome == expected
         status = "ok" if ok else "FAIL"
-        shape = f"violates {detail}" if outcome else "clean"
+        shape = "clean" if outcome == "<clean>" else f"violates {outcome}"
         print(f"{status}  {cfg} ({module}): {shape} - {description}")
         if not ok:
+            print(f"      expected: {'clean' if expect_invariant is None else 'violates ' + expect_invariant}")
             failures += 1
     print()
     if failures:

@@ -38,6 +38,16 @@ catalog:
 # instead use serviceAccount.annotations and env. No credentials are created.
 credentialSecrets: []
 env: []
+# Kubernetes client-side rate limit for the controller's in-cluster API
+# client. Empty (default, either field independently) leaves the binary's
+# own default in effect for that flag - QPS 20 requests/second, Burst 40,
+# both already well above client-go's library defaults of 5/10 (see
+# docs/operations.md). Set either to override, e.g. to raise the ceiling
+# further under real PR-storm load, or to lower it under a stricter API
+# server rate-limit policy.
+kubeClient:
+  qps: ""
+  burst: ""
 resources:
   requests:
     cpu: 100m

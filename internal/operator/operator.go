@@ -264,7 +264,20 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 			return r.EncodedJITConfig, nil
 		}, NetworkPeers: networkPeers}
 	}
-	o.Controller = &lifecycle.Controller{Store: s, Providers: providers, Now: time.Now, Runners: &runnerDeregistrar{client: g}}
+	// Runners stays nil - not wrapping a runnerDeregistrar around a nil g -
+	// when this Operator has no GitHub client at all (CleanupMode/RecoveryMode,
+	// see internal/configapi/runtime.go: both run Tick without ever opening a
+	// GitHub session, by design). Controller.Runners == nil is the signal both
+	// Controller.deregister and Operator.pruneTerminalAllocations already key
+	// their own nil-checks on; wrapping a nil client here would make that
+	// check permanently unable to see this case, silently defeating both
+	// deregistration and the "never prune without a confirmed answer"
+	// guarantee for every allocation these modes ever touch.
+	var runners lifecycle.RunnerDeregistrar
+	if g != nil {
+		runners = &runnerDeregistrar{client: g}
+	}
+	o.Controller = &lifecycle.Controller{Store: s, Providers: providers, Now: time.Now, Runners: runners}
 	return o
 }
 func (o *Operator) binding() string {
@@ -592,13 +605,18 @@ const (
 	// currently active ones) gets a goroutine, most of which are
 	// near-instant no-ops (Deleted/TimedOut phases return immediately).
 	tickStepConcurrency = 20
-	// terminalRetention bounds how long a Deleted/TimedOut allocation's
-	// ConfigMap record survives past its own TerminalAt before Tick prunes
-	// it - otherwise every terminal record accumulates forever, and
-	// updateAdmission's own o.Store.List(ctx) (see HandleDesiredRunnerCount)
-	// pays an ever-growing per-tick Kubernetes API cost for records that are
-	// all provably inert. A conservative 24h keeps steady-state Store size
-	// bounded to roughly one deployment-day's worth of churn.
+	// terminalRetention bounds how long a Deleted/TimedOut allocation's own
+	// ConfigMap record (one per allocation, in the Store) survives past its
+	// TerminalAt before Tick prunes it - otherwise every terminal record
+	// accumulates forever, and updateAdmission's own o.Store.List(ctx) (see
+	// HandleDesiredRunnerCount) pays an ever-growing per-tick Kubernetes API
+	// cost for records that are all provably inert. A conservative 24h
+	// keeps steady-state Store size bounded to roughly one deployment-day's
+	// worth of churn. This bounds the Store specifically, not the fleet
+	// ConfigMap's own Created/Released/Reserved/Pruned maps, which remain
+	// unbounded by design (see Reserved's own comment) - a real, separate
+	// ceiling (a single ConfigMap's ~1MiB size limit) that pruning does not
+	// address.
 	terminalRetention = 24 * time.Hour
 )
 
@@ -748,31 +766,38 @@ func (o *Operator) Tick(ctx context.Context) error {
 // released only by Reconcile's own zero-demand cohort reset, never by
 // anything keyed off the record's continued existence.
 //
-// Before deleting, each candidate's claimed GitHub runner registration is
-// re-verified/cleared right here - not by trusting a flag some earlier Step
-// call may or may not have set. Persisting such a flag at transition time
-// cannot distinguish "confirmed clear" from "this record predates the flag
-// existing at all," which would permanently strand every terminal record
-// already in the Store the moment this code deploys - a self-inflicted
-// version of exactly the "no periodic reconciliation" gap this whole
-// mechanism exists to close. Re-checking at prune time instead needs no
-// migration and is uniformly correct for every record regardless of when it
-// was created or which Step transition (if any) is the one that reaches
-// Deleted/TimedOut for it: DeregisterRunner is required to no-op once the
-// registration is already gone, so this costs one extra idempotent lookup
-// per record, on an already-rare, already-batched operation (once per
-// record, 24h+ after it went terminal), never a per-tick cost. If Runners
-// is not configured at all, or the verification call itself fails, the
-// record is retained and retried on a later Tick - never deleted without a
-// confirmed answer.
+// Before a record is eligible for deletion, its claimed GitHub runner
+// registration is re-verified/cleared right here - not by trusting a flag
+// some earlier Step call may or may not have set. Persisting such a flag at
+// transition time cannot distinguish "confirmed clear" from "this record
+// predates the flag existing at all," which would permanently strand every
+// terminal record already in the Store the moment this code deploys - a
+// self-inflicted version of exactly the "no periodic reconciliation" gap
+// this whole mechanism exists to close. Re-checking at prune time instead
+// needs no migration and is uniformly correct for every record regardless
+// of when it was created or which Step transition (if any) is the one that
+// reaches Deleted/TimedOut for it: DeregisterRunner is required to no-op
+// once the registration is already gone, so this costs one extra idempotent
+// lookup per record, on an already-rare, already-batched operation (once
+// per record, 24h+ after it went terminal), never a per-tick cost. If
+// Runners is not configured at all, or the verification call itself fails,
+// the record is retained and retried on a later Tick - never deleted
+// without a confirmed answer.
 //
 // Deleting a record's Store entry alone is not enough: fleet.Created never
 // removes this ID (see fleet.Reserved's own comment), so Drained
 // (control.go) would otherwise see this ID's Store record vanish and
 // conclude, forever, that its allocation is unresolved rather than
 // confirmed-clean-and-pruned (issue #170). f.Pruned records the distinction
-// Drained needs, saved once at the end of this call rather than once per
-// deleted record.
+// Drained needs - and it is saved, durably, BEFORE any Store.Delete call
+// below, never after: deleting first and saving f.Pruned once at the end
+// would mean a single failed save after some deletes had already succeeded
+// permanently re-creates issue #170 for exactly those records (their Store
+// entry is already gone, so no future Tick's allocs snapshot will ever
+// contain them again to retry marking Pruned). Saving first means a failed
+// save simply leaves every candidate's Store record intact for a clean
+// retry next Tick - DeregisterRunner's own idempotency means re-verifying
+// them again costs nothing beyond the extra lookups.
 func (o *Operator) pruneTerminalAllocations(ctx context.Context, allocs []lifecycle.Allocation) error {
 	if o.Controller.Runners == nil {
 		return nil
@@ -782,6 +807,7 @@ func (o *Operator) pruneTerminalAllocations(ctx context.Context, allocs []lifecy
 		return e
 	}
 	var failures []error
+	var toDelete []string
 	dirty := false
 	for _, a := range allocs {
 		if a.TerminalAt.IsZero() || time.Since(a.TerminalAt) < terminalRetention {
@@ -794,15 +820,21 @@ func (o *Operator) pruneTerminalAllocations(ctx context.Context, allocs []lifecy
 			failures = append(failures, err)
 			continue
 		}
-		if err := o.Store.Delete(ctx, a.ID); err != nil {
-			failures = append(failures, err)
-			continue
-		}
 		f.Pruned[a.ID] = true
 		dirty = true
+		toDelete = append(toDelete, a.ID)
 	}
 	if dirty {
 		if err := o.saveFleet(ctx, cm, f); err != nil {
+			// Nothing has been deleted yet - every candidate's Store record
+			// is intact, so a clean retry next Tick recovers fully. Deleting
+			// any of them now, with this save unconfirmed, is exactly the
+			// failure mode this ordering exists to avoid.
+			return errors.Join(append(failures, err)...)
+		}
+	}
+	for _, id := range toDelete {
+		if err := o.Store.Delete(ctx, id); err != nil {
 			failures = append(failures, err)
 		}
 	}
