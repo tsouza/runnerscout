@@ -135,11 +135,11 @@ func (c *GCPSkuClient) Observe(ctx context.Context, coreSkuID, ramSkuID string, 
 	if !ok {
 		return Quote{}, errors.New("GCP SKU price observation has no entry for the pinned RAM SKU")
 	}
-	coreDollars, err := gcpSkuUnitPrice(core, gcpCoreUsageUnit, "core")
+	coreDollars, err := gcpSkuUnitPrice(core, gcpCoreUsageUnit)
 	if err != nil {
 		return Quote{}, fmt.Errorf("pinned core SKU: %w", err)
 	}
-	ramDollars, err := gcpSkuUnitPrice(ram, gcpRamUsageUnit, "ram")
+	ramDollars, err := gcpSkuUnitPrice(ram, gcpRamUsageUnit)
 	if err != nil {
 		return Quote{}, fmt.Errorf("pinned RAM SKU: %w", err)
 	}
@@ -244,16 +244,19 @@ func (c *GCPSkuClient) request(ctx context.Context, pageToken string) (*http.Req
 
 // gcpSkuUnitPrice extracts sku's single, currently-effective, USD unit
 // price and re-verifies it actually looks like the role it was pinned for
-// (wantResourceGroupSubstring, matched case-insensitively against
-// category.resourceGroup) - catching the real, human-scale failure mode
-// this design has to guard against: an operator swapping which ID they
-// pasted into coreSkuId vs ramSkuId. It never infers which machine type the
+// by checking wantUsageUnit ("h" for a core SKU, "GiBy.h" for a RAM SKU) -
+// catching the real, human-scale failure mode this design has to guard
+// against: an operator swapping which ID they pasted into coreSkuId vs
+// ramSkuId. A swapped pin resolves to the other role's SKU, whose usage
+// unit never matches what was asked for, regardless of category.
+// category.resourceGroup is deliberately NOT used for this check: for
+// standard machine families (N1, E2, ...) both the Core and RAM SKUs of a
+// family share the family name as resourceGroup (e.g. "N1Standard"), not
+// "Core"/"RAM" - a resourceGroup-substring check would reject correctly
+// pinned SKUs for those families. It never infers which machine type the
 // SKU belongs to; that remains entirely the pinning operator's own,
 // already-completed verification.
-func gcpSkuUnitPrice(sku gcpSku, wantUsageUnit, wantResourceGroupSubstring string) (float64, error) {
-	if !strings.Contains(strings.ToLower(sku.Category.ResourceGroup), wantResourceGroupSubstring) {
-		return 0, fmt.Errorf("resourceGroup %q does not look like a %s SKU", sku.Category.ResourceGroup, wantResourceGroupSubstring)
-	}
+func gcpSkuUnitPrice(sku gcpSku, wantUsageUnit string) (float64, error) {
 	if len(sku.PricingInfo) != 1 {
 		return 0, errors.New("pricing ambiguous: expected exactly one currently effective price")
 	}

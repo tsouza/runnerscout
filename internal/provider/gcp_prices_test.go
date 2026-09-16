@@ -8,7 +8,13 @@ import (
 	"testing"
 )
 
-const gcpSkuPriceFixture = `{"skus":[{"skuId":"core-id","category":{"resourceGroup":"Core"},"pricingInfo":[{"pricingExpression":{"usageUnit":"h","tieredRates":[{"unitPrice":{"currencyCode":"USD","units":"0","nanos":31611000}}]}}]},{"skuId":"ram-id","category":{"resourceGroup":"RAM"},"pricingInfo":[{"pricingExpression":{"usageUnit":"GiBy.h","tieredRates":[{"unitPrice":{"currencyCode":"USD","units":"0","nanos":4237000}}]}}]}]}`
+// resourceGroup uses a realistic standard-machine-family shape
+// ("N1Standard", shared by both the Core and RAM SKU of that family) -
+// internal/prices.gcpSkuUnitPrice deliberately never inspects
+// resourceGroup (see its own doc comment for why), so this is inert to
+// this test's own assertions either way, but keeping it realistic avoids
+// baking in a since-corrected wrong assumption anywhere in the suite.
+const gcpSkuPriceFixture = `{"skus":[{"skuId":"core-id","category":{"resourceGroup":"N1Standard"},"pricingInfo":[{"pricingExpression":{"usageUnit":"h","tieredRates":[{"unitPrice":{"currencyCode":"USD","units":"0","nanos":31611000}}]}}]},{"skuId":"ram-id","category":{"resourceGroup":"N1Standard"},"pricingInfo":[{"pricingExpression":{"usageUnit":"GiBy.h","tieredRates":[{"unitPrice":{"currencyCode":"USD","units":"0","nanos":4237000}}]}}]}]}`
 
 func TestGCPSkuPricesObservesUsingConfiguredBillingAPIKey(t *testing.T) {
 	var gotKey string
