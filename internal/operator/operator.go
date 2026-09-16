@@ -413,7 +413,31 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 		// completed: Completed and cleanup are orthogonal, and gating
 		// release on both left every non-Completed terminal allocation
 		// (interrupted, expired, drained) permanently consuming a slot.
-		if a.Phase == lifecycle.Deleted && !f.Released[a.ID] {
+		//
+		// TimedOut releases the same way, for the same reason (issue #174):
+		// lifecycle.Step proves a TimedOut allocation never held cloud
+		// resources (the Pending phase's own invariant - "pending allocation
+		// retains cloud resources" is a hard error otherwise), so it is just
+		// as provably inert as a Deleted one. Gating this on the separate
+		// zero-demand Cohort reset (admission.State.Reconcile's own
+		// ResetObserved && cleanupConfirmed && active == 0 branch) meant a
+		// batch of TimedOut allocations under sustained real demand -
+		// demand never dropping to 0 - permanently consumed their slots
+		// until a human deleted the fleet ConfigMap by hand: confirmed in
+		// production, v1.2.0, a transient AWS capacity blip took maxRunners
+		// admission to zero indefinitely despite #163/#168's cleanup
+		// running correctly. The zero-demand Cohort reset still exists for
+		// its own purpose (a clean full-fleet-idle rebaseline); it no
+		// longer needs to be the *only* path back to a usable slot for a
+		// provably-terminal outcome. Unlike Deleted, this does trade away
+		// some protection against a persistently-misconfigured provider
+		// retry-looping under sustained demand - accepted because
+		// MaxAttempts already bounds each allocation to a fixed number of
+		// tries, placement.Choose's own Cooldowns already throttle repeated
+		// capacity-classified rejections against the same pool, and
+		// BudgetDailyMicros (docs/capacity-budget.md) remains available as
+		// an explicit spend ceiling for a deployment that wants one.
+		if (a.Phase == lifecycle.Deleted || a.Phase == lifecycle.TimedOut) && !f.Released[a.ID] {
 			if f.Admission.Admitted > 0 {
 				f.Admission.Admitted--
 			}
