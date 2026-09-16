@@ -17,6 +17,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/recovery"
 	"github.com/tsouza/runnerscout/internal/state"
 	"github.com/tsouza/runnerscout/internal/wireguard"
+	"golang.org/x/time/rate"
 	"io"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -251,11 +252,21 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 		}
 		return wireguard.Snapshot(a.ID, a.NetworkProfile, allocations), nil
 	}
+	// jitLimiter is shared across every provider.Command this Operator
+	// builds below - the resource it protects (GitHub's own Actions
+	// Service) is shared regardless of which cloud a given allocation
+	// targets. Burst=1: an isolated Bootstrap call never waits; only a
+	// second call arriving within githubJITRequestInterval of the first
+	// one does. See githubJITRequestInterval's own doc comment for why.
+	jitLimiter := rate.NewLimiter(rate.Every(githubJITRequestInterval), 1)
 	providers := map[string]lifecycle.Provider{}
 	for name, p := range c.Providers {
 		providers[name] = &provider.Command{Config: p, Bootstrap: func(ctx context.Context, id string) (string, error) {
 			if g == nil {
 				return "", errors.New("GitHub JIT client unavailable during recovery")
+			}
+			if e := jitLimiter.Wait(ctx); e != nil {
+				return "", fmt.Errorf("GitHub JIT request throttled: %w", e)
 			}
 			r, e := g.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: id, WorkFolder: "_work"}, c.ScaleSetID)
 			if e != nil {
@@ -635,6 +646,24 @@ const (
 	// currently active ones) gets a goroutine, most of which are
 	// near-instant no-ops (Deleted/TimedOut phases return immediately).
 	tickStepConcurrency = 20
+	// githubJITRequestInterval spaces successive GenerateJitRunnerConfig
+	// calls at least this far apart, even when several allocations are
+	// admitted in the same batch and their Step calls all reach Bootstrap
+	// within the same sub-millisecond window - issue #176: a batch of
+	// concurrently-admitted allocations consistently exhausted all local
+	// attempts with zero GCP API calls ever dispatched (each failed inside
+	// Bootstrap, before ever reaching the GCP provider), while an
+	// allocation admitted in isolation always succeeded. GitHub does not
+	// document a rate limit for this endpoint specifically, but "burst
+	// fails together, solo succeeds" is the signature of a burst-sensitive
+	// backend limit, not a defect in how this codebase issues the request.
+	// This is a mitigation for that evidence, not a confirmed root cause -
+	// #178 means the next recurrence, if any, carries GitHub's own error
+	// text directly instead of requiring this kind of inference. 250ms
+	// costs a 5-allocation batch at most ~1.25s against a 5-minute Step
+	// budget - negligible either way if the real cause turns out to be
+	// something else.
+	githubJITRequestInterval = 250 * time.Millisecond
 	// terminalRetention bounds how long a Deleted/TimedOut allocation's own
 	// ConfigMap record (one per allocation, in the Store) survives past its
 	// TerminalAt before Tick prunes it - otherwise every terminal record
