@@ -36,6 +36,23 @@ type Offering struct {
 	PriceMicros  int64     `json:"priceMicros"`
 	Currency     string    `json:"currency"`
 	ObservedAt   time.Time `json:"observedAt"`
+	// GCPSkuRefs pins this offering's compute-core and RAM charges to exact,
+	// human-verified Cloud Billing Catalog SKU IDs - see
+	// api/v1alpha1.Offering.GCPSkuRefs, which this field mirrors exactly
+	// (internal/configapi/compile.go copies it through unchanged). nil (the
+	// default) means this offering is never touched by
+	// internal/operator.Operator.refreshGCPPrices, regardless of Provider
+	// or internal/operator.Config.GCPPriceRefresh.
+	GCPSkuRefs *GCPSkuRefs `json:"gcpSkuRefs,omitempty"`
+}
+
+// GCPSkuRefs is internal/prices.GCPSkuClient.Observe's exact input shape,
+// carried on an Offering rather than passed as bare strings so a catalog's
+// pinning stays attached to the offering it was verified against - see
+// Offering.GCPSkuRefs.
+type GCPSkuRefs struct {
+	CoreSkuID string `json:"coreSkuId"`
+	RamSkuID  string `json:"ramSkuId"`
 }
 type Catalog struct {
 	Offerings []Offering      `json:"offerings"`

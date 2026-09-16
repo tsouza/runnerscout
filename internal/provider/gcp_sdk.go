@@ -17,7 +17,23 @@ import (
 
 // GCPSDK uses provider-local credentials. Service permits an isolated HTTPS
 // transport in tests; production uses the official Compute endpoint.
-type GCPSDK struct{ Service *compute.Service }
+type GCPSDK struct {
+	Service *compute.Service
+	// BillingAPIKey authenticates internal/prices.GCPSkuClient's Cloud
+	// Billing Catalog API calls (see SkuPrices) - resolved once at
+	// newGCPSDK construction from the "gcp" provider's GCP_BILLING_API_KEY
+	// credential environment entry, never derived from Service's own OAuth2
+	// credential (see credentials.go's GCP_BILLING_API_KEY doc comment for
+	// why these are deliberately separate). Empty for every GCP provider
+	// that never opts into internal/operator.Config.GCPPriceRefresh.
+	BillingAPIKey string
+	// BillingHTTPClient and BillingEndpoint override the Cloud Billing
+	// Catalog API's transport and endpoint for local fixtures only, never
+	// product configuration - mirroring AzureSDK's own
+	// PricesHTTPClient/PricesEndpoint test injection fields.
+	BillingHTTPClient *http.Client
+	BillingEndpoint   string
+}
 
 func (*GCPSDK) String() string   { return "GCP SDK (credentials redacted)" }
 func (*GCPSDK) GoString() string { return "GCP SDK (credentials redacted)" }

@@ -124,6 +124,13 @@ func (r *Runtime) newWorker(resolved Resolved, credentials Credentials, mode Wor
 		}
 		op.AzurePrices = command.Azure.SpotPrices()
 	}
+	if resolved.Config.GCPPriceRefresh {
+		command, ok := op.Controller.Providers["gcp"].(*provider.Command)
+		if !ok || command.GCP == nil || command.GCP.BillingAPIKey == "" {
+			return nil, nil, errors.New(`GCP price refresh requires a configured "gcp" provider with a billing API key`)
+		}
+		op.GCPPrices = command.GCP.SkuPrices()
+	}
 	if resolved.Config.AzureInterruptionQueueURL != "" {
 		command, ok := op.Controller.Providers["azure"].(*provider.Command)
 		if !ok || command.Azure == nil {

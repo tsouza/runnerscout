@@ -107,12 +107,13 @@ signal to check the guess against.
 
 ## Decision
 
-`internal/prices/gcp.go` will not be built. GCP catalog offerings stay on
-static pricing, as they are today, permanently — accepted as this
-project's product decision for issue #2, closing that issue's remaining
-scope rather than leaving it open indefinitely on a hypothetical future
-API change. Two paths that could justify revisiting this were considered
-and explicitly declined:
+A *generic* `internal/prices/gcp.go` - one that maps an arbitrary machine
+type to its SKUs itself - will not be built. GCP catalog offerings stay on
+static pricing by default, permanently — accepted as this project's
+product decision for issue #2, closing that issue's remaining scope rather
+than leaving it open indefinitely on a hypothetical future API change. Two
+paths that could justify revisiting this were considered and explicitly
+declined:
 
 - Waiting for Google to publish a structured, documented, GA field that
   maps a specific Compute Engine machine type and region (zone-level
@@ -131,6 +132,24 @@ and explicitly declined:
 If Google ever publishes the structured field described in the first
 option, revisiting this decision is a small, well-scoped follow-up: this
 document and issue #2 stay as the record of why it wasn't built sooner.
+
+## Why the pinned-SKU capability (issue #143) does not reopen this decision
+
+`internal/prices/gcp.go` was later built, but not as either of the two
+paths declined above: `GCPSkuClient.Observe` takes SKU IDs a human has
+already looked up and verified by hand (the same `services.skus.list`
+pagination and exact-`skuId` matching this investigation itself used - see
+"What was checked" above) and only re-queries their current price. It never
+maps a machine type to a SKU, never pattern-matches a `description` string,
+and never depends on a hand-maintained vCPU/RAM shape table to decide
+*which* SKU applies - the offering's own already-declared `cpu` and
+`memoryMiB` fields (needed regardless of price source, for `placement`'s
+own eligibility checks) are all the arithmetic combining a pinned pair of
+unit prices needs. The classification discipline point still holds
+exactly as written above: this capability adds no inference this codebase
+would have to trust without an authoritative signal to check it against -
+the signal here is the human who pinned the ID, the same signal a static
+catalog price already implicitly relies on today.
 
 This mirrors other places this session's line of work left something
 genuinely undone rather than faked, since resolved with the same

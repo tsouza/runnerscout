@@ -18,6 +18,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/placement"
 	"github.com/tsouza/runnerscout/internal/provider"
 	"github.com/tsouza/runnerscout/internal/recovery"
+	"github.com/tsouza/runnerscout/internal/testutil"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -94,6 +95,64 @@ func TestAzurePricesObserverBuildsFromConfiguredAzureProvider(t *testing.T) {
 	}
 	defer cleanup()
 	observer, err := azurePricesObserver(controller, cfg)
+	if err != nil || observer == nil {
+		t.Fatal("expected a configured observer", observer, err)
+	}
+}
+
+func gcpPriceRefreshConfig(enabled bool, providers map[string]provider.Config, requirementProviders []string) operator.Config {
+	return operator.Config{Name: "test", Namespace: "test", GitHubURL: "https://github.com/tsouza/runnerscout", ScaleSetID: 1, MaxRunners: 2, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Requirements:    placement.Requirements{CPU: 1, MemoryMiB: 1, Architecture: "amd64", MaxPriceMicros: 100, Providers: requirementProviders, Regions: []string{"r"}, Policy: "lowest-price"},
+		Providers:       providers,
+		GCPPriceRefresh: enabled,
+	}
+}
+
+func TestGCPPricesObserverNilWhenDisabled(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(false, map[string]provider.Config{"gcp": {Kind: "gcp", Owner: "test", Project: "project", Subnet: "private"}}, []string{"gcp"})
+	controller := operator.New(cfg, fake.NewClientset(), nil)
+	observer, err := gcpPricesObserver(controller, cfg)
+	if err != nil || observer != nil {
+		t.Fatal("disabled price refresh still built an observer", observer, err)
+	}
+}
+
+func TestGCPPricesObserverRequiresConfiguredGCPProvider(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(true, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	controller := operator.New(cfg, fake.NewClientset(), nil)
+	if observer, err := gcpPricesObserver(controller, cfg); err == nil || observer != nil {
+		t.Fatal("expected an error without a configured \"gcp\" provider", observer, err)
+	}
+}
+
+func TestGCPPricesObserverRequiresBillingAPIKey(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(true, map[string]provider.Config{"gcp": {Kind: "gcp", Owner: "test", Project: "project", Subnet: "private"}}, []string{"gcp"})
+	// No GCP_BILLING_API_KEY supplied - construction of the GCP provider
+	// itself still succeeds (it needs no billing key at all), so this
+	// exercises gcpPricesObserver's own extra check, not provider setup.
+	// GOOGLE_APPLICATION_CREDENTIALS is set to a valid fixture (rather than
+	// left absent) so this test's outcome never depends on whether the host
+	// process happens to have ambient GCP credential environment variables.
+	credentials := map[string]map[string]string{"gcp": {"GOOGLE_APPLICATION_CREDENTIALS": testutil.GCPServiceAccountFixture(t)}}
+	controller, cleanup, err := operator.NewWithCredentials(cfg, fake.NewClientset(), nil, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if observer, err := gcpPricesObserver(controller, cfg); err == nil || observer != nil {
+		t.Fatal("expected an error without a configured billing API key", observer, err)
+	}
+}
+
+func TestGCPPricesObserverBuildsFromConfiguredGCPProvider(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(true, map[string]provider.Config{"gcp": {Kind: "gcp", Owner: "test", Project: "project", Subnet: "private"}}, []string{"gcp"})
+	credentials := map[string]map[string]string{"gcp": {"GCP_BILLING_API_KEY": "fixture-key"}}
+	controller, cleanup, err := operator.NewWithCredentials(cfg, fake.NewClientset(), nil, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	observer, err := gcpPricesObserver(controller, cfg)
 	if err != nil || observer == nil {
 		t.Fatal("expected a configured observer", observer, err)
 	}

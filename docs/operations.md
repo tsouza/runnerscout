@@ -27,12 +27,16 @@ exclusive. Credentials are mounted files; never put values into command argument
 
 Use `catalogPath` to reload a complete JSON price snapshot for new admissions.
 Update that file atomically. Each admitted allocation retains its original snapshot
-and deadline. Setting `awsPriceRefresh`/`azurePriceRefresh` in the config file opts
-into live Spot price observation (AWS EC2, Azure Retail Prices) immediately
-before each admission cycle, refreshing every matching Spot offering's price
-and freshness from the real provider API; GCP has no equivalent live API and
-stays on its static catalog price. None of this discovers new pools - adding
-an offering to the catalog remains a manual, file-based change either way.
+and deadline. Setting `awsPriceRefresh`/`azurePriceRefresh`/`gcpPriceRefresh` in
+the config file (or, in CRD mode, `priceRefresh` on the `CapacityCatalog`) opts
+into live Spot price observation immediately before each admission cycle,
+refreshing every matching offering's price and freshness from the real
+provider API: AWS EC2 and Azure Retail Prices for every matching Spot
+offering, and GCP's Cloud Billing Catalog API only for an offering that also
+carries its own hand-pinned `gcpSkuRefs` (see `docs/prices-gcp.md`) - a GCP
+offering with no `gcpSkuRefs` stays on its static catalog price regardless.
+None of this discovers new pools - adding an offering to the catalog remains
+a manual, file-based (or CRD-applied) change either way.
 Restore the original provider/class configuration if durable fleet binding
 rejects a change; do not delete state to bypass it. Admission stops at 1,000
 retained allocations - no automatic archival exists yet; plan restarts or
