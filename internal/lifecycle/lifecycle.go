@@ -243,12 +243,37 @@ type Controller struct {
 	Store     Store
 	Providers map[string]Provider
 	Now       func() time.Time
-	// Runners deregisters a TimedOut allocation's claimed GitHub runner
-	// registration before the phase transition is persisted (see
-	// RunnerDeregistrar). nil is a complete no-op, matching every other
-	// optional integration point in this codebase (e.g. operator.Operator's
-	// AzureInterruptions) - no allocation's transition is otherwise affected.
+	// Runners deregisters an allocation's claimed GitHub runner registration
+	// before Step persists any Deleted/TimedOut transition (see
+	// RunnerDeregistrar and deregister below). nil is a complete no-op,
+	// matching every other optional integration point in this codebase (e.g.
+	// operator.Operator's AzureInterruptions) - no allocation's transition is
+	// otherwise affected.
 	Runners RunnerDeregistrar
+}
+
+// deregister calls Runners.DeregisterRunner, if configured, before Step
+// persists a Deleted/TimedOut transition. GitHub's scale-set listener
+// protocol registers a claimed runner name at GenerateJitRunnerConfig time -
+// on or before every path that can reach Creating - so every one of Step's
+// four Deleted/TimedOut transitions can be leaving behind a claimed
+// registration, not just the Pending -> TimedOut path: a hard spot
+// interruption or a forced cloud Delete never gives the runner process a
+// graceful shutdown to self-deregister, and even a confirmed-absent Creating
+// outcome can follow a successful registration if the cloud create call
+// itself failed after Bootstrap already succeeded. DeregisterRunner is
+// required to no-op when the registration is already gone, so calling it
+// unconditionally here - regardless of which path is certain to have
+// registered one - costs nothing beyond one extra lookup on an already-rare
+// terminal transition. Every caller must return this error unsaved on
+// failure: persisting the phase transition anyway would strand the orphaned
+// registration permanently, since Step treats Deleted/TimedOut as permanent
+// no-ops from then on.
+func (c *Controller) deregister(ctx context.Context, id string) error {
+	if c.Runners == nil {
+		return nil
+	}
+	return c.Runners.DeregisterRunner(ctx, id)
 }
 
 // Step makes at most one provider operation. A committed Creating intent survives
@@ -272,10 +297,8 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return errors.New("pending allocation retains cloud resources")
 		}
 		if a.Retire || expired || a.Attempts >= a.MaxAttempts {
-			if c.Runners != nil {
-				if err := c.Runners.DeregisterRunner(ctx, a.ID); err != nil {
-					return err
-				}
+			if err := c.deregister(ctx, a.ID); err != nil {
+				return err
 			}
 			a.Phase = TimedOut
 			a.Condition = "LocalProvisioningTimeout"
@@ -398,6 +421,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			// (independent of Retire or expiry) so a fresh admission cycle
 			// can replace this allocation instead of parking it here
 			// forever with no recovery path.
+			if err := c.deregister(ctx, a.ID); err != nil {
+				return err
+			}
 			a.Phase = Deleted
 			a.Condition = "CreateConfirmedAbsent"
 			a.TerminalAt = now
@@ -425,6 +451,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return err
 		}
 		if !ob.Exists {
+			if err := c.deregister(ctx, a.ID); err != nil {
+				return err
+			}
 			a.Phase = Deleted
 			a.Condition = "ResourceAbsentInterruptionUnproven"
 			if ob.Interrupted {
@@ -444,6 +473,9 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return err
 		}
 		if !ob.Exists {
+			if err := c.deregister(ctx, a.ID); err != nil {
+				return err
+			}
 			a.Phase = Deleted
 			a.Condition = "CleanupConfirmed"
 			a.TerminalAt = now

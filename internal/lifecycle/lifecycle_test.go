@@ -235,6 +235,107 @@ func TestTimedOutRetriesDeregistrationUntilConfirmed(t *testing.T) {
 		t.Fatal("must retry deregistration on the next Step and then persist TimedOut", s.a, d)
 	}
 }
+
+// Deregistration must fire on every path into Deleted/TimedOut, not just
+// Pending -> TimedOut: GitHub's scale-set listener registers a claimed
+// runner name at JIT-config time, at or before Creating, so a hard spot
+// interruption or a forced cloud Delete - which never gives the runner
+// process a graceful shutdown to self-deregister - can equally strand a
+// registration.
+func TestSpotInterruptionDeregistersClaimedRunner(t *testing.T) {
+	c, s, cloud, _ := setup()
+	d := &deregistrar{}
+	c.Runners = d
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Running {
+		t.Fatal("expected Running before interruption", s.a)
+	}
+	cloud.exists = false
+	cloud.interrupted = true
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if d.calls != 1 || d.id != "rs-test" {
+		t.Fatal("must deregister the claimed runner on a confirmed interruption", d)
+	}
+	if s.a.Phase != l.Deleted {
+		t.Fatal(s.a)
+	}
+}
+
+func TestSpotInterruptionRetriesDeregistrationUntilConfirmed(t *testing.T) {
+	c, s, cloud, _ := setup()
+	d := &deregistrar{fail: true}
+	c.Runners = d
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	cloud.exists = false
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("a failed deregistration must surface as an error")
+	}
+	if s.a.Phase != l.Running || d.calls != 1 {
+		t.Fatal("must not persist Deleted over an unconfirmed orphaned registration", s.a)
+	}
+	d.fail = false
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Deleted || d.calls != 2 {
+		t.Fatal("must retry deregistration on the next Step and then persist Deleted", s.a, d)
+	}
+}
+
+func TestDeletingCleanupConfirmedDeregistersClaimedRunner(t *testing.T) {
+	c, s, cloud, _ := setup()
+	d := &deregistrar{}
+	c.Runners = d
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	s.a.Retire = true
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Deleting {
+		t.Fatal("expected Deleting before cleanup confirmation", s.a)
+	}
+	cloud.exists = false
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if d.calls != 1 || d.id != "rs-test" {
+		t.Fatal("must deregister the claimed runner once normal cleanup is confirmed", d)
+	}
+	if s.a.Phase != l.Deleted {
+		t.Fatal(s.a)
+	}
+}
+
+func TestCreateConfirmedAbsentDeregistersClaimedRunner(t *testing.T) {
+	c, s, cloud, _ := setup()
+	d := &deregistrar{}
+	c.Runners = d
+	cloud.loseResponse = true
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("ambiguous create must surface as an error")
+	}
+	if s.a.Phase != l.Creating {
+		t.Fatal(s.a)
+	}
+	cloud.exists = false
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if d.calls != 1 || d.id != "rs-test" {
+		t.Fatal("must deregister the claimed runner even on a confirmed-absent create", d)
+	}
+	if s.a.Phase != l.Deleted {
+		t.Fatal(s.a)
+	}
+}
 func TestCapacityRejectionKeepsDeadline(t *testing.T) {
 	c, s, p, _ := setup()
 	deadline := s.a.Deadline
