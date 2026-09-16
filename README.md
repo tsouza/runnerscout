@@ -114,6 +114,8 @@ make build
 
 `make emulators` runs isolated AWS/Azure API checks on a Linux Docker host.
 Emulators do not execute real cloud VMs or establish live-provider support.
+GCP has no emulator tier - see [emulators.md](docs/emulators.md) for what
+covers it instead and why.
 
 ## Contribute
 
