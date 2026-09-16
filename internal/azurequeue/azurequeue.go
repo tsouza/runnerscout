@@ -7,12 +7,14 @@
 // topic or its event subscription - provisioning that delivery path is a
 // human/install-doc responsibility, not this client's or the controller's
 // (see docs/azure-interruption-delivery.md). It never imports
-// internal/operator, internal/provider or internal/lifecycle, and it never
-// correlates a returned resource ID against a specific RunnerScout
-// allocation - mirroring internal/azureevents' own dependency-free,
-// single-purpose style. Wiring a real caller that constructs a Client and
-// feeds its Result values into a provider Observation remains a separate,
-// later decision.
+// internal/lifecycle directly, and it never correlates a returned resource
+// ID against a specific RunnerScout allocation itself - mirroring
+// internal/azureevents' own dependency-free, single-purpose style.
+// internal/provider.AzureSDK.InterruptionQueue constructs a real Client,
+// and internal/operator polls it once per Tick cycle
+// (internal/operator/azure_interruptions.go), feeding its Result values
+// into azureevents.ParsePreemptionEvent and the resource-ID correlation in
+// internal/provider's own azureConfirmedPreemption.
 package azurequeue
 
 import (

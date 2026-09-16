@@ -24,9 +24,9 @@ requirements and ordinary `runs-on` targeting. It can run alongside
 [Actions Runner Controller](https://github.com/actions/actions-runner-controller)
 with separate scale-set ownership.
 
-**Pre-1.0; APIs remain experimental.** Real VM creation, interruption reporting
-and cleanup have each been independently qualified against live AWS, Azure and
-GCP spot capacity - see [qualification-real-cloud.md](docs/qualification-real-cloud.md)
+Real VM creation, interruption reporting and cleanup have each been
+independently qualified against live AWS, Azure and GCP spot capacity - see
+[qualification-real-cloud.md](docs/qualification-real-cloud.md)
 for what that qualification covers (and its named gaps, including that real
 GitHub Actions job execution is a separate, larger piece it does not attempt)
 and how to re-run it. The controller supports

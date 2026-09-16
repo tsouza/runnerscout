@@ -178,6 +178,10 @@ Named gaps, not covered by this piece:
 - **WireGuard networking.** The resource graph uses `separate` mode - this
   harness does not exercise wireguard mode, which is otherwise functionally
   usable end-to-end (see [operations.md](operations.md)).
+- **Budget enforcement.** The resource graph has no `CapacityBudget` or
+  `budgetRef` - this harness does not exercise the daily spend ceiling,
+  which has its own separate qualification surface (see
+  [capacity-budget.md](capacity-budget.md)).
 
 ## Azure
 
@@ -280,6 +284,10 @@ Named gaps, not covered by this piece:
 - **WireGuard networking.** The resource graph uses `separate` mode - this
   harness does not exercise wireguard mode, which is otherwise functionally
   usable end-to-end (see [operations.md](operations.md)).
+- **Budget enforcement.** The resource graph has no `CapacityBudget` or
+  `budgetRef` - this harness does not exercise the daily spend ceiling,
+  which has its own separate qualification surface (see
+  [capacity-budget.md](capacity-budget.md)).
 - **Azure's `-1` "no price cap" sentinel.** `azure_realcloud_test.go` sets
   `Requirements.MaxPriceMicros = -1_000_000` directly on a hand-built
   Allocation to mean "no cap" (see
@@ -404,6 +412,10 @@ Named gaps, not covered by this piece:
 - **WireGuard networking.** The resource graph uses `separate` mode - this
   harness does not exercise wireguard mode, which is otherwise functionally
   usable end-to-end (see [operations.md](operations.md)).
+- **Budget enforcement.** The resource graph has no `CapacityBudget` or
+  `budgetRef` - this harness does not exercise the daily spend ceiling,
+  which has its own separate qualification surface (see
+  [capacity-budget.md](capacity-budget.md)).
 
 See [e2e-qualification.background.md](e2e-qualification.background.md) for
 the reasoning behind the design choices above, including the local-runbook

@@ -39,8 +39,9 @@ None of this discovers new pools - adding an offering to the catalog remains
 a manual, file-based (or CRD-applied) change either way.
 Restore the original provider/class configuration if durable fleet binding
 rejects a change; do not delete state to bypass it. Admission stops at 1,000
-retained allocations - no automatic archival exists yet. This experimental
-runtime is not yet suitable for unattended production.
+retained allocations - no automatic archival exists yet; plan restarts or
+reduce retention pressure well before a long-running unattended deployment
+approaches that ceiling.
 
 For local Kubernetes qualification, create a dedicated kind v0.33.0 cluster using
 kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5, set `RUNNERSCOUT_TEST_KUBECONFIG` to its explicit kubeconfig,
@@ -110,7 +111,7 @@ An untagged or foreign disk is never adopted from its name; restore authoritativ
 ownership evidence or investigate it before retiring the allocation.
 
 Run the CRD controller inside the cluster with
-`runnerscout -scale-set=build -namespace=runnerscout`. Install the five schemas
+`runnerscout -scale-set=build -namespace=runnerscout`. Install the six schemas
 under `config/crd/bases/` and create the referenced namespaced resources first.
 This mode reads GitHub and provider credentials from their named Secret
 references; mounted configuration and GitHub authentication flags are mutually
