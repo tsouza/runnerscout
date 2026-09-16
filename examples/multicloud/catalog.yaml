@@ -100,3 +100,9 @@ spec:
     aws: false
     azure: false
     gcp: false
+  # Opts every AWS/Azure Spot offering above into live price observation on
+  # each admission cycle (see docs/architecture.md and
+  # internal/operator/prices.go).
+  priceRefresh:
+    aws: true
+    azure: true

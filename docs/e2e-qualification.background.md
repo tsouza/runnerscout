@@ -217,18 +217,16 @@ does automatically on every run.
 
 ## Why `dispatch-and-wait-<provider>.sh` re-renders the CapacityCatalog immediately before dispatch
 
-`internal/placement.MaxPriceAge` is five minutes, and CRD-driven mode has
-no equivalent of `operator.Config.AWSPriceRefresh` - that flag is read only
-by `cmd/runnerscout`'s mounted-JSON path
-(`internal/configapi/runtime.go:112` checks `resolved.Config.AWSPriceRefresh`,
-but nothing in `internal/configapi/compile.go` or `api/v1alpha1/types.go`
-ever sets it from any CRD field). This was verified by reading both files
-directly while designing the AWS piece, not assumed by analogy with AWS's
-mounted-config path, and applies identically to Azure and GCP - CRD-driven
-mode has no per-cloud carve-out here at all. A CRD-driven `CapacityCatalog`
-is therefore always a static snapshot: whatever `observedAt` timestamp was
-in the manifest at `kubectl apply` time is what it stays until something
-re-applies it. If a bring-up script rendered the catalog once and an
+`internal/placement.MaxPriceAge` is five minutes. CRD-driven mode gained a
+`CapacityCatalogSpec.priceRefresh` field in issue #143 that can opt a
+catalog's AWS/Azure offerings into the same live refresh
+`operator.Config.AWSPriceRefresh`/`AzurePriceRefresh` already gave
+`cmd/runnerscout`'s mounted-JSON path - but none of
+`tools/e2e/manifests/capacity-catalog*.yaml.tmpl` sets it (verified by
+reading all three templates directly, not assumed), so this harness's own
+rendered `CapacityCatalog` is still always a static snapshot in practice:
+whatever `observedAt` timestamp was in the manifest at `kubectl apply` time
+is what it stays until something re-applies it. If a bring-up script rendered the catalog once and an
 operator then took several minutes bringing up the rest of the graph,
 waiting for `Ready`, and only then ran the dispatch-and-wait script, the
 price could easily have gone stale before the controller ever had a chance

@@ -128,8 +128,15 @@ func Compile(s Snapshot) (Resolved, error) {
 	}
 	r, p, limits := s.Class.Spec.Resources, s.Class.Spec.Placement, s.ScaleSet.Spec
 	cfg := operator.Config{Name: s.ScaleSet.Name, Namespace: ns, GitHubURL: limits.GitHub.URL, ScaleSetID: limits.GitHub.ScaleSetID, MaxRunners: limits.MaxRunners, ProvisioningSeconds: limits.ProvisioningSeconds, MaxLifetimeSeconds: limits.MaxLifetimeSeconds, Providers: providers, NetworkProfile: networkProfile, NetworkOverlayCIDRs: overlayCIDRs,
-		Requirements: placement.Requirements{CPU: r.CPU, MemoryMiB: r.MemoryMiB, Architecture: r.Architecture, Vendor: r.Vendor, Capabilities: slices.Clone(r.Capabilities), Providers: names, Regions: slices.Clone(p.Regions), MaxPriceMicros: p.MaxPriceMicros, AllowOnDemand: p.AllowOnDemand, Policy: p.Policy},
-		Retry:        recovery.Policy{Enabled: s.Class.Spec.Retry.Enabled, MaxRetries: s.Class.Spec.Retry.MaxRetries, AcknowledgeRepeatedEffects: s.Class.Spec.Retry.AcknowledgeRepeatedEffects}}
+		// AWSPriceRefresh/AzurePriceRefresh mirror the mounted-JSON config's
+		// own top-level flags of the same name, read here from the
+		// catalog's PriceRefresh map instead - see
+		// api/v1alpha1.CapacityCatalogSpec.PriceRefresh's own doc comment
+		// for why that's the catalog rather than the class or scale set.
+		AWSPriceRefresh:   s.Catalog.Spec.PriceRefresh["aws"],
+		AzurePriceRefresh: s.Catalog.Spec.PriceRefresh["azure"],
+		Requirements:      placement.Requirements{CPU: r.CPU, MemoryMiB: r.MemoryMiB, Architecture: r.Architecture, Vendor: r.Vendor, Capabilities: slices.Clone(r.Capabilities), Providers: names, Regions: slices.Clone(p.Regions), MaxPriceMicros: p.MaxPriceMicros, AllowOnDemand: p.AllowOnDemand, Policy: p.Policy},
+		Retry:             recovery.Policy{Enabled: s.Class.Spec.Retry.Enabled, MaxRetries: s.Class.Spec.Retry.MaxRetries, AcknowledgeRepeatedEffects: s.Class.Spec.Retry.AcknowledgeRepeatedEffects}}
 	cfg.Catalog.Complete = make(map[string]bool)
 	for name, complete := range s.Catalog.Spec.Complete {
 		cfg.Catalog.Complete[name] = complete

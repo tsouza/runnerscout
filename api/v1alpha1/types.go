@@ -192,6 +192,17 @@ type CapacityCatalogSpec struct {
 	// +kubebuilder:validation:MaxItems=1000
 	Offerings []Offering      `json:"offerings"`
 	Complete  map[string]bool `json:"complete"`
+	// PriceRefresh opts specific providers in this catalog into live spot
+	// price observation on every admission cycle - the CRD-mode equivalent
+	// of the mounted-JSON operator.Config.AWSPriceRefresh/AzurePriceRefresh
+	// flags. Keyed by provider name ("aws" or "azure"), exactly like
+	// Complete above - catalog-level rather than per-offering, since
+	// neither refresh path this drives (Operator.refreshAWSPrices/
+	// refreshAzurePrices) is selective by individual offering: enabling a
+	// provider here refreshes every eligible offering from that provider in
+	// this catalog. Absent or false for a provider leaves that provider's
+	// offerings on their static PriceMicros unchanged.
+	PriceRefresh map[string]bool `json:"priceRefresh,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -269,6 +269,29 @@ func TestCompileStaleCatalogAllowsRecoveryButNotAdmission(t *testing.T) {
 	}
 }
 
+func TestCompileWiresPriceRefreshFromCatalog(t *testing.T) {
+	s := fixture()
+	s.Catalog.Spec.PriceRefresh = map[string]bool{"aws": true, "azure": true}
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Config.AWSPriceRefresh || !r.Config.AzurePriceRefresh {
+		t.Fatalf("catalog PriceRefresh not wired onto Config: %+v", r.Config)
+	}
+}
+
+func TestCompileLeavesPriceRefreshFalseWhenAbsentFromCatalog(t *testing.T) {
+	s := fixture()
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.AWSPriceRefresh || r.Config.AzurePriceRefresh {
+		t.Fatalf("PriceRefresh defaulted true without any catalog entry: %+v", r.Config)
+	}
+}
+
 func TestCompileNetworkMappingsRequireIsolationAndCoverage(t *testing.T) {
 	base := fixture()
 	base.Class.Spec.NetworkRef = &api.LocalReference{Name: "private"}
