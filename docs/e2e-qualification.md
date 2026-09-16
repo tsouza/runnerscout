@@ -179,9 +179,10 @@ Named gaps, not covered by this piece:
   harness does not exercise wireguard mode, which is otherwise functionally
   usable end-to-end (see [operations.md](operations.md)).
 - **Budget enforcement.** The resource graph has no `CapacityBudget` or
-  `budgetRef` - this harness does not exercise the daily spend ceiling,
-  which has its own separate qualification surface (see
-  [capacity-budget.md](capacity-budget.md)).
+  `budgetRef` - this harness does not exercise the daily spend ceiling
+  (see [capacity-budget.md](capacity-budget.md) for what it bounds). It has
+  unit test coverage only; no live-cloud qualification surface exists for
+  it yet.
 
 ## Azure
 
@@ -285,9 +286,10 @@ Named gaps, not covered by this piece:
   harness does not exercise wireguard mode, which is otherwise functionally
   usable end-to-end (see [operations.md](operations.md)).
 - **Budget enforcement.** The resource graph has no `CapacityBudget` or
-  `budgetRef` - this harness does not exercise the daily spend ceiling,
-  which has its own separate qualification surface (see
-  [capacity-budget.md](capacity-budget.md)).
+  `budgetRef` - this harness does not exercise the daily spend ceiling
+  (see [capacity-budget.md](capacity-budget.md) for what it bounds). It has
+  unit test coverage only; no live-cloud qualification surface exists for
+  it yet.
 - **Azure's `-1` "no price cap" sentinel.** `azure_realcloud_test.go` sets
   `Requirements.MaxPriceMicros = -1_000_000` directly on a hand-built
   Allocation to mean "no cap" (see
@@ -413,9 +415,10 @@ Named gaps, not covered by this piece:
   harness does not exercise wireguard mode, which is otherwise functionally
   usable end-to-end (see [operations.md](operations.md)).
 - **Budget enforcement.** The resource graph has no `CapacityBudget` or
-  `budgetRef` - this harness does not exercise the daily spend ceiling,
-  which has its own separate qualification surface (see
-  [capacity-budget.md](capacity-budget.md)).
+  `budgetRef` - this harness does not exercise the daily spend ceiling
+  (see [capacity-budget.md](capacity-budget.md) for what it bounds). It has
+  unit test coverage only; no live-cloud qualification surface exists for
+  it yet.
 
 See [e2e-qualification.background.md](e2e-qualification.background.md) for
 the reasoning behind the design choices above, including the local-runbook
