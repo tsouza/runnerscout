@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -46,6 +47,38 @@ func TestAttemptJobsParsesRESTIdentity(t *testing.T) {
 		t.Fatal("job fields not mapped correctly", want)
 	}
 }
+
+// GitHub paginates this endpoint at 30 jobs per page by default. A matrix
+// build with 31+ jobs must not silently truncate before reaching the job
+// matching an interrupted runner.
+func TestAttemptJobsPaginatesBeyondFirstPage(t *testing.T) {
+	const total = 35
+	var sawPages []string
+	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
+		sawPages = append(sawPages, r.URL.RawQuery)
+		page := 1
+		if p := r.URL.Query().Get("page"); p != "" {
+			page, _ = strconv.Atoi(p)
+		}
+		var jobs []any
+		start := (page - 1) * 30
+		for i := start; i < start+30 && i < total; i++ {
+			jobs = append(jobs, map[string]any{"id": int64(i + 1), "run_id": 99, "run_attempt": 2, "runner_name": "rs-a", "status": "completed", "conclusion": "success"})
+		}
+		writeJSON(w, map[string]any{"total_count": total, "jobs": jobs})
+	})
+	jobs, err := c.AttemptJobs(context.Background(), "acme", "widgets", 99, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != total {
+		t.Fatalf("expected all %d jobs across pages, got %d (pages requested: %v)", total, len(jobs), sawPages)
+	}
+	if len(sawPages) < 2 {
+		t.Fatalf("expected more than one page request for %d jobs, got %v", total, sawPages)
+	}
+}
+
 func TestAttemptJobsRejectsNonOKStatus(t *testing.T) {
 	c := fixture(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
