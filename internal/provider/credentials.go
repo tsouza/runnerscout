@@ -15,7 +15,13 @@ import (
 var credentialVariables = map[string][]string{
 	"aws":   {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN"},
 	"azure": {"AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_FEDERATED_TOKEN_FILE", "AZURE_CLIENT_SECRET", "AZURE_CLIENT_CERTIFICATE_PATH", "AZURE_CLIENT_CERTIFICATE_PASSWORD", "AZURE_CLIENT_SEND_CERTIFICATE_CHAIN"},
-	"gcp":   {"GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"},
+	// GCP_BILLING_API_KEY authenticates only internal/prices.GCPSkuClient's
+	// Cloud Billing Catalog API calls (see GCPSDK.SkuPrices) - a distinct
+	// static key, never the OAuth2 credential the other two entries resolve
+	// for VM provisioning. See docs/prices-gcp.md for why: the Catalog
+	// API's public SKU data is documented as requiring an API key, not an
+	// OAuth2 access token (https://docs.cloud.google.com/billing/docs/how-to/get-pricing-information-api).
+	"gcp": {"GOOGLE_APPLICATION_CREDENTIALS", "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE", "GCP_BILLING_API_KEY"},
 }
 
 // CredentialVariable is shared by CRD validation and the execution boundary.

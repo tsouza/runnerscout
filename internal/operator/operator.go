@@ -58,6 +58,18 @@ type Config struct {
 	// false so existing deployments never start making live Azure API
 	// calls without an explicit choice to do so.
 	AzurePriceRefresh bool `json:"azurePriceRefresh,omitempty"`
+	// GCPPriceRefresh opts into live Cloud Billing Catalog API price
+	// observation on every admission cycle, using the "gcp" entry in
+	// Providers for its billing API key. Unlike AWSPriceRefresh/
+	// AzurePriceRefresh, enabling this alone refreshes nothing: it only
+	// permits refreshGCPPrices to observe offerings that also carry their
+	// own placement.Offering.GCPSkuRefs (see docs/prices-gcp.md) - there is
+	// no generic GCP live-price discovery this flag could opt every GCP
+	// offering into (see docs/prices-gcp.background.md). It defaults to
+	// false so existing deployments never start making live Cloud Billing
+	// API calls without an explicit choice to do so, exactly like
+	// AWSPriceRefresh/AzurePriceRefresh above.
+	GCPPriceRefresh bool `json:"gcpPriceRefresh,omitempty"`
 	// AzureInterruptionQueueURL opts into live Azure Storage Queue polling
 	// for spot interruption delivery on every Tick cycle, using the "azure"
 	// entry in Providers for credentials (internal/provider.AzureSDK's own
@@ -192,6 +204,7 @@ type Operator struct {
 	GitHubJobs  githubJobsClient
 	AWSPrices   awsPriceObserver
 	AzurePrices azurePriceObserver
+	GCPPrices   gcpPriceObserver
 	// AzureInterruptions polls one Azure Storage Queue for confirmed spot
 	// preemptions, once per Tick cycle (see pollAzureInterruptions and
 	// applyAzureInterruptions in azure_interruptions.go) - never per
@@ -435,6 +448,7 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 	if e == nil {
 		catalog = o.refreshAWSPrices(ctx, catalog)
 		catalog = o.refreshAzurePrices(ctx, catalog)
+		catalog = o.refreshGCPPrices(ctx, catalog)
 	}
 	if n > 0 {
 		if _, e = placement.Choose(time.Now(), o.Config.Requirements, catalog, nil); e != nil {

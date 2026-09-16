@@ -186,12 +186,46 @@ type Offering struct {
 	// +kubebuilder:validation:Enum=USD
 	Currency   string      `json:"currency"`
 	ObservedAt metav1.Time `json:"observedAt"`
+	// GCPSkuRefs pins the exact Cloud Billing Catalog SKU IDs a human has
+	// already identified as this offering's compute-core and RAM charges
+	// (see docs/prices-gcp.md). The controller only ever re-queries the
+	// current price of these exact, already-known SKU IDs - it never
+	// infers or guesses a machine-type-to-SKU mapping (see
+	// docs/prices-gcp.background.md for why that's a deliberately rejected
+	// design). It is read only when Provider is "gcp" and the catalog's
+	// PriceRefresh["gcp"] is true; nil (the default) leaves this offering
+	// on its static PriceMicros exactly as before this field existed.
+	GCPSkuRefs *GCPSkuRefs `json:"gcpSkuRefs,omitempty"`
+}
+
+// GCPSkuRefs is a hand-verified pinning of one offering's compute-core and
+// RAM billing components to their exact Cloud Billing Catalog SKU IDs - see
+// Offering.GCPSkuRefs.
+type GCPSkuRefs struct {
+	// +kubebuilder:validation:MinLength=1
+	CoreSkuID string `json:"coreSkuId"`
+	// +kubebuilder:validation:MinLength=1
+	RamSkuID string `json:"ramSkuId"`
 }
 
 type CapacityCatalogSpec struct {
 	// +kubebuilder:validation:MaxItems=1000
 	Offerings []Offering      `json:"offerings"`
 	Complete  map[string]bool `json:"complete"`
+	// PriceRefresh opts specific providers in this catalog into live spot
+	// price observation on every admission cycle - the CRD-mode equivalent
+	// of the mounted-JSON operator.Config.AWSPriceRefresh/AzurePriceRefresh/
+	// GCPPriceRefresh flags. Keyed by provider name ("aws", "azure" or
+	// "gcp"), exactly like Complete above - catalog-level rather than
+	// per-offering, since none of the refresh paths this drives
+	// (Operator.refreshAWSPrices/refreshAzurePrices/refreshGCPPrices) is
+	// selective by individual offering: enabling a provider here refreshes
+	// every eligible offering from that provider in this catalog. A "gcp"
+	// entry additionally requires each offering to carry its own
+	// GCPSkuRefs (see Offering.GCPSkuRefs) - this map alone never triggers
+	// a GCP price lookup by itself. Absent or false for a provider leaves
+	// that provider's offerings on their static PriceMicros unchanged.
+	PriceRefresh map[string]bool `json:"priceRefresh,omitempty"`
 }
 
 // +kubebuilder:object:root=true

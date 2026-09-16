@@ -81,6 +81,13 @@ spec:
     priceMicros: 10000
     currency: USD
     observedAt: '2000-01-01T00:00:00Z'
+    # Illustrative placeholders. Replace with the exact Cloud Billing
+    # Catalog SKU IDs you've hand-verified correspond to e2-standard-2's
+    # Core and RAM charges in us-central1 (see docs/prices-gcp.md) - never
+    # guess these from the machine type.
+    gcpSkuRefs:
+      coreSkuId: REPLACE-WITH-VERIFIED-CORE-SKU-ID
+      ramSkuId: REPLACE-WITH-VERIFIED-RAM-SKU-ID
   - id: gcp-ondemand
     provider: gcp
     region: us-central1
@@ -99,4 +106,15 @@ spec:
   complete:
     aws: false
     azure: false
+    gcp: false
+  # Opts every AWS/Azure Spot offering above into live price observation on
+  # each admission cycle (see docs/architecture.md and
+  # internal/operator/prices.go). GCP is left false here: enabling it also
+  # requires its own GCP_BILLING_API_KEY provider credential (see
+  # docs/prices-gcp.md), which this example's providers.yaml/README does
+  # not provision - set it to true only after adding that credential and
+  # verifying the gcpSkuRefs above against your own project's SKUs.
+  priceRefresh:
+    aws: true
+    azure: true
     gcp: false

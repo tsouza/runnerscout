@@ -181,6 +181,25 @@ func azurePricesObserver(controller *operator.Operator, cfg operator.Config) (*p
 	return command.Azure.SpotPrices(), nil
 }
 
+// gcpPricesObserver builds a live Cloud Billing Catalog API price observer,
+// mirroring awsPricesObserver/azurePricesObserver: nil unless the operator
+// explicitly opts in via cfg.GCPPriceRefresh. Unlike either, a configured
+// "gcp" provider alone is not sufficient: the Cloud Billing Catalog API
+// authenticates with its own static GCP_BILLING_API_KEY credential entry
+// (see internal/provider/credentials.go), never the OAuth2 credential VM
+// provisioning uses, so this also requires that key to already be resolved
+// onto the provider's GCPSDK.
+func gcpPricesObserver(controller *operator.Operator, cfg operator.Config) (*provider.GCPSkuPrices, error) {
+	if !cfg.GCPPriceRefresh {
+		return nil, nil
+	}
+	command, ok := controller.Controller.Providers["gcp"].(*provider.Command)
+	if !ok || command.GCP == nil || command.GCP.BillingAPIKey == "" {
+		return nil, errors.New(`GCP price refresh requires a configured "gcp" provider with a billing API key`)
+	}
+	return command.GCP.SkuPrices(), nil
+}
+
 // azureInterruptionsObserver builds a live internal/azurequeue.Client from
 // the already-credentialed "azure" provider entry, mirroring
 // awsPricesObserver/azurePricesObserver: nil unless the operator explicitly
@@ -347,6 +366,13 @@ func run(args []string) error {
 		}
 		if azurePrices != nil {
 			controller.AzurePrices = azurePrices
+		}
+		gcpPrices, err := gcpPricesObserver(controller, cfg)
+		if err != nil {
+			return err
+		}
+		if gcpPrices != nil {
+			controller.GCPPrices = gcpPrices
 		}
 		azureInterruptions, err := azureInterruptionsObserver(controller, cfg)
 		if err != nil {
