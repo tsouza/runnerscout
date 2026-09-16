@@ -18,6 +18,15 @@
 (* EarlyReleaseEnabled = FALSE models the current code (PR #157's fix):     *)
 (* the missing-origin case is folded into `failures` and the loop           *)
 (* continues, so wg.Wait() always runs on every path out of Tick.           *)
+(*                                                                          *)
+(* HONESTY NOTE on the EarlyReleaseEnabled=FALSE ("fixed") result: with     *)
+(* EarlyReleaseEnabled=FALSE, ReleaseNormally is the only release action,   *)
+(* and its own guard already requires `inflight = 0` - so                   *)
+(* MuReleasedOnlyWhenIdle holding in that config is a restatement of that   *)
+(* guard, not an independent discovery. The result that actually matters   *)
+(* is the buggy config's counterexample: it proves the OLD code's shape     *)
+(* (a release action with no inflight guard at all) reaches a violating    *)
+(* state, which the fixed code's shape structurally cannot.                 *)
 (***************************************************************************)
 EXTENDS Naturals
 

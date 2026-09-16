@@ -6,12 +6,25 @@
 (* one RunID is enough to check the bound and the mutual-exclusion shape;  *)
 (* nothing in the real logic lets two RunIDs interact).                    *)
 (*                                                                          *)
-(* Three real code paths after a RerunFailedJobs POST become three actions *)
-(* here: a synchronous success or a synchronous, definitive rejection      *)
-(* (ErrRerunRejected) resolve immediately; anything else is "ambiguous"    *)
-(* and parks a pendingRerun, resolved later by reconcilePendingRerun once  *)
-(* GitHub's own attempt-jobs evidence definitively confirms it either      *)
-(* landed or never did.                                                    *)
+(* Three real code paths follow a RerunFailedJobs POST: a synchronous       *)
+(* success, a synchronous and definitive rejection (ErrRerunRejected -     *)
+(* certainly did not land, budget untouched - modeled by neither variable  *)
+(* changing, i.e. a stutter step already implied by [Next]_vars, so it has *)
+(* no separate action here), or "ambiguous" (parks a pendingRerun, later   *)
+(* resolved by reconcilePendingRerun once GitHub's own attempt-jobs        *)
+(* evidence definitively confirms it either landed or never did).         *)
+(*                                                                          *)
+(* "At most one rerun request outstanding per RunID at a time" is not      *)
+(* checked as a TLC invariant here: it holds by construction of `pending`  *)
+(* being a single BOOLEAN (there is no state a second, concurrently        *)
+(* outstanding request could occupy), the same way the real code's         *)
+(* fleet.PendingReruns being a Go map keyed by RunID makes "at most one     *)
+(* entry per RunID" true by the map's own data structure, not something    *)
+(* worth a runtime check. An earlier draft of this file asserted           *)
+(* `AtMostOneOutstandingRerun == TypeOK` and advertised it as a checked     *)
+(* property - that was wrong: TypeOK's own `pending \in BOOLEAN` conjunct  *)
+(* is trivially true for a BOOLEAN-typed variable, so TLC was proving       *)
+(* nothing beyond what the type declaration already guarantees.            *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -33,12 +46,6 @@ RequestSucceeds ==
   /\ Eligible
   /\ retriesUsed' = retriesUsed + 1
   /\ UNCHANGED pending
-
-(* GitHub synchronously and definitively rejects (e.g. no failed jobs to   *)
-(* rerun) -- certainly did not land, budget untouched, never parked.       *)
-RequestRejected ==
-  /\ Eligible
-  /\ UNCHANGED vars
 
 (* Transport failure after the POST: GitHub may have accepted it before    *)
 (* the response was lost. Parked, never guessed either way.                *)
@@ -69,7 +76,6 @@ ReconcileConfirmedDidNotHappen ==
 
 Next ==
   \/ RequestSucceeds
-  \/ RequestRejected
   \/ RequestAmbiguous
   \/ ReconcileConfirmedHappened
   \/ ReconcileConfirmedDidNotHappen
@@ -78,13 +84,5 @@ Spec == Init /\ [][Next]_vars
 
 (* The bound recovery.Policy.MaxRetries exists to enforce.                 *)
 RetryBoundRespected == retriesUsed <= MaxRetries
-
-(* At most one rerun request may be outstanding for a RunID at a time --   *)
-(* true by construction here (pending is a single BOOLEAN, and every       *)
-(* action that could start a new ambiguous request first requires          *)
-(* Eligible, which itself requires ~pending) -- checked anyway as a        *)
-(* structural confirmation that a second RequestAmbiguous can never fire   *)
-(* while one is already parked.                                            *)
-AtMostOneOutstandingRerun == TypeOK
 
 ====

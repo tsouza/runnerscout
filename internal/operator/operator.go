@@ -719,39 +719,47 @@ func (o *Operator) Tick(ctx context.Context) error {
 // ConfigMap record once it is past terminalRetention. allocs is the pre-Step
 // snapshot Tick already loaded: Step never changes an already-terminal
 // allocation (Controller.Step no-ops for Deleted/TimedOut), so it remains an
-// accurate view of every candidate's Phase, TerminalAt and
-// RegistrationCleared. A Deleted record is only pruned once f.Released[id]
-// is true - the same fleet-level flag HandleDesiredRunnerCount sets the
-// first time it decrements Admitted for this ID - so a record is never
-// removed from the Store before that one-time admission accounting has had
-// a chance to observe it via Store.List. TimedOut carries no such
-// dependency: it is excluded from the active count immediately, and its
-// Admitted slot is released only by Reconcile's own zero-demand cohort
-// reset, never by anything keyed off the record's continued existence.
+// accurate view of every candidate's Phase and TerminalAt. A Deleted record
+// is only pruned once f.Released[id] is true - the same fleet-level flag
+// HandleDesiredRunnerCount sets the first time it decrements Admitted for
+// this ID - so a record is never removed from the Store before that
+// one-time admission accounting has had a chance to observe it via
+// Store.List. TimedOut carries no such dependency: it is excluded from the
+// active count immediately, and its Admitted slot is released only by
+// Reconcile's own zero-demand cohort reset, never by anything keyed off the
+// record's continued existence.
 //
-// Every candidate additionally requires RegistrationCleared: age and phase
-// alone cannot distinguish an allocation whose claimed GitHub runner
-// registration was actually confirmed deregistered from one that leaked
-// through some path that never called Controller.Runners at all - a future
-// code path someone adds without wiring it, or Runners itself unconfigured
-// in this deployment. Pruning that record anyway would discard the only
-// local evidence such a leak ever happened, with no periodic reconciliation
-// against GitHub's own registration list to ever rediscover it afterward.
-// Leaving it retained (indefinitely, if RegistrationCleared never becomes
-// true) trades back exactly the unbounded-Store-growth problem this
-// pruning exists to solve, but only for the allocations where doing
-// otherwise would silently and permanently hide a real orphaned
-// registration - the narrower, safer failure mode.
+// Before deleting, each candidate's claimed GitHub runner registration is
+// re-verified/cleared right here - not by trusting a flag some earlier Step
+// call may or may not have set. Persisting such a flag at transition time
+// cannot distinguish "confirmed clear" from "this record predates the flag
+// existing at all," which would permanently strand every terminal record
+// already in the Store the moment this code deploys - a self-inflicted
+// version of exactly the "no periodic reconciliation" gap this whole
+// mechanism exists to close. Re-checking at prune time instead needs no
+// migration and is uniformly correct for every record regardless of when it
+// was created or which Step transition (if any) is the one that reaches
+// Deleted/TimedOut for it: DeregisterRunner is required to no-op once the
+// registration is already gone, so this costs one extra idempotent lookup
+// per record, on an already-rare, already-batched operation (once per
+// record, 24h+ after it went terminal), never a per-tick cost. If Runners
+// is not configured at all, or the verification call itself fails, the
+// record is retained and retried on a later Tick - never deleted without a
+// confirmed answer.
 func (o *Operator) pruneTerminalAllocations(ctx context.Context, f fleet, allocs []lifecycle.Allocation) error {
+	if o.Controller.Runners == nil {
+		return nil
+	}
 	var failures []error
 	for _, a := range allocs {
 		if a.TerminalAt.IsZero() || time.Since(a.TerminalAt) < terminalRetention {
 			continue
 		}
-		if !a.RegistrationCleared {
+		if a.Phase != lifecycle.TimedOut && !(a.Phase == lifecycle.Deleted && f.Released[a.ID]) {
 			continue
 		}
-		if a.Phase != lifecycle.TimedOut && !(a.Phase == lifecycle.Deleted && f.Released[a.ID]) {
+		if e := o.Controller.Runners.DeregisterRunner(ctx, a.ID); e != nil {
+			failures = append(failures, e)
 			continue
 		}
 		if e := o.Store.Delete(ctx, a.ID); e != nil {

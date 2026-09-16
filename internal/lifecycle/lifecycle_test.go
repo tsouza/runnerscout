@@ -210,27 +210,6 @@ func TestTimedOutDeregistersClaimedRunner(t *testing.T) {
 	if s.a.Phase != l.TimedOut {
 		t.Fatal(s.a)
 	}
-	if !s.a.RegistrationCleared {
-		t.Fatal("RegistrationCleared must be set once deregistration is confirmed", s.a)
-	}
-}
-
-// A terminal transition with no Runners configured at all must never claim
-// RegistrationCleared - internal/operator's pruning relies on this to skip
-// (rather than silently prune) a record whose registration was never
-// actually checked.
-func TestTimedOutWithoutRunnersLeavesRegistrationUnconfirmed(t *testing.T) {
-	c, s, _, now := setup()
-	*now = s.a.Deadline
-	if e := c.Step(context.Background(), "rs-test"); e != nil {
-		t.Fatal(e)
-	}
-	if s.a.Phase != l.TimedOut {
-		t.Fatal(s.a)
-	}
-	if s.a.RegistrationCleared {
-		t.Fatal("RegistrationCleared must stay false when no Runners is configured", s.a)
-	}
 }
 
 // A failed deregistration attempt must never be masked by persisting TimedOut

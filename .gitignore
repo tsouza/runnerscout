@@ -30,3 +30,7 @@ __pycache__/
 # tools/tlc.py downloads this on first run; not committed, not reproducible
 # byte-for-byte across TLC releases.
 /spec/.tools/
+# TLC's own per-run metadata directory (fingerprint set, checkpoints) -
+# -cleanup keeps it from accumulating across runs but does not remove the
+# directory itself.
+/spec/states/
