@@ -103,7 +103,8 @@ workload identity; developer ADC and gcloud login caches are not read. Executabl
 credential sources are rejected. The running client detects projected credential-file
 changes on its next request; invalid or missing updates fail without reusing an old
 token. Grant access to instance and disk inventory/creation/deletion
-and zonal operation inventory/observation in the configured project.
+and zonal operation inventory/observation in the configured project - see
+[gcp-iam.md](gcp-iam.md) for the exact required permission list.
 
 GCP labels the VM and its boot disk at creation and checks operation commitment
 before cleanup. A residual disk retains the allocation until observed absent.
