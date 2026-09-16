@@ -154,22 +154,44 @@ func TestGCPObserveRejectsMissingRamSku(t *testing.T) {
 	}
 }
 
-func TestGCPObserveRejectsMismatchedCoreResourceGroup(t *testing.T) {
+// Real Cloud Billing Catalog API responses do not use "Core"/"RAM" as
+// category.resourceGroup for standard machine families (N1, E2, ...) - both
+// a family's Core and RAM SKUs share the family name itself as
+// resourceGroup (e.g. "N1Standard"), and usageUnit ("h" vs "GiBy.h") is
+// what actually distinguishes them. A correctly-pinned SKU pair for a
+// standard family must not be rejected just because resourceGroup doesn't
+// contain "core"/"ram".
+func TestGCPObserveAcceptsRealisticFamilyShapedResourceGroup(t *testing.T) {
 	f := newFixtureGCP(t)
-	// A pinned "core" SKU ID whose actual category looks like a RAM SKU is
-	// exactly the human pinning-mixup this check exists to catch - never
-	// silently trusted just because the ID matched.
-	f.setPage("", gcpPage("", gcpSkuJSON(coreSkuFixture, "RAM", "h", 0, 31611000), ramSkuEntry()))
-	if _, err := testGCPClient(f).Observe(context.Background(), coreSkuFixture, ramSkuFixture, 2, 4096); err == nil {
-		t.Fatal("expected error when the pinned core SKU's category does not look like a Core SKU")
+	f.setPage("", gcpPage("",
+		gcpSkuJSON(coreSkuFixture, "N1Standard", "h", 0, 31611000),
+		gcpSkuJSON(ramSkuFixture, "N1Standard", "GiBy.h", 0, 4237000),
+	))
+	quote, err := testGCPClient(f).Observe(context.Background(), coreSkuFixture, ramSkuFixture, 2, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quote.PriceMicros != 80170 {
+		t.Errorf("PriceMicros = %d, want 80170", quote.PriceMicros)
 	}
 }
 
-func TestGCPObserveRejectsMismatchedRamResourceGroup(t *testing.T) {
+// The real, human-scale failure mode this design has to guard against - an
+// operator swapping which ID they pasted into coreSkuId vs ramSkuId - is
+// caught by usageUnit alone: a swapped core pin actually points at the RAM
+// SKU, whose usageUnit ("GiBy.h") never matches what a Core SKU must have
+// ("h"), regardless of resourceGroup.
+func TestGCPObserveRejectsSwappedSkuPinningViaUsageUnit(t *testing.T) {
 	f := newFixtureGCP(t)
-	f.setPage("", gcpPage("", coreSkuEntry(), gcpSkuJSON(ramSkuFixture, "Core", "GiBy.h", 0, 4237000)))
+	// coreSkuFixture's ID now resolves to what is actually the RAM-shaped
+	// entry (usageUnit "GiBy.h"), and vice versa - simulating a pinning
+	// mixup, not a malformed API response.
+	f.setPage("", gcpPage("",
+		gcpSkuJSON(coreSkuFixture, "N1Standard", "GiBy.h", 0, 4237000),
+		gcpSkuJSON(ramSkuFixture, "N1Standard", "h", 0, 31611000),
+	))
 	if _, err := testGCPClient(f).Observe(context.Background(), coreSkuFixture, ramSkuFixture, 2, 4096); err == nil {
-		t.Fatal("expected error when the pinned RAM SKU's category does not look like a RAM SKU")
+		t.Fatal("expected error when the pinned core/RAM SKU IDs are swapped")
 	}
 }
 
