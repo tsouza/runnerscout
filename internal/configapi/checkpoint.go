@@ -89,6 +89,9 @@ func checkpointSnapshot(s Snapshot) (Snapshot, error) {
 	if snapshot.Network != nil {
 		snapshot.Network.ObjectMeta, snapshot.Network.Status = metadata(snapshot.Network.ObjectMeta), api.ConfigurationStatus{}
 	}
+	if snapshot.Budget != nil {
+		snapshot.Budget.ObjectMeta, snapshot.Budget.Status = metadata(snapshot.Budget.ObjectMeta), api.ConfigurationStatus{}
+	}
 	return snapshot, nil
 }
 
