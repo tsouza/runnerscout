@@ -218,3 +218,57 @@ func TestRunBringsUpConfiguresInitialPeersThenReconcilesOnPoll(t *testing.T) {
 		t.Fatalf("expected RemovePeer(initial), got %+v", removed)
 	}
 }
+
+// A controller that accepts the connection but never responds must not
+// block the poll loop past its own PollInterval - DefaultPollInterval's own
+// doc comment claims this bounds convergence "tightly enough," which is
+// only true if one wedged poll cannot prevent the next interval's retry.
+func TestRunDoesNotHangWhenControllerAcceptsButNeverResponds(t *testing.T) {
+	var reqCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&reqCount, 1)
+		if n == 1 {
+			<-r.Context().Done() // simulate a wedged controller: accepts, never responds until the client gives up
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Peers []wireguard.Peer `json:"peers"`
+		}{})
+	}))
+	defer server.Close()
+
+	path := writePayload(t, wireguard.CloudInitPayload{
+		PrivateKey:     base64.StdEncoding.EncodeToString(make([]byte, wireguard.KeySize)),
+		AllocationID:   "rs-self",
+		ControllerURL:  server.URL,
+		PollToken:      "fixture-token",
+		OverlayAddress: "10.60.0.9",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			PayloadPath:  path,
+			PollInterval: 20 * time.Millisecond,
+			BringUp:      func(tunnel.Config) (Closer, error) { return fakeCloser{&fakeTunnel{}}, nil },
+			Logf:         func(string, ...any) {},
+		})
+	}()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("second poll never happened - a wedged first poll blocked the loop past PollInterval")
+		default:
+		}
+		if atomic.LoadInt32(&reqCount) >= 2 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

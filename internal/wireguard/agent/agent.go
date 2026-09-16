@@ -186,7 +186,16 @@ func Run(ctx context.Context, opts Options) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			peers, pollErr := Poll(ctx, opts.HTTPClient, payload.ControllerURL, payload.AllocationID, payload.PollToken)
+			// Bounded to PollInterval itself: opts.HTTPClient defaults to
+			// http.DefaultClient (Timeout 0, i.e. none), so a controller
+			// that accepts the connection but never responds would
+			// otherwise block this select body indefinitely - the loop
+			// would never re-check ctx.Done() or fire the next tick,
+			// defeating DefaultPollInterval's own "bounds convergence
+			// tightly enough" claim. One attempt per interval, at most.
+			pollCtx, cancel := context.WithTimeout(ctx, opts.PollInterval)
+			peers, pollErr := Poll(pollCtx, opts.HTTPClient, payload.ControllerURL, payload.AllocationID, payload.PollToken)
+			cancel()
 			if pollErr != nil {
 				opts.Logf("agent: poll failed, retrying next interval: %v", pollErr)
 				continue

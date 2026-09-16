@@ -58,12 +58,17 @@ func (p *Command) createAzure(ctx context.Context, a lifecycle.Allocation, scrip
 	// NIC+VM ARM template deployment to reach a terminal state - a real
 	// deployment routinely takes well over 30 seconds, confirmed live
 	// (a real dispatch's own deployment converged at ~26s, right at that
-	// margin, and a second real dispatch exceeded it outright). A 30s
-	// budget here was making "commitment unknown" - meant for genuine
-	// transport ambiguity - the routine outcome instead, needlessly
-	// relying on Observe-driven reconciliation (or, for the one-shot
-	// qualification harness, the external safety net) to pick up
-	// resources a merely-slow-but-healthy deployment already created.
+	// margin, and a second real dispatch exceeded it outright). This
+	// 5-minute budget only actually applies when the caller's own context
+	// allows it: internal/provider/azure_realcloud_test.go's direct call
+	// does, but operator.go's Step call wraps every production Create in
+	// its own, tighter 30-second context (see gcp_sdk.go's deleteGCP for
+	// the identical caveat on the delete path), which still caps this at
+	// ~30s in production regardless of the value here. Raising that
+	// shared, per-reconciliation-step budget is a separate, broader
+	// change - it would serialize behind every other allocation Tick
+	// steps in the same cycle, under the same lock HandleDesiredRunnerCount
+	// and HandleJobStarted/Completed also take - see issue #144.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	if !strings.HasPrefix(strings.ToLower(a.Offering.Image), "/subscriptions/") {
