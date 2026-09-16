@@ -26,12 +26,19 @@ as an error — never a best-effort pick. GCP has no equivalent single-call,
 single-key, single-price endpoint. Concretely, from the docs above:
 
 1. **A SKU is a billed resource *component*, not a priced instance.**
-   Compute Engine SKUs split `resourceGroup` by "Core" (vCPU) and "RAM"
-   (memory) — confirmed both in the v1 SKU `category` schema and in
-   Google's own public SKU-group page, whose example descriptions include
+   Compute Engine splits a machine family's price into a vCPU (Core) SKU
+   and a memory (RAM) SKU, confirmed in Google's own public SKU-group
+   page, whose example descriptions include
    `"Spot Preemptible N1 Predefined Instance Core running in Berlin"` and
    `"Spot Preemptible Custom Extended Instance Ram running in APAC"` as
-   *separate* SKUs with separate SKU IDs. Getting one instance-type price
+   *separate* SKUs with separate SKU IDs. `resourceGroup` does not reliably
+   spell this out as the literal string "Core"/"RAM", though: for standard
+   families it is the family name itself (e.g. "N1Standard"), shared by
+   both that family's Core and RAM SKU - `usageUnit` ("h" for Core,
+   "GiBy.h" for RAM) is the field that actually, reliably distinguishes
+   the two roles (confirmed against real `services.skus.list` responses;
+   see `internal/prices/gcp.go`'s `gcpSkuUnitPrice`, which checks only
+   `usageUnit` for exactly this reason). Getting one instance-type price
    requires locating the right Core SKU and the right RAM SKU (and, for
    attached GPUs/Local SSD, more SKUs still) and combining them — never a
    single authoritative row.
