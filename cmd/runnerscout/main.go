@@ -279,6 +279,8 @@ func run(args []string) error {
 		return err
 	}
 	if o.printVersion {
+		// A nil error here means main exits 0, matching the standard
+		// `-version` convention every other flag in this binary follows.
 		fmt.Println(version.Version)
 		return nil
 	}
