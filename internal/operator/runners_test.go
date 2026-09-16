@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/actions/scaleset"
+	"github.com/tsouza/runnerscout/internal/provider"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -72,6 +73,50 @@ func TestNewLeavesRunnersNilWithoutAGitHubClient(t *testing.T) {
 	o := New(Config{Name: "test", Namespace: "test", MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}, fake.NewClientset(), nil)
 	if o.Controller.Runners != nil {
 		t.Fatal("Controller.Runners must be nil when no GitHub client is configured", o.Controller.Runners)
+	}
+}
+
+// New's own Bootstrap closure (github JIT config generation, shared by every
+// provider.Command it builds) is the first of three swallow points issue
+// #176 found: a real GitHub-side failure (e.g. a 429) was previously
+// collapsed to a bare "GitHub JIT request failed" before command.go or
+// lifecycle.go ever saw the real cause, which is exactly why the incident
+// looked like a GCP-provider problem instead of a GitHub one.
+func TestBootstrapPreservesGitHubJITFailureCause(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
+	token := "eyJhbGciOiJIUzI1NiJ9." + payload + ".c2ln"
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/runners/registration-token"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"fixture"}`))
+		case strings.HasSuffix(req.URL.Path, "/actions/runner-registration"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"url": server.URL + "/tenant/123/", "token": token})
+		case strings.Contains(req.URL.Path, "/generatejitconfig"):
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
+		default:
+			t.Errorf("unexpected fixture request %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: server.URL + "/org", PersonalAccessToken: "fixture"}, scaleset.WithRetryMax(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Name: "test", Namespace: "test", ScaleSetID: 1, MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Providers: map[string]provider.Config{"a": {Kind: "aws"}}}
+	o := New(cfg, fake.NewClientset(), client)
+	command := o.Controller.Providers["a"].(*provider.Command)
+	material, err := command.Bootstrap(context.Background(), "rs-test")
+	if err == nil || material != "" {
+		t.Fatal("expected the fixture's 429 to fail bootstrap", material, err)
+	}
+	if !strings.Contains(err.Error(), "generatejitconfig") {
+		t.Fatal("Bootstrap must preserve the real GitHub failure detail, not a bare fixed string", err)
 	}
 }
 

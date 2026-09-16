@@ -3,9 +3,11 @@ package lifecycle_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	l "github.com/tsouza/runnerscout/internal/lifecycle"
 	p "github.com/tsouza/runnerscout/internal/placement"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,12 +32,16 @@ func (s *store) Save(_ context.Context, a l.Allocation, version string) (l.Alloc
 type cloud struct {
 	created, deleted                                     int
 	exists, unknown, loseResponse, capacity, interrupted bool
+	noEffect                                             error
 }
 
 func (c *cloud) Create(context.Context, l.Allocation) (string, error) {
 	c.created++
 	if c.capacity {
 		return "", l.ErrCapacity
+	}
+	if c.noEffect != nil {
+		return "", c.noEffect
 	}
 	c.exists = true
 	if c.loseResponse {
@@ -113,6 +119,27 @@ func TestUnknownAbsenceNeverBlindlyCreates(t *testing.T) {
 	}
 	if p.created != 1 || s.a.Phase != l.Creating {
 		t.Fatal(s.a)
+	}
+}
+
+// A create attempt that fails before any cloud effect (ErrNoEffect) must
+// surface its real underlying cause through Condition, not a bare fixed
+// string - a provider wrapping a specific reason (e.g. "GitHub JIT request
+// failed: unexpected status code: 429") under ErrNoEffect must have that
+// reason readable from the allocation's own status, not discarded. Issue
+// #176: a real GitHub-side JIT failure was indistinguishable from any other
+// preparation failure, including a GCP-provider one, until this was fixed.
+func TestCreatePreparationFailureSurfacesItsRealCause(t *testing.T) {
+	c, s, cloud, _ := setup()
+	cloud.noEffect = fmt.Errorf("%w: GitHub JIT request failed: unexpected status code: 429", l.ErrNoEffect)
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Pending {
+		t.Fatal("a preparation failure with no cloud effect must remain retryable", s.a)
+	}
+	if !strings.Contains(s.a.Condition, "GitHub JIT request failed: unexpected status code: 429") {
+		t.Fatal("Condition must surface the real underlying cause, not a bare fixed string", s.a.Condition)
 	}
 }
 

@@ -340,7 +340,17 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		empty := creation.ResourceID == "" && len(creation.Resources) == 0
 		if errors.Is(e, ErrNoEffect) && empty {
 			a.Phase = Pending
-			a.Condition = "CreatePreparationFailed"
+			// Matches the placement.Choose failure branch a few lines below:
+			// Condition carries the real underlying reason, not a bare fixed
+			// string. A bootstrap/preparation failure with no cloud effect
+			// (e.g. GitHub JIT config generation failing) used to collapse
+			// to a single opaque "CreatePreparationFailed" regardless of
+			// cause, indistinguishable in the allocation's own status from
+			// any other preparation failure - which is why a real GitHub
+			// JIT failure got misdiagnosed as a GCP-provider issue (issue
+			// #176): nothing in the allocation's observable state pointed
+			// at GitHub at all.
+			a.Condition = "CreatePreparationFailed: " + e.Error()
 			return save()
 		}
 		if errors.Is(e, ErrCapacity) && empty {
