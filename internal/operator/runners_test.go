@@ -120,6 +120,59 @@ func TestBootstrapPreservesGitHubJITFailureCause(t *testing.T) {
 	}
 }
 
+// A batch of allocations admitted in the same instant must not fire their
+// GenerateJitRunnerConfig calls at GitHub within the same sub-millisecond
+// window - issue #176's own evidence (a concurrently-admitted batch
+// consistently failed before ever reaching the cloud provider, while an
+// isolated allocation always succeeded) is the signature of a burst-
+// sensitive backend limit. jitLimiter mitigates that without penalizing the
+// common case: an isolated Bootstrap call must never wait.
+func TestBootstrapThrottlesConcurrentGitHubJITRequests(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
+	token := "eyJhbGciOiJIUzI1NiJ9." + payload + ".c2ln"
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/runners/registration-token"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"fixture"}`))
+		case strings.HasSuffix(req.URL.Path, "/actions/runner-registration"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"url": server.URL + "/tenant/123/", "token": token})
+		case strings.Contains(req.URL.Path, "/generatejitconfig"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"encodedJITConfig": "fixture-jit"})
+		default:
+			t.Errorf("unexpected fixture request %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: server.URL + "/org", PersonalAccessToken: "fixture"}, scaleset.WithRetryMax(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Name: "test", Namespace: "test", ScaleSetID: 1, MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Providers: map[string]provider.Config{"a": {Kind: "aws"}}}
+	o := New(cfg, fake.NewClientset(), client)
+	command := o.Controller.Providers["a"].(*provider.Command)
+
+	start := time.Now()
+	if _, err := command.Bootstrap(context.Background(), "rs-first"); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > githubJITRequestInterval/2 {
+		t.Fatal("an isolated Bootstrap call must not be throttled", elapsed)
+	}
+
+	start = time.Now()
+	if _, err := command.Bootstrap(context.Background(), "rs-second"); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed < githubJITRequestInterval/2 {
+		t.Fatal("a second Bootstrap call arriving immediately after the first must be throttled", elapsed)
+	}
+}
+
 func TestRunnerDeregistrarNilClientNoop(t *testing.T) {
 	d := &runnerDeregistrar{}
 	if err := d.DeregisterRunner(context.Background(), "rs-test"); err != nil {
