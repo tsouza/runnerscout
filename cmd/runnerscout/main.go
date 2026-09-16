@@ -37,6 +37,14 @@ type options struct {
 	installationID                                 int64
 	validate                                       bool
 	printVersion                                   bool
+	// kubeQPS/kubeBurst override client-go's own library defaults (QPS=5,
+	// Burst=10) for the in-cluster rest.Config this binary builds in run().
+	// Those defaults are sized for a generic client, not this controller's
+	// own per-Tick call volume (one GET per retained allocation, sometimes a
+	// PUT/DELETE, on top of credential Secret reads) - see issue #165 for the
+	// production reconciliation deadlock this caused.
+	kubeQPS   float64
+	kubeBurst int
 }
 
 func parseOptions(args []string) (options, error) {
@@ -54,6 +62,8 @@ func parseOptions(args []string) (options, error) {
 	flags.BoolVar(&o.checkCRD, "check-crd", false, "check a CRD snapshot through Kubernetes without GitHub or cloud operations")
 	flags.BoolVar(&o.checkUninstall, "check-uninstall", false, "check that CRD deletion and durable cleanup are complete before uninstall")
 	flags.BoolVar(&o.printVersion, "version", false, "print the build version and exit")
+	flags.Float64Var(&o.kubeQPS, "kube-client-qps", 20, "Kubernetes client-side rate limit, in requests per second, for the in-cluster API client")
+	flags.IntVar(&o.kubeBurst, "kube-client-burst", 40, "Kubernetes client-side burst allowance for the in-cluster API client")
 	if err := flags.Parse(args); err != nil {
 		return o, err
 	}
@@ -64,6 +74,9 @@ func parseOptions(args []string) (options, error) {
 	// flags below and must not be rejected for lacking them.
 	if o.printVersion {
 		return o, nil
+	}
+	if o.kubeQPS <= 0 || o.kubeBurst <= 0 {
+		return o, errors.New("kube-client-qps and kube-client-burst must be positive")
 	}
 	if (o.checkCRD || o.checkUninstall) && o.scaleSet == "" || o.checkCRD && o.checkUninstall {
 		return o, errors.New("select only one CRD check and provide -scale-set and -namespace")
@@ -300,6 +313,8 @@ func run(args []string) error {
 		return errors.New("in-cluster Kubernetes configuration required")
 	}
 	kc.Timeout = 30 * time.Second
+	kc.QPS = float32(o.kubeQPS)
+	kc.Burst = o.kubeBurst
 	client, err := kubernetes.NewForConfig(kc)
 	if err != nil {
 		return err
