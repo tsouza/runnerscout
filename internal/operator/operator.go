@@ -365,7 +365,15 @@ func (o *Operator) HandleDesiredRunnerCount(ctx context.Context, count int) (int
 	}
 	active := 0
 	for _, a := range allocs {
-		if a.Completed && a.Phase == lifecycle.Deleted && !f.Released[a.ID] {
+		// Deleted means cleanup is confirmed (the cloud resource is provably
+		// gone, whether from a spot interruption, a MaxLifetimeSeconds
+		// expiry, or a drain before job pickup - see lifecycle.Controller.Step,
+		// which only ever sets Deleted after Observe reports !Exists). The
+		// admission slot must release regardless of whether a job ever
+		// completed: Completed and cleanup are orthogonal, and gating
+		// release on both left every non-Completed terminal allocation
+		// (interrupted, expired, drained) permanently consuming a slot.
+		if a.Phase == lifecycle.Deleted && !f.Released[a.ID] {
 			if f.Admission.Admitted > 0 {
 				f.Admission.Admitted--
 			}
