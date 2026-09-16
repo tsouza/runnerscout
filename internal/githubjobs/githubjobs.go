@@ -55,7 +55,8 @@ type attemptJob struct {
 	Conclusion string `json:"conclusion"`
 }
 type attemptJobsResponse struct {
-	Jobs []attemptJob `json:"jobs"`
+	TotalCount int          `json:"total_count"`
+	Jobs       []attemptJob `json:"jobs"`
 }
 
 // ErrAttemptNotFound reports GitHub's own HTTP 404 for the attempt-jobs
@@ -75,27 +76,43 @@ var ErrAttemptNotFound = errors.New("GitHub reports no such workflow run attempt
 // not land, so callers must not treat it as ambiguous.
 var ErrRerunRejected = errors.New("GitHub rejected the rerun-failed-jobs request")
 
-// AttemptJobs fetches the jobs recorded for one attempt of one workflow run.
+// AttemptJobs fetches every job recorded for one attempt of one workflow
+// run, following GitHub's pagination (default 30 jobs per page) rather than
+// stopping at the first page - a matrix build routinely exceeds 30 jobs,
+// and a truncated result here would let internal/recovery see zero matches
+// for a legitimately retry-eligible interruption with no signal that the
+// list was ever incomplete.
 func (c *Client) AttemptJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]recovery.RESTJob, error) {
-	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs", owner, repo, runID, attempt)
-	response, err := c.do(ctx, http.MethodGet, path)
-	if err != nil {
-		return nil, err
+	var jobs []recovery.RESTJob
+	for page := 1; ; page++ {
+		path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100&page=%d", owner, repo, runID, attempt, page)
+		response, err := c.do(ctx, http.MethodGet, path)
+		if err != nil {
+			return nil, err
+		}
+		if response.StatusCode == http.StatusNotFound {
+			response.Body.Close()
+			return nil, ErrAttemptNotFound
+		}
+		if response.StatusCode != http.StatusOK {
+			response.Body.Close()
+			return nil, fmt.Errorf("GitHub attempt jobs request failed with status %d", response.StatusCode)
+		}
+		var decoded attemptJobsResponse
+		err = json.NewDecoder(response.Body).Decode(&decoded)
+		response.Body.Close()
+		if err != nil {
+			return nil, errors.New("GitHub attempt jobs response malformed")
+		}
+		for _, job := range decoded.Jobs {
+			jobs = append(jobs, recovery.RESTJob{ID: job.ID, RunID: job.RunID, Attempt: job.RunAttempt, RunnerName: job.RunnerName, Status: job.Status, Conclusion: job.Conclusion})
+		}
+		if len(decoded.Jobs) == 0 || len(jobs) >= decoded.TotalCount {
+			break
+		}
 	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound {
-		return nil, ErrAttemptNotFound
-	}
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub attempt jobs request failed with status %d", response.StatusCode)
-	}
-	var decoded attemptJobsResponse
-	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
-		return nil, errors.New("GitHub attempt jobs response malformed")
-	}
-	jobs := make([]recovery.RESTJob, 0, len(decoded.Jobs))
-	for _, job := range decoded.Jobs {
-		jobs = append(jobs, recovery.RESTJob{ID: job.ID, RunID: job.RunID, Attempt: job.RunAttempt, RunnerName: job.RunnerName, Status: job.Status, Conclusion: job.Conclusion})
+	if jobs == nil {
+		jobs = []recovery.RESTJob{}
 	}
 	return jobs, nil
 }
