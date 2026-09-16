@@ -26,3 +26,7 @@ __pycache__/
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# tools/tlc.py downloads this on first run; not committed, not reproducible
+# byte-for-byte across TLC releases.
+/spec/.tools/

@@ -129,6 +129,22 @@ type Allocation struct {
 	// Deadline, which keeps its original Pending-phase meaning even after a
 	// later terminal transition.
 	TerminalAt time.Time `json:"terminalAt,omitempty"`
+	// RegistrationCleared is set alongside TerminalAt, only when deregister's
+	// call to Runners.DeregisterRunner for this exact transition returned nil
+	// (a confirmed removal, or a confirmed no-op because no registration ever
+	// existed) - never merely because a terminal transition happened. A
+	// terminal allocation whose RegistrationCleared is still false means
+	// either Runners was nil (no GitHub wiring configured at all - see
+	// Controller.Runners) or deregister's own error path returned before this
+	// transition could be persisted (impossible to observe here, since Step
+	// never persists a transition whose deregister call failed - see
+	// deregister's own doc comment). It exists so a caller (see
+	// internal/operator's terminal-record pruning) can require confirmed
+	// deregistration before permanently discarding an allocation's only
+	// remaining local evidence that a claimed GitHub runner registration
+	// might still need cleanup - age and phase alone cannot tell that apart
+	// from one this codebase has already fully accounted for.
+	RegistrationCleared bool `json:"registrationCleared,omitempty"`
 }
 
 var ErrConflict = errors.New("state revision conflict")
@@ -303,6 +319,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			a.Phase = TimedOut
 			a.Condition = "LocalProvisioningTimeout"
 			a.TerminalAt = now
+			a.RegistrationCleared = c.Runners != nil
 			return save()
 		}
 		outcomes := make(map[string]placement.Outcome, len(a.Outcomes))
@@ -427,6 +444,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			a.Phase = Deleted
 			a.Condition = "CreateConfirmedAbsent"
 			a.TerminalAt = now
+			a.RegistrationCleared = c.Runners != nil
 			return save()
 		}
 		a.ResourceID = ob.ResourceID
@@ -460,6 +478,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 				a.Condition = "ResourceAbsentConfirmedInterruption"
 			}
 			a.TerminalAt = now
+			a.RegistrationCleared = c.Runners != nil
 			return save()
 		}
 		return nil
@@ -479,6 +498,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			a.Phase = Deleted
 			a.Condition = "CleanupConfirmed"
 			a.TerminalAt = now
+			a.RegistrationCleared = c.Runners != nil
 			return save()
 		}
 		if err := p.Delete(ctx, a); err != nil {

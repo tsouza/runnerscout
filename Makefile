@@ -15,6 +15,10 @@ integration:
 qualify:
 	python3 tools/qualify.py
 
+.PHONY: tlc
+tlc:
+	python3 tools/tlc.py
+
 .PHONY: emulators
 emulators:
 	python3 tools/emulators.py
