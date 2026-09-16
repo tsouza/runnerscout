@@ -34,9 +34,12 @@ workflow or decide its result. Credentials remain external Secret files or
 workload identity; they are not catalog data.
 
 Admissions retain their original deadlines and bounded attempt counts. Unchanged
-demand does not rearm expired slots. Confirmed job completion and observed VM
-cleanup release successful slots. A zero-demand reset requires old resources to
-be absent. Lowering maxRunners drains naturally without discarding allocations.
+demand does not rearm expired slots. Observed cleanup - confirmed absence of
+the cloud resource, however the allocation reached that point (job completion,
+spot interruption, lifetime expiry, or drain before pickup) - releases its
+admission slot; whether a job ever completed on it is unrelated. A zero-demand
+reset requires old resources to be absent. Lowering maxRunners drains
+naturally without discarding allocations.
 
 ## Configuration surface
 

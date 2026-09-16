@@ -185,6 +185,14 @@ func (p *Command) waitGCPOperation(ctx context.Context, a lifecycle.Allocation, 
 }
 
 func (p *Command) createGCP(ctx context.Context, a lifecycle.Allocation, script string) (lifecycle.Creation, error) {
+	// Same shape as Azure's createAzure: Instances.Insert then a blocking
+	// poll (waitGCPOperation) to a terminal state, not a fire-and-return
+	// call. No real-cloud evidence yet that GCP instance creation reliably
+	// finishes under 30s the way AWS's RunInstances does - unlike Azure,
+	// this budget has not been raised, since operator.go's Step call caps
+	// it at ~30s in production regardless (see deleteGCP's identical
+	// caveat, and createAzure's comment for why raising the shared budget
+	// is a separate, broader change - see issue #144).
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	service, err := p.gcpClient()
