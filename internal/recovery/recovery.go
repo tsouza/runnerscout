@@ -1,5 +1,7 @@
-// Package recovery validates an opt-in fresh-execution retry. Scale-set job IDs
-// and REST numeric job IDs deliberately have different types and are never cast.
+// Package recovery validates an opt-in fresh-execution retry. Eligible
+// matches identity purely on RunnerName, RunID and Attempt against the REST
+// jobs list - Evidence.ScaleSetJobID is carried for callers but is not part
+// of that match.
 package recovery
 
 import "errors"

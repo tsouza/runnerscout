@@ -280,6 +280,18 @@ func (p *Command) observeGCP(ctx context.Context, a lifecycle.Allocation) (lifec
 // system operation - never inferred from a bare absence - is recorded against
 // this instance. Any ambiguity (an unavailable observation or a non-matching
 // target) returns false.
+//
+// Unlike Azure (one Event Grid queue poll per Tick for every allocation,
+// see internal/operator/azure_interruptions.go), this issues one
+// ZoneOperations.List call per allocation per Tick - not the same
+// batched-per-cycle shape, because the underlying APIs differ, not because
+// of an inconsistent design choice: Azure's confirmation source is a single
+// shared push queue, naturally read once regardless of how many
+// allocations exist; GCP's is a pull query scoped to one project/zone with
+// no equivalent shared delivery point. (AWS needs no separate call at all -
+// its confirmation is a field on the same per-allocation Describe response
+// Observe already makes.) A per-zone batch across allocations sharing a
+// zone would reduce redundant calls but is not implemented.
 func (p *Command) gcpConfirmedPreemption(ctx context.Context, a lifecycle.Allocation) bool {
 	service, err := p.gcpClient()
 	if err != nil {

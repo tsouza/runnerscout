@@ -645,14 +645,17 @@ project/region/zone: `compute.zones.get`, `compute.images.get`,
 `compute.zoneOperations.list`; `compute.instances.create`,
 `compute.instances.delete`, `compute.disks.create`, `compute.disks.delete`,
 `compute.instances.setLabels`, `compute.disks.setLabels`,
+`compute.instances.setMetadata`, `compute.instances.setScheduling`,
 `compute.subnetworks.use`. `compute.instances.setLabels`/
-`compute.disks.setLabels` are both needed even though `gcp_sdk.go`'s
-`createGCP` never calls a distinct `setLabels` API method - it sets labels
-as part of the `instances.create`/`disks.create` insert calls themselves,
-but GCE's own IAM checks still gate that on the `setLabels` permission
-(confirmed by an actual real-cloud dispatch: `compute.disks.setLabels` was
-missing and the create failed with a live "Required
-'compute.disks.setLabels' permission" error - see
+`compute.disks.setLabels`/`compute.instances.setMetadata`/
+`compute.instances.setScheduling` are all needed even though `gcp_sdk.go`'s
+`createGCP` never calls a distinct `setLabels`/`setMetadata`/`setScheduling`
+API method - it sets labels, metadata (the startup script) and Spot
+scheduling as part of the `instances.create`/`disks.create` insert calls
+themselves, but GCE's own IAM checks still gate each of those on its
+respective `setX` permission (confirmed by real-cloud dispatches: each
+missing permission failed create in turn with a live "Required
+'compute.<resource>.setX' permission" error - see
 [qualification-real-cloud.background.md](qualification-real-cloud.background.md)'s
 "What real dispatches found" section). No project-creation, IAM,
 VPC-creation or billing permissions are needed — this identity only ever

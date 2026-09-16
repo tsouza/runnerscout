@@ -35,8 +35,10 @@
    plain synchronous clients and driven by `internal/operator.Operator`'s
    own polling cadence (`Tick`), not like
    `github.com/actions/scaleset`'s `MessageSessionClient`/`listener.New`
-   live session. This session ships exactly that shape as a real, tested,
-   currently-unwired package: `internal/azurequeue`.
+   live session. `internal/azurequeue` ships exactly that shape, and is
+   wired into `internal/operator`'s own polling cadence
+   (`internal/operator/azure_interruptions.go`), constructed via
+   `internal/provider.AzureSDK.InterruptionQueue`.
 
 4. **Correlation is exact VM-name equality**, mirroring GCP's
    `a.ID`-as-instance-name convention, not a new lookup structure:

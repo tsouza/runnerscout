@@ -60,8 +60,14 @@ Set `spec.suspend: false` on `build`, then wait for its `Ready` condition. To pe
 global on-demand fallback, explicitly set the class's `placement.allowOnDemand`
 to true; it still requires definitive exhaustion of every eligible spot pool.
 
-Retries remain disabled; enabled retry composition and a WireGuard overlay are
-not yet available. `network.yaml` maps existing private networks in each cloud;
+Retries remain disabled and this example stays in `separate` networking mode -
+not because either is unimplemented (both are functionally complete, see
+[architecture.md](../../docs/architecture.md) and
+[networking-peer-model.md](../../docs/networking-peer-model.md)), but because
+of this example's own configuration: enabling retries requires PAT
+authentication (this example uses App auth), and a wireguard-mode
+`NetworkProfile` accepts exactly one `NetworkMapping` (this example maps all
+three clouds). `network.yaml` maps existing private networks in each cloud;
 it does not join them or create gateways. The [workflow](../workflow.yml) exercises
 multiple dependent jobs, cached Go dependencies and a Docker build on this class.
 

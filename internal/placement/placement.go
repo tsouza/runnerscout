@@ -56,10 +56,13 @@ const MaxPriceAge = 5 * time.Minute
 
 // maxPriceMicrosCeiling mirrors api/v1alpha1's
 // PlacementPolicy.MaxPriceMicros kubebuilder Maximum marker (keep both in
-// sync by hand - kubebuilder markers can't reference a Go constant). It
-// exists to keep reservationMicros's maxPriceMicros*maxLifetimeSeconds
-// multiplication (maxLifetimeSeconds itself independently capped at 21600)
-// well clear of int64 overflow, not merely to reject implausible prices.
+// sync by hand - kubebuilder markers can't reference a Go constant). Chosen
+// as a generous plausibility ceiling ($100,000/hour) - real int64 overflow
+// in reservationMicros's maxPriceMicros*maxLifetimeSeconds multiplication
+// (maxLifetimeSeconds itself independently capped at 21600) only starts
+// around 4.27e14, roughly 4,270x higher than this value, so this ceiling
+// rejects implausible prices with wide overflow headroom to spare, not the
+// other way around.
 const maxPriceMicrosCeiling = 100_000_000_000
 
 func (r Requirements) Validate() error {

@@ -6,11 +6,13 @@
 // https://learn.microsoft.com/en-us/azure/event-grid/event-schema-health-resources).
 // It never creates or subscribes to any Event Grid or Storage Queue
 // resource, and never imports internal/operator, internal/provider or
-// internal/lifecycle - it only turns a received payload into a resource ID
-// and a preemption verdict, mirroring internal/githubjobs and
-// internal/prices's own single-purpose, dependency-free style. Wiring a
-// delivery transport and correlating the resource ID against a
-// RunnerScout allocation remain separate, later decisions.
+// internal/lifecycle itself - it only turns a received payload into a
+// resource ID and a preemption verdict, mirroring internal/githubjobs and
+// internal/prices's own single-purpose, dependency-free style. The delivery
+// transport is internal/azurequeue.Client, polled once per Tick cycle by
+// internal/operator (internal/operator/azure_interruptions.go); resource-ID
+// correlation against a RunnerScout allocation happens in
+// internal/provider's own azureConfirmedPreemption.
 package azureevents
 
 import (
