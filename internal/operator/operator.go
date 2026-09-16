@@ -194,6 +194,17 @@ type fleet struct {
 	// whichever allocation eventually observes and reconciles it. See
 	// pendingRerun and processInterruptionRetries in retry.go.
 	PendingReruns map[int64]pendingRerun `json:"pendingReruns,omitempty"`
+	// Pruned records every allocation ID whose Store record
+	// pruneTerminalAllocations has deleted, confirmed by that same call to
+	// have already had its claimed GitHub runner registration cleared.
+	// Created is never removed (see Reserved's own comment above), so once a
+	// record is pruned its ID remains in Created with no matching Store
+	// entry forever - Drained (control.go) relies on Pruned to tell "this ID
+	// is gone because it was confirmed resolved and cleaned up" apart from
+	// "this ID's allocation was never created at all," which an absent
+	// Store record alone cannot distinguish. Entries here are never removed
+	// either, matching Created's own lifetime.
+	Pruned map[string]bool `json:"pruned,omitempty"`
 }
 type Operator struct {
 	// Readiness is an optional concurrency-safe observer of session/reconciliation state.
@@ -353,6 +364,9 @@ func (o *Operator) readFleet(ctx context.Context, create bool) (*corev1.ConfigMa
 	}
 	if f.PendingReruns == nil {
 		f.PendingReruns = map[int64]pendingRerun{}
+	}
+	if f.Pruned == nil {
+		f.Pruned = map[string]bool{}
 	}
 	return cm, f, e
 }
@@ -709,7 +723,7 @@ func (o *Operator) Tick(ctx context.Context) error {
 	if e := o.processInterruptionRetries(ctx); e != nil {
 		failures = append(failures, e)
 	}
-	if e := o.pruneTerminalAllocations(ctx, f, allocs); e != nil {
+	if e := o.pruneTerminalAllocations(ctx, allocs); e != nil {
 		failures = append(failures, e)
 	}
 	return errors.Join(failures...)
@@ -719,15 +733,20 @@ func (o *Operator) Tick(ctx context.Context) error {
 // ConfigMap record once it is past terminalRetention. allocs is the pre-Step
 // snapshot Tick already loaded: Step never changes an already-terminal
 // allocation (Controller.Step no-ops for Deleted/TimedOut), so it remains an
-// accurate view of every candidate's Phase and TerminalAt. A Deleted record
-// is only pruned once f.Released[id] is true - the same fleet-level flag
-// HandleDesiredRunnerCount sets the first time it decrements Admitted for
-// this ID - so a record is never removed from the Store before that
-// one-time admission accounting has had a chance to observe it via
-// Store.List. TimedOut carries no such dependency: it is excluded from the
-// active count immediately, and its Admitted slot is released only by
-// Reconcile's own zero-demand cohort reset, never by anything keyed off the
-// record's continued existence.
+// accurate view of every candidate's Phase and TerminalAt. It loads the
+// fleet ConfigMap itself, rather than reusing Tick's own already-loaded
+// copy, because processInterruptionRetries (called just before this, in the
+// same Tick) may have already saved a newer one - reusing a stale copy here
+// would risk a conflict on save, or silently discarding that update.
+//
+// A Deleted record is only pruned once f.Released[id] is true - the same
+// fleet-level flag HandleDesiredRunnerCount sets the first time it
+// decrements Admitted for this ID - so a record is never removed from the
+// Store before that one-time admission accounting has had a chance to
+// observe it via Store.List. TimedOut carries no such dependency: it is
+// excluded from the active count immediately, and its Admitted slot is
+// released only by Reconcile's own zero-demand cohort reset, never by
+// anything keyed off the record's continued existence.
 //
 // Before deleting, each candidate's claimed GitHub runner registration is
 // re-verified/cleared right here - not by trusting a flag some earlier Step
@@ -746,11 +765,24 @@ func (o *Operator) Tick(ctx context.Context) error {
 // is not configured at all, or the verification call itself fails, the
 // record is retained and retried on a later Tick - never deleted without a
 // confirmed answer.
-func (o *Operator) pruneTerminalAllocations(ctx context.Context, f fleet, allocs []lifecycle.Allocation) error {
+//
+// Deleting a record's Store entry alone is not enough: fleet.Created never
+// removes this ID (see fleet.Reserved's own comment), so Drained
+// (control.go) would otherwise see this ID's Store record vanish and
+// conclude, forever, that its allocation is unresolved rather than
+// confirmed-clean-and-pruned (issue #170). f.Pruned records the distinction
+// Drained needs, saved once at the end of this call rather than once per
+// deleted record.
+func (o *Operator) pruneTerminalAllocations(ctx context.Context, allocs []lifecycle.Allocation) error {
 	if o.Controller.Runners == nil {
 		return nil
 	}
+	cm, f, e := o.loadFleet(ctx)
+	if e != nil {
+		return e
+	}
 	var failures []error
+	dirty := false
 	for _, a := range allocs {
 		if a.TerminalAt.IsZero() || time.Since(a.TerminalAt) < terminalRetention {
 			continue
@@ -758,12 +790,20 @@ func (o *Operator) pruneTerminalAllocations(ctx context.Context, f fleet, allocs
 		if a.Phase != lifecycle.TimedOut && !(a.Phase == lifecycle.Deleted && f.Released[a.ID]) {
 			continue
 		}
-		if e := o.Controller.Runners.DeregisterRunner(ctx, a.ID); e != nil {
-			failures = append(failures, e)
+		if err := o.Controller.Runners.DeregisterRunner(ctx, a.ID); err != nil {
+			failures = append(failures, err)
 			continue
 		}
-		if e := o.Store.Delete(ctx, a.ID); e != nil {
-			failures = append(failures, e)
+		if err := o.Store.Delete(ctx, a.ID); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		f.Pruned[a.ID] = true
+		dirty = true
+	}
+	if dirty {
+		if err := o.saveFleet(ctx, cm, f); err != nil {
+			failures = append(failures, err)
 		}
 	}
 	return errors.Join(failures...)

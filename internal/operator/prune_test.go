@@ -178,3 +178,46 @@ func TestTickNeverPrunesWithoutRunnersConfigured(t *testing.T) {
 		t.Fatal("a record must never be pruned when Runners is unconfigured", e)
 	}
 }
+
+// Issue #170: fleet.Created is never removed, so once a record is pruned
+// its ID remains in Created with no matching Store entry - Drained must
+// treat that as confirmed-resolved-and-cleaned-up (via fleet.Pruned), not
+// as unresolved, or a deployment that has ever pruned a single record could
+// never again confirm drain/uninstall.
+func TestDrainedRemainsTrueAfterPruning(t *testing.T) {
+	ctx := context.Background()
+	k := fake.NewClientset()
+	cfg := Config{Name: "test", Namespace: "test", MaxRunners: 10, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}
+	o := New(cfg, k, nil)
+	o.Controller.Runners = &fakeDeregistrar{}
+
+	old := time.Now().Add(-48 * time.Hour)
+	const id = "rs-prune-then-drain"
+	a := lifecycle.Allocation{ID: id, Phase: lifecycle.TimedOut, Deadline: old, MaxAttempts: 3, Retire: true, TerminalAt: old}
+	if _, e := o.Store.Save(ctx, a, ""); e != nil {
+		t.Fatal(e)
+	}
+	cm, f, e := o.loadFleet(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.Created[id] = time.Now()
+	if e := o.saveFleet(ctx, cm, f); e != nil {
+		t.Fatal(e)
+	}
+
+	if e := o.Tick(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := o.Store.Load(ctx, id); e == nil {
+		t.Fatal("expected the record to have been pruned as a precondition of this test")
+	}
+
+	done, e := o.Drained(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !done {
+		t.Fatal("Drained must remain true for an allocation whose record was pruned after confirmed cleanup")
+	}
+}
