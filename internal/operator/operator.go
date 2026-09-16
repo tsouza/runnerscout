@@ -722,19 +722,44 @@ func (o *Operator) Tick(ctx context.Context) error {
 // accurate view of every candidate's Phase and TerminalAt. A Deleted record
 // is only pruned once f.Released[id] is true - the same fleet-level flag
 // HandleDesiredRunnerCount sets the first time it decrements Admitted for
-// this ID - so a record is never removed from the Store before that one-time
-// admission accounting has had a chance to observe it via Store.List.
-// TimedOut carries no such dependency: it is excluded from the active count
-// immediately, and its Admitted slot is released only by Reconcile's own
-// zero-demand cohort reset, never by anything keyed off the record's
-// continued existence.
+// this ID - so a record is never removed from the Store before that
+// one-time admission accounting has had a chance to observe it via
+// Store.List. TimedOut carries no such dependency: it is excluded from the
+// active count immediately, and its Admitted slot is released only by
+// Reconcile's own zero-demand cohort reset, never by anything keyed off the
+// record's continued existence.
+//
+// Before deleting, each candidate's claimed GitHub runner registration is
+// re-verified/cleared right here - not by trusting a flag some earlier Step
+// call may or may not have set. Persisting such a flag at transition time
+// cannot distinguish "confirmed clear" from "this record predates the flag
+// existing at all," which would permanently strand every terminal record
+// already in the Store the moment this code deploys - a self-inflicted
+// version of exactly the "no periodic reconciliation" gap this whole
+// mechanism exists to close. Re-checking at prune time instead needs no
+// migration and is uniformly correct for every record regardless of when it
+// was created or which Step transition (if any) is the one that reaches
+// Deleted/TimedOut for it: DeregisterRunner is required to no-op once the
+// registration is already gone, so this costs one extra idempotent lookup
+// per record, on an already-rare, already-batched operation (once per
+// record, 24h+ after it went terminal), never a per-tick cost. If Runners
+// is not configured at all, or the verification call itself fails, the
+// record is retained and retried on a later Tick - never deleted without a
+// confirmed answer.
 func (o *Operator) pruneTerminalAllocations(ctx context.Context, f fleet, allocs []lifecycle.Allocation) error {
+	if o.Controller.Runners == nil {
+		return nil
+	}
 	var failures []error
 	for _, a := range allocs {
 		if a.TerminalAt.IsZero() || time.Since(a.TerminalAt) < terminalRetention {
 			continue
 		}
 		if a.Phase != lifecycle.TimedOut && !(a.Phase == lifecycle.Deleted && f.Released[a.ID]) {
+			continue
+		}
+		if e := o.Controller.Runners.DeregisterRunner(ctx, a.ID); e != nil {
+			failures = append(failures, e)
 			continue
 		}
 		if e := o.Store.Delete(ctx, a.ID); e != nil {
