@@ -24,6 +24,36 @@ func TestPersistenceAcrossStoreInstances(t *testing.T) {
 		t.Fatal(got, e)
 	}
 }
+func TestDeleteRemovesRecordAndNoOpsWhenAlreadyGone(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewClientset()
+	s := Kubernetes{Maps: client.CoreV1().ConfigMaps("test"), Owner: "owner"}
+	a := lifecycle.Allocation{ID: "rs-test", Phase: lifecycle.TimedOut}
+	if _, e := s.Save(ctx, a, ""); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.Delete(ctx, a.ID); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Load(ctx, a.ID); e == nil {
+		t.Fatal("record survived Delete")
+	}
+	// Deleting an already-gone record is a no-op, not an error - a retried
+	// prune pass (e.g. after a partial fleet-write failure) must not fail.
+	if e := s.Delete(ctx, a.ID); e != nil {
+		t.Fatal("deleting an already-absent record must no-op", e)
+	}
+}
+func TestDeleteRejectsForeignState(t *testing.T) {
+	c := fake.NewClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "rs-test", Namespace: "test", Labels: map[string]string{"runnerscout/owner": "foreign"}}, Data: map[string]string{"allocation": `{"id":"rs-test"}`}})
+	s := Kubernetes{Maps: c.CoreV1().ConfigMaps("test"), Owner: "owner"}
+	if e := s.Delete(context.Background(), "rs-test"); e == nil {
+		t.Fatal("deleted foreign allocation")
+	}
+	if _, e := c.CoreV1().ConfigMaps("test").Get(context.Background(), "rs-test", metav1.GetOptions{}); e != nil {
+		t.Fatal("foreign record must survive a rejected delete", e)
+	}
+}
 func TestForeignStateRejected(t *testing.T) {
 	c := fake.NewClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "rs-test", Namespace: "test", Labels: map[string]string{"runnerscout/owner": "foreign"}}, Data: map[string]string{"allocation": `{"id":"rs-test"}`}})
 	s := Kubernetes{Maps: c.CoreV1().ConfigMaps("test"), Owner: "owner"}

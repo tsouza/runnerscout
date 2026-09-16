@@ -96,6 +96,29 @@ func (s *Kubernetes) Save(ctx context.Context, a lifecycle.Allocation, revision 
 	a.Revision = out.ResourceVersion
 	return a, nil
 }
+
+// Delete permanently removes a terminal allocation's ConfigMap record.
+// Callers must only ever delete a record whose Phase is already durably
+// Deleted or TimedOut - see internal/operator's terminal-record pruning,
+// the only caller today.
+func (s *Kubernetes) Delete(ctx context.Context, id string) error {
+	cm, err := s.Maps.Get(ctx, id, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if cm.Labels["runnerscout/owner"] != s.Owner {
+		return errors.New("state ownership mismatch")
+	}
+	err = s.Maps.Delete(ctx, id, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 func (s *Kubernetes) List(ctx context.Context) ([]lifecycle.Allocation, error) {
 	cms, err := s.Maps.List(ctx, metav1.ListOptions{LabelSelector: "runnerscout/owner=" + s.Owner + ",runnerscout/kind=allocation"})
 	if err != nil {

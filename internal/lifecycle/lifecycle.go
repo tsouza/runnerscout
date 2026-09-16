@@ -121,6 +121,14 @@ type Allocation struct {
 	// The raw token itself is generated once and consumed immediately into
 	// cloud-init, exactly like WireGuardPublicKey's private-key counterpart.
 	WireGuardPollTokenHash []byte `json:"wireGuardPollTokenHash,omitempty"`
+	// TerminalAt is set once, the moment Phase first becomes Deleted or
+	// TimedOut, and never touched again - it is not a general last-transition
+	// timestamp for every phase change. It exists so a caller (see
+	// internal/operator's terminal-record pruning) can tell how long an
+	// allocation has been definitively inert without inferring that from
+	// Deadline, which keeps its original Pending-phase meaning even after a
+	// later terminal transition.
+	TerminalAt time.Time `json:"terminalAt,omitempty"`
 }
 
 var ErrConflict = errors.New("state revision conflict")
@@ -216,11 +224,31 @@ type Store interface {
 	Load(context.Context, string) (Allocation, error)
 	Save(context.Context, Allocation, string) (Allocation, error)
 }
+
+// RunnerDeregistrar deregisters a claimed GitHub Actions runner registration by
+// allocation ID (the runner name GitHub pre-registered when it claimed the
+// job), the moment an allocation reaches TimedOut with no cloud resource ever
+// confirmed created. It must no-op when the registration is already gone
+// (picked up by something else, never actually claimed, or already removed by
+// a prior attempt) - only a definitive removal or confirmed absence may
+// return nil; any other outcome must return an error so Step leaves the
+// allocation in Pending for a later retry rather than persisting TimedOut
+// over an unconfirmed orphaned registration.
+type RunnerDeregistrar interface {
+	DeregisterRunner(ctx context.Context, id string) error
+}
+
 type Controller struct {
 	Cooldowns map[string]time.Time
 	Store     Store
 	Providers map[string]Provider
 	Now       func() time.Time
+	// Runners deregisters a TimedOut allocation's claimed GitHub runner
+	// registration before the phase transition is persisted (see
+	// RunnerDeregistrar). nil is a complete no-op, matching every other
+	// optional integration point in this codebase (e.g. operator.Operator's
+	// AzureInterruptions) - no allocation's transition is otherwise affected.
+	Runners RunnerDeregistrar
 }
 
 // Step makes at most one provider operation. A committed Creating intent survives
@@ -244,8 +272,14 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return errors.New("pending allocation retains cloud resources")
 		}
 		if a.Retire || expired || a.Attempts >= a.MaxAttempts {
+			if c.Runners != nil {
+				if err := c.Runners.DeregisterRunner(ctx, a.ID); err != nil {
+					return err
+				}
+			}
 			a.Phase = TimedOut
 			a.Condition = "LocalProvisioningTimeout"
+			a.TerminalAt = now
 			return save()
 		}
 		outcomes := make(map[string]placement.Outcome, len(a.Outcomes))
@@ -366,6 +400,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			// forever with no recovery path.
 			a.Phase = Deleted
 			a.Condition = "CreateConfirmedAbsent"
+			a.TerminalAt = now
 			return save()
 		}
 		a.ResourceID = ob.ResourceID
@@ -395,6 +430,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			if ob.Interrupted {
 				a.Condition = "ResourceAbsentConfirmedInterruption"
 			}
+			a.TerminalAt = now
 			return save()
 		}
 		return nil
@@ -410,6 +446,7 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		if !ob.Exists {
 			a.Phase = Deleted
 			a.Condition = "CleanupConfirmed"
+			a.TerminalAt = now
 			return save()
 		}
 		if err := p.Delete(ctx, a); err != nil {
