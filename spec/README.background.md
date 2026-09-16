@@ -210,6 +210,40 @@ way credentials/CIDR-churn/leader-election were - they are gaps in this
 pass's coverage, named here so a future pass does not have to rediscover
 that they are missing.
 
+## AdmissionSlot.tla: a gap this pass never even named
+
+Issue #174 (a v1.2.0 production incident: a batch of TimedOut allocations
+under sustained real demand permanently consumed their admission slots,
+because release was gated on the same zero-demand `Cohort` reset used for a
+full-fleet-idle rebaseline) exposed a coverage gap distinct from every one
+listed above. The four items in "why the remaining events were set aside"
+were at least named as gaps once the original research enumeration
+surfaced them, even though they were never modeled. This one was not named
+anywhere - not modeled, not deliberately excluded, not flagged for a future
+pass. `admission.State`'s own per-allocation lifecycle (`Admitted`,
+`fleet.Released`, which terminal phase actually releases a slot) was never
+treated as its own subsystem worth enumerating events for. `BudgetAdmission.tla`
+touches the same code area but only as an aggregate proxy for a different
+question (the daily spend ceiling); it has no `Admitted`/`Released`
+variables and could not have caught this by construction, independent of
+which invariants it checks.
+
+The honest reason: the original enumeration was organized around the two
+things that prompted this whole exploration - GitHub's registration state
+diverging, and the budget/ceiling question about price dropping while
+capacity is full. A state machine that looked like solved, understood
+plumbing (a slot counter and a release flag) never got the same
+first-principles "what are all the events that can happen to this" pass
+`RunnerRegistration.tla`'s subject got. `AdmissionSlot.tla` is that pass,
+applied retroactively, once a production incident forced the question. Its
+`EveryTerminalIsReleasable` invariant would have caught #174 before it
+shipped, had this module existed first: `ReleasablePhases` (standing in for
+the code's actual release guard) and `{"Deleted", "TimedOut"}` (standing in
+for what "provably inert, should release" means) are independently
+parameterized, and the pre-174 config's three-step counterexample
+(`Claim -> ToTimedOut`, no third step ever enabled) reproduces the real
+incident's shape exactly.
+
 ## Why `make tlc` and not CI
 
 These models check themselves, not the Go code - there is no mechanism
