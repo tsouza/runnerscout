@@ -643,7 +643,13 @@ func (o *Operator) Tick(ctx context.Context) error {
 	for i, a := range allocs {
 		created, ok := f.Created[a.ID]
 		if !ok {
-			return errors.New("allocation has no durable lifetime origin")
+			// Recorded into failures and joined below, not returned
+			// directly: a bare return here would strand every goroutine
+			// this loop already spawned for earlier allocations and
+			// release o.mu (deferred at the top of Tick) while they're
+			// still running, letting a subsequent Tick race them.
+			failures = append(failures, errors.New("allocation has no durable lifetime origin"))
+			continue
 		}
 		if !a.Retire && (o.draining || !time.Now().Before(created.Add(time.Duration(o.Config.MaxLifetimeSeconds)*time.Second))) {
 			a.Retire = true

@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -189,5 +190,59 @@ func TestTickAggregatesCooldownsFromConcurrentCapacityRejections(t *testing.T) {
 	}
 	if until, ok := op.Controller.Cooldowns["pool"]; !ok || !until.After(time.Now()) {
 		t.Fatalf("expected pool cooldown recorded from concurrent capacity rejections, got %v", op.Controller.Cooldowns)
+	}
+}
+
+// An allocation the Store knows about but the fleet ConfigMap's f.Created
+// map has no entry for (the two falling out of sync - a manual kubectl
+// edit, backup/restore) must not strand the goroutines Tick already spawned
+// for other, valid allocations earlier in the same loop: Tick must still
+// join every goroutine it started before returning, not abandon them by
+// returning directly from inside the loop (which would also release o.mu
+// while they're still running, unblocking a subsequent Tick to race them).
+func TestTickJoinsAlreadySpawnedGoroutinesWhenALaterAllocationHasNoOrigin(t *testing.T) {
+	const n = 3
+	const delay = 200 * time.Millisecond
+	op, cloud := concurrentOperatorFixture(n)
+	cloud.delay = delay
+	ctx := context.Background()
+	if _, err := op.HandleDesiredRunnerCount(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	cm, f, err := op.loadFleet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(f.Created))
+	for id := range f.Created {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	// Store.List (backing the allocs range in Tick) returns allocations
+	// name-sorted, so breaking the last-sorted ID guarantees the other
+	// n-1 allocations' goroutines are already spawned by the time Tick
+	// reaches this one.
+	broken := ids[len(ids)-1]
+	delete(f.Created, broken)
+	if err := op.saveFleet(ctx, cm, f); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	err = op.Tick(ctx)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error for the allocation missing its durable lifetime origin")
+	}
+	// If the already-spawned goroutines for the other n-1 allocations were
+	// stranded instead of joined, Tick would return almost immediately -
+	// well under delay. Joining them means Tick cannot return before delay
+	// has elapsed.
+	if elapsed < delay {
+		t.Fatalf("Tick returned after %v, before its still-running goroutines (delay %v) could have finished - they were stranded, not joined", elapsed, delay)
+	}
+	if len(cloud.createDeadlines) != n-1 {
+		t.Fatalf("expected %d Create calls from the still-valid allocations, got %d", n-1, len(cloud.createDeadlines))
 	}
 }
