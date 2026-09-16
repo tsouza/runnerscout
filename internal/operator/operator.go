@@ -259,7 +259,13 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 			}
 			r, e := g.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: id, WorkFolder: "_work"}, c.ScaleSetID)
 			if e != nil {
-				return "", errors.New("GitHub JIT request failed")
+				// Preserve the real GitHub API error (status code, message)
+				// rather than a bare fixed string - see command.go's
+				// CreateWithResources and lifecycle.go's Step, which now both
+				// thread this text through to the allocation's own Condition
+				// instead of discarding it at this, the first of what used
+				// to be three separate swallow points (issue #176).
+				return "", fmt.Errorf("GitHub JIT request failed: %w", e)
 			}
 			return r.EncodedJITConfig, nil
 		}, NetworkPeers: networkPeers}

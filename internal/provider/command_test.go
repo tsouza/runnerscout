@@ -9,6 +9,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/testutil"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +91,14 @@ func TestJITPreparationFailureHasNoCloudEffects(t *testing.T) {
 			receipt, err := p.CreateWithResources(context.Background(), a)
 			if !errors.Is(err, lifecycle.ErrNoEffect) || receipt.ResourceID != "" || len(receipt.Resources) != 0 || len(f.Requests()) != 0 {
 				t.Fatal("bootstrap failure allowed cloud effects", receipt, err)
+			}
+			// A real Bootstrap error (e.g. GitHub JIT config generation
+			// failing) must stay readable in the wrapped error's own text -
+			// Step's Condition assignment relies on it (issue #176: this used
+			// to be discarded here, collapsing every preparation failure to
+			// an indistinguishable bare sentinel).
+			if mode == "error" && !strings.Contains(err.Error(), "private upstream error") {
+				t.Fatal("Bootstrap's real error must not be discarded", err)
 			}
 		})
 	}

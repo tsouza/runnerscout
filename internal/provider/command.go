@@ -182,7 +182,15 @@ func (p *Command) CreateWithResources(ctx context.Context, a lifecycle.Allocatio
 		return lifecycle.Creation{}, lifecycle.ErrNoEffect
 	}
 	jit, err := p.Bootstrap(ctx, a.ID)
-	if err != nil || jit == "" {
+	if err != nil {
+		// Preserve why Bootstrap failed (e.g. the real GitHub JIT config
+		// error) rather than collapsing it to the bare sentinel - Step's own
+		// Condition assignment surfaces this text, and a discarded cause here
+		// is exactly what made issue #176's GitHub-side failure look like a
+		// GCP-provider problem from the allocation's own status alone.
+		return lifecycle.Creation{}, fmt.Errorf("%w: %v", lifecycle.ErrNoEffect, err)
+	}
+	if jit == "" {
 		return lifecycle.Creation{}, lifecycle.ErrNoEffect
 	}
 	// Wireguard-mode embedding only runs when NetworkProfile is set - only
