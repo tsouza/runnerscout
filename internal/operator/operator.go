@@ -561,6 +561,25 @@ func (o *Operator) HandleJobCompleted(ctx context.Context, j *scaleset.JobComple
 	_, e = o.Store.Save(ctx, a, a.Revision)
 	return e
 }
+
+const (
+	// tickStepBudget is the per-call context budget for phases that only
+	// ever call Observe (Creating, Running) - no real-cloud evidence any
+	// of them need more.
+	tickStepBudget = 30 * time.Second
+	// tickCreateOrDeleteBudget is the per-call budget for Pending (about
+	// to call Create) and Deleting (about to call Delete) - see the call
+	// site's own comment for the evidence this needs to be minutes, not
+	// seconds.
+	tickCreateOrDeleteBudget = 5 * time.Minute
+	// tickStepConcurrency bounds how many allocations' Step calls run at
+	// once in a single Tick - generous headroom above MaxRunners's own
+	// hard cap of 10, since every allocation in the Store (not just the
+	// currently active ones) gets a goroutine, most of which are
+	// near-instant no-ops (Deleted/TimedOut phases return immediately).
+	tickStepConcurrency = 20
+)
+
 func (o *Operator) Tick(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -600,7 +619,28 @@ func (o *Operator) Tick(ctx context.Context) error {
 	// applyAzureInterruptions's own doc comments for why.
 	o.applyAzureInterruptions(o.pollAzureInterruptions(ctx))
 	var failures []error
-	for _, a := range allocs {
+	// Each allocation's Step call runs on its own goroutine, bounded by
+	// tickStepConcurrency, rather than sequentially: real cloud create/
+	// delete calls (see the budget selection below) can genuinely take
+	// minutes, and a burst of admissions (up to MaxRunners, all newly
+	// Pending in the same Tick - see the f.Pending migration above) would
+	// otherwise serialize behind one another, holding o.mu for their sum
+	// rather than their max. o.mu itself is still held for the whole Tick
+	// call as before - this only shortens how long that hold typically
+	// lasts, it does not change what Tick is exclusive with (see issue
+	// #144's own "why this hasn't just been bumped to a bigger number"
+	// section for the full reasoning, including why o.Controller.Cooldowns
+	// updates below are deferred until every goroutine has joined: nothing
+	// may write that shared map while any goroutine could still be reading
+	// it via placement.Choose inside Step).
+	type stepOutcome struct {
+		err       error
+		cooldowns map[string]time.Time
+	}
+	results := make([]stepOutcome, len(allocs))
+	sem := make(chan struct{}, tickStepConcurrency)
+	var wg sync.WaitGroup
+	for i, a := range allocs {
 		created, ok := f.Created[a.ID]
 		if !ok {
 			return errors.New("allocation has no durable lifetime origin")
@@ -612,19 +652,44 @@ func (o *Operator) Tick(ctx context.Context) error {
 				continue
 			}
 		}
-		call, cancel := context.WithTimeout(ctx, 30*time.Second)
-		e = o.Controller.Step(call, a.ID)
-		cancel()
-		if updated, loadErr := o.Store.Load(ctx, a.ID); loadErr == nil {
-			for pool, at := range updated.RejectedAt {
-				until := at.Add(5 * time.Minute)
-				if until.After(o.Controller.Cooldowns[pool]) {
-					o.Controller.Cooldowns[pool] = until
+		// Pending (about to call Create) and Deleting (about to call
+		// Delete) are the phases real cloud dispatches have shown can
+		// genuinely exceed 30s (see internal/provider/azure.go's
+		// createAzure and internal/provider/gcp_sdk.go's createGCP/
+		// deleteGCP for the documented evidence). Creating/Running only
+		// ever call Observe, which has no such evidence and stays tight
+		// so a stuck one can't hold a concurrency slot for minutes.
+		budget := tickStepBudget
+		if a.Phase == lifecycle.Pending || a.Phase == lifecycle.Deleting {
+			budget = tickCreateOrDeleteBudget
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, id string, budget time.Duration) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			call, cancel := context.WithTimeout(ctx, budget)
+			stepErr := o.Controller.Step(call, id)
+			cancel()
+			outcome := stepOutcome{err: stepErr}
+			if updated, loadErr := o.Store.Load(ctx, id); loadErr == nil && len(updated.RejectedAt) > 0 {
+				outcome.cooldowns = make(map[string]time.Time, len(updated.RejectedAt))
+				for pool, at := range updated.RejectedAt {
+					outcome.cooldowns[pool] = at.Add(5 * time.Minute)
 				}
 			}
+			results[i] = outcome
+		}(i, a.ID, budget)
+	}
+	wg.Wait()
+	for _, r := range results {
+		if r.err != nil {
+			failures = append(failures, r.err)
 		}
-		if e != nil {
-			failures = append(failures, e)
+		for pool, until := range r.cooldowns {
+			if until.After(o.Controller.Cooldowns[pool]) {
+				o.Controller.Cooldowns[pool] = until
+			}
 		}
 	}
 	if e := o.processInterruptionRetries(ctx); e != nil {

@@ -204,12 +204,16 @@ func (p *Command) createGCP(ctx context.Context, a lifecycle.Allocation, script 
 	// Same shape as Azure's createAzure: Instances.Insert then a blocking
 	// poll (waitGCPOperation) to a terminal state, not a fire-and-return
 	// call. No real-cloud evidence yet that GCP instance creation reliably
-	// finishes under 30s the way AWS's RunInstances does - unlike Azure,
-	// this budget has not been raised, since operator.go's Step call caps
-	// it at ~30s in production regardless (see deleteGCP's identical
-	// caveat, and createAzure's comment for why raising the shared budget
-	// is a separate, broader change - see issue #144).
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// finishes under 30s the way AWS's RunInstances does - given Azure's
+	// own create path needed well over 30s in practice for the identical
+	// insert-then-poll shape, this uses the same 5-minute budget
+	// defensively rather than waiting for a real GCP dispatch to hit the
+	// same wall. operator.go's Step call gives Pending-phase allocations
+	// this same 5-minute context (not the tighter 30-second budget it
+	// gives Observe-only phases), and each allocation's Step call runs on
+	// its own goroutine, so this budget genuinely reaches production
+	// without serializing behind other allocations' Step calls.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	service, err := p.gcpClient()
 	if err != nil {
@@ -328,20 +332,16 @@ func (p *Command) gcpConfirmedPreemption(ctx context.Context, a lifecycle.Alloca
 	return err == nil && found
 }
 func (p *Command) deleteGCP(ctx context.Context, a lifecycle.Allocation) error {
-	// 60s, not createGCP's 30s: a real dispatch found that deleting a real
-	// instance (which includes detaching/deleting its PERSISTENT,
-	// AutoDelete boot disk in the same async operation chain) can
-	// genuinely take longer to reach DONE than creating one does - a
-	// timeout here doesn't mean the delete failed (GCP keeps processing it
-	// server-side regardless of whether this call is still watching), just
-	// that this one call couldn't confirm completion in time. This only
-	// actually matters for internal/provider/gcp_realcloud_test.go's own
-	// direct Delete call (its own 5-minute dedicatedTeardownBudget context
-	// has room for the full 60s) - operator.go's Step call wraps every
-	// production Delete in its own, tighter 30-second context, which caps
-	// this at ~30s regardless of the value here. Raising that shared,
-	// per-reconciliation-step budget is a separate, broader change than
-	// this one, out of scope here.
+	// 60s: a real dispatch found that deleting a real instance (which
+	// includes detaching/deleting its PERSISTENT, AutoDelete boot disk in
+	// the same async operation chain) can genuinely take longer to reach
+	// DONE than creating one does - a timeout here doesn't mean the
+	// delete failed (GCP keeps processing it server-side regardless of
+	// whether this call is still watching), just that this one call
+	// couldn't confirm completion in time. operator.go's Step call gives
+	// Deleting-phase allocations (the ones about to call Delete, like
+	// this one) a 5-minute context, well above this 60s budget, so this
+	// value applies as configured in production, not shortened.
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := p.gcpCreateTerminal(ctx, a); err != nil {
