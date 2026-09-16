@@ -94,7 +94,7 @@ func (o *Operator) Drained(ctx context.Context) (bool, error) {
 		}
 	}
 	for id := range fleet.Created {
-		if !recorded[id] {
+		if !recorded[id] && !fleet.Pruned[id] {
 			return false, nil
 		}
 	}
