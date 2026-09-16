@@ -2,7 +2,12 @@
 
 Development chart `0.1.0-dev.1`; supply an explicitly built runtime image. The
 current target is Kubernetes 1.37 and Helm 3.22. The runtime includes the AWS/GCP
-CLIs and native Azure SDK. Live GitHub-to-VM and release qualification remain open.
+CLIs and native Azure SDK. Real VM creation, interruption reporting and cleanup
+have each been independently qualified against live AWS, Azure and GCP spot
+capacity - see [qualification-real-cloud.md](../../docs/qualification-real-cloud.md).
+Real GitHub Actions job execution end-to-end (a runner actually picking up and
+running a job on a provisioned VM) is a separate, larger piece that qualification
+does not attempt and remains open.
 
 ## Configuration
 

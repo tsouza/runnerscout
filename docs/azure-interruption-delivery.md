@@ -223,27 +223,32 @@ own inventory poll.
 
 ## What this document does not decide
 
-The exact `provider.Config` field(s) referencing the queue endpoint
-(name/URL, and whether authentication reuses `AzureSDK.credentials()`
-as-is or needs its own credential scoping); the precise poll interval
-(whether it rides `Operator.Tick`'s existing cadence unchanged or needs
-its own, faster interval given interruption response latency); the actual
-`internal/provider/azure.go` and `internal/operator/operator.go` code
-changes that would construct a real `azurequeue.Client`, assign it to
-`Operator.AzureInterruptions`, and consult it from `observeAzure`; the
-exact install-doc IAM role/permission grant (Storage Queue Data
-Message Processor scoped to the one queue, versus a broader role); the
-Event Grid subscription's own delivery retry policy and optional
+Only step 1 (provisioning) remains outside this document's scope, by the
+same design as every other cloud IAM/credential setup step this codebase
+defers to a human (see Recommendation 1 above) - `docs/operations.md` does
+not yet document it. Two pieces of that provisioning step are genuinely
+undecided: the exact install-doc IAM role/permission grant (Storage Queue
+Data Message Processor scoped to the one queue, versus a broader role),
+and the Event Grid subscription's own delivery retry policy and optional
 dead-letter destination (a separate Storage Blob container Event Grid can
 target when *delivery itself* is exhausted - a different failure mode from
 a message this client dequeues but cannot classify, which
 `internal/azurequeue.Client.Poll` already handles by leaving it
-undeleted); and whether `internal/azurequeue`'s assumption that Event Grid
+undeleted).
+
+Separately, whether `internal/azurequeue`'s assumption that Event Grid
 base64-encodes message bodies before placing them in the queue holds
-against a real subscription (unverified here - no live Azure Event Grid
+against a real subscription remains unverified (no live Azure Event Grid
 budget is currently allocated per `docs/operations.md`, so
 `internal/azurequeue`'s decoder defensively tries both raw and
 base64-decoded bytes; see
 [azure-interruption-delivery.background.md](azure-interruption-delivery.background.md)
-for the investigation behind that assumption) are all real remaining
-implementation decisions this document does not make.
+for the investigation behind that assumption).
+
+Everything else this section previously listed as undecided - the
+`provider.Config` field referencing the queue endpoint
+(`Config.AzureInterruptionQueueURL`), the poll interval (rides
+`Operator.Tick`'s existing cadence unchanged), and the
+`internal/provider/azure.go`/`internal/operator/operator.go` code
+constructing `azurequeue.Client` and consulting it from `observeAzure` -
+is implemented; see the Status banner and steps 2-4 above.
