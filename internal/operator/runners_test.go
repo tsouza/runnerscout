@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/actions/scaleset"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // fixtureClient builds a *scaleset.Client backed by a local HTTP fixture (not
@@ -56,6 +57,22 @@ func fixtureClient(t *testing.T, runners map[string]int, removed *[]int) *scales
 		t.Fatal(err)
 	}
 	return client
+}
+
+// internal/configapi/runtime.go's CleanupMode and RecoveryMode both call
+// operator.New with a nil *scaleset.Client (they never open a GitHub
+// session, by design) and then run Tick in a loop - the exact shape this
+// test constructs. Controller.Runners must be a true nil interface in that
+// case, not a non-nil *runnerDeregistrar wrapping a nil client: the latter
+// would make every Controller.Runners == nil check elsewhere (deregister,
+// pruneTerminalAllocations) silently unable to detect "no GitHub wiring at
+// all," letting pruneTerminalAllocations delete records having asked GitHub
+// nothing while believing it had confirmed clean.
+func TestNewLeavesRunnersNilWithoutAGitHubClient(t *testing.T) {
+	o := New(Config{Name: "test", Namespace: "test", MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}, fake.NewClientset(), nil)
+	if o.Controller.Runners != nil {
+		t.Fatal("Controller.Runners must be nil when no GitHub client is configured", o.Controller.Runners)
+	}
 }
 
 func TestRunnerDeregistrarNilClientNoop(t *testing.T) {

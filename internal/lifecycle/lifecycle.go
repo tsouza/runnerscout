@@ -225,15 +225,15 @@ type Store interface {
 	Save(context.Context, Allocation, string) (Allocation, error)
 }
 
-// RunnerDeregistrar deregisters a claimed GitHub Actions runner registration by
-// allocation ID (the runner name GitHub pre-registered when it claimed the
-// job), the moment an allocation reaches TimedOut with no cloud resource ever
-// confirmed created. It must no-op when the registration is already gone
-// (picked up by something else, never actually claimed, or already removed by
-// a prior attempt) - only a definitive removal or confirmed absence may
-// return nil; any other outcome must return an error so Step leaves the
-// allocation in Pending for a later retry rather than persisting TimedOut
-// over an unconfirmed orphaned registration.
+// RunnerDeregistrar deregisters a claimed GitHub Actions runner registration
+// by allocation ID (the runner name) - see deregister's own doc comment
+// below for when this is called and why. It must no-op when the
+// registration is already gone (picked up by something else, never actually
+// claimed, or already removed by a prior attempt) - only a definitive
+// removal or confirmed absence may return nil; any other outcome must
+// return an error so Step leaves the allocation's phase transition
+// unpersisted for a later retry, rather than persisting a Deleted/TimedOut
+// transition over an unconfirmed orphaned registration.
 type RunnerDeregistrar interface {
 	DeregisterRunner(ctx context.Context, id string) error
 }

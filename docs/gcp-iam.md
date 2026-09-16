@@ -38,9 +38,17 @@ compute.images.useReadOnly
 
 Each of these needs its own permission on top of `*.create`.
 
-A role missing any one of these permissions produces `LocalProvisioningTimeout`
-after 3 silent attempts, with no error surfaced by runnerscout itself. The
-only place the underlying 403 appears is GCP's own Admin Activity audit log:
+A role missing any one of these permissions makes `Instances.Insert` itself
+403, which `createGCP` cannot distinguish from any other ambiguous create
+failure: the allocation stays committed to `Creating` (never returns to
+`Pending` to retry, and never reaches `LocalProvisioningTimeout`), and
+`Tick` surfaces `"create commitment unknown for <id>"` as an error each
+cycle - which fails `/readyz` and logs `reconciliation incomplete; durable
+obligations retained`, so this is visible, but never names IAM or the
+missing permission as the cause. The condition eventually resolves to
+`CreateConfirmedAbsent` once a later `Observe` confirms the VM was never
+created. The only place the underlying 403 itself appears is GCP's own
+Admin Activity audit log:
 
 ```
 gcloud logging read 'protoPayload.methodName:"compute.instances"' --project=<project>

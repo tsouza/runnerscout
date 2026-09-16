@@ -7,7 +7,11 @@ import (
 	"time"
 
 	"github.com/tsouza/runnerscout/internal/lifecycle"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	kt "k8s.io/client-go/testing"
 )
 
 // fakeDeregistrar is a test-only lifecycle.RunnerDeregistrar: fail, when set,
@@ -219,5 +223,67 @@ func TestDrainedRemainsTrueAfterPruning(t *testing.T) {
 	}
 	if !done {
 		t.Fatal("Drained must remain true for an allocation whose record was pruned after confirmed cleanup")
+	}
+}
+
+// pruneTerminalAllocations must persist f.Pruned before deleting any Store
+// record, not after: deleting first and saving f.Pruned once at the end
+// would mean a single failed fleet save after some deletes had already
+// succeeded permanently strands those records' IDs in fleet.Created with no
+// way to ever mark them Pruned again (issue #170, reopened). Injects a
+// failure into exactly the fleet ConfigMap's own update call (not the
+// allocation's own Store record) to isolate this ordering.
+func TestPruneSurvivesAFailedFleetSave(t *testing.T) {
+	ctx := context.Background()
+	k := fake.NewClientset()
+	cfg := Config{Name: "test", Namespace: "test", MaxRunners: 10, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}
+	o := New(cfg, k, nil)
+	o.Controller.Runners = &fakeDeregistrar{}
+
+	old := time.Now().Add(-48 * time.Hour)
+	const id = "rs-fleet-save-fails"
+	a := lifecycle.Allocation{ID: id, Phase: lifecycle.TimedOut, Deadline: old, MaxAttempts: 3, Retire: true, TerminalAt: old}
+	if _, e := o.Store.Save(ctx, a, ""); e != nil {
+		t.Fatal(e)
+	}
+	cm, f, e := o.loadFleet(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.Created[id] = time.Now()
+	if e := o.saveFleet(ctx, cm, f); e != nil {
+		t.Fatal(e)
+	}
+
+	// The second update to the fleet ConfigMap in a Tick call is
+	// pruneTerminalAllocations's own save (the first is Tick's own
+	// unconditional f.Pending-migration save at the top of the method).
+	updates := 0
+	k.PrependReactor("update", "configmaps", func(action kt.Action) (bool, runtime.Object, error) {
+		if action.GetResource().Resource != "configmaps" {
+			return false, nil, nil
+		}
+		updates++
+		if updates == 2 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, cfg.Name+"-fleet", errors.New("injected conflict"))
+		}
+		return false, nil, nil
+	})
+
+	if e := o.Tick(ctx); e == nil {
+		t.Fatal("expected the injected fleet save failure to surface as an error")
+	}
+	if _, e := o.Store.Load(ctx, id); e != nil {
+		t.Fatal("record must survive intact when pruning's own fleet save fails - nothing may be deleted on an unconfirmed save", e)
+	}
+
+	// A later Tick, once the fleet save succeeds, must prune cleanly - the
+	// failed attempt above cost nothing beyond retrying the (idempotent)
+	// deregistration verification.
+	if e := o.Tick(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := o.Store.Load(ctx, id); e == nil {
+		t.Fatal("expected the record to be pruned once the fleet save succeeds")
 	}
 }

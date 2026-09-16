@@ -44,7 +44,7 @@ java -jar spec/.tools/tla2tools.jar -deadlock -cleanup -config spec/<name>.cfg s
 | `RunnerRegistration.tla` | GitHub's runner-registration state vs. `Allocation.phase`, across all four Deleted/TimedOut transitions, plus GC pruning and an unpatched fifth leak path | `pending_only` | **Violates** `NoOrphanedRegistration` (reproduces PR #163 exactly as it shipped) |
 | | | `all_four` | Clean (PR #168 + the current re-verifying prune design) |
 | | | `unknown_leak` | **Violates** `NoIrrecoverableOrphan` (an unpatched fifth path, combined with #161's *original* age-only pruning, produces a permanently unrecoverable orphan) |
-| | | `reverifying_prune` | Clean (the design that actually shipped: pruning re-verifies the registration immediately before deleting a record, closing the gap regardless of which transition - or an unpatched one - produced it) |
+| | | `reverifying_prune` | Clean for `NoIrrecoverableOrphan` (the design that actually shipped: pruning re-verifies the registration immediately before deleting a record, closing the *irrecoverable*-orphan gap regardless of which transition - or an unpatched one - produced it; `NoOrphanedRegistration` itself is still transiently violated right after the leak, which is expected) |
 | `TickConcurrency.tla` | `Operator.Tick`'s `o.mu` release contract against its own spawned goroutines | `buggy` | **Violates** `MuReleasedOnlyWhenIdle` (reproduces PR #157's bug) |
 | | | `fixed` | Clean (PR #157's fix) |
 | `BudgetAdmission.tla` | `budget.go`'s admission-gating arithmetic (`spentToday`, the ceiling check) | `ceiling` | Clean (the gate itself is internally consistent) |

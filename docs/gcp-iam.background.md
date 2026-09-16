@@ -12,8 +12,9 @@ permissions that look sufficient by reading `createGCP`'s own request shape -
 `compute.disks.{get,delete}`, `compute.zoneOperations.{get,list}`,
 `compute.subnetworks.use`, `compute.networks.get`,
 `compute.images.useReadOnly` - every `gcp-spot` allocation in production
-failed, 3 attempts each, `LocalProvisioningTimeout`, with zero visible error
-from runnerscout itself.
+failed to ever reach `Running`, stuck reporting `"create commitment unknown
+for <id>"` on every `Tick` cycle, with nothing in that message or condition
+naming IAM or the specific missing permission.
 
 Each missing permission in the final list (`gcp-iam.md`) was found only by
 reading GCP's own Cloud Audit Log for the exact `v1.compute.instances.insert`
@@ -44,9 +45,15 @@ list every permission a request would need up front.
 ## Why the failure mode is silent
 
 `createGCP` treats a missing permission the same as any other create failure
-that never reaches a definitive answer: 3 attempts, then
-`LocalProvisioningTimeout`. This is deliberate and correct as a *classification*
-matter - the codebase's own discipline elsewhere (see
+that never reaches a definitive answer: `Instances.Insert`'s own error is a
+plain wrapped error, not `lifecycle.ErrCapacity`/`ErrNoEffect`, so the
+allocation stays committed to `Creating` (already persisted before the
+create call was even made) rather than returning to `Pending` to retry -
+`Attempts` is never incremented past the first try, and
+`LocalProvisioningTimeout` (which requires being back in `Pending` with
+`Attempts >= MaxAttempts`) is never reached by this path at all. This is
+deliberate and correct as a *classification* matter - the codebase's own
+discipline elsewhere (see
 `docs/prices-gcp.background.md`'s "Why this fails this codebase's
 classification discipline") is to never infer a specific cause from an
 ambiguous transport or provider response, and a 403 buried inside a wrapped

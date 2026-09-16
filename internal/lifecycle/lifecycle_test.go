@@ -243,7 +243,7 @@ func TestTimedOutRetriesDeregistrationUntilConfirmed(t *testing.T) {
 // process a graceful shutdown to self-deregister - can equally strand a
 // registration.
 func TestSpotInterruptionDeregistersClaimedRunner(t *testing.T) {
-	c, s, cloud, _ := setup()
+	c, s, cloud, now := setup()
 	d := &deregistrar{}
 	c.Runners = d
 	if e := c.Step(context.Background(), "rs-test"); e != nil {
@@ -262,6 +262,9 @@ func TestSpotInterruptionDeregistersClaimedRunner(t *testing.T) {
 	}
 	if s.a.Phase != l.Deleted {
 		t.Fatal(s.a)
+	}
+	if s.a.TerminalAt != *now {
+		t.Fatal("TerminalAt must be set on the Running->Deleted transition", s.a)
 	}
 }
 
@@ -289,7 +292,7 @@ func TestSpotInterruptionRetriesDeregistrationUntilConfirmed(t *testing.T) {
 }
 
 func TestDeletingCleanupConfirmedDeregistersClaimedRunner(t *testing.T) {
-	c, s, cloud, _ := setup()
+	c, s, cloud, now := setup()
 	d := &deregistrar{}
 	c.Runners = d
 	if e := c.Step(context.Background(), "rs-test"); e != nil {
@@ -309,13 +312,16 @@ func TestDeletingCleanupConfirmedDeregistersClaimedRunner(t *testing.T) {
 	if d.calls != 1 || d.id != "rs-test" {
 		t.Fatal("must deregister the claimed runner once normal cleanup is confirmed", d)
 	}
+	if s.a.TerminalAt != *now {
+		t.Fatal("TerminalAt must be set on the Deleting->Deleted transition", s.a)
+	}
 	if s.a.Phase != l.Deleted {
 		t.Fatal(s.a)
 	}
 }
 
 func TestCreateConfirmedAbsentDeregistersClaimedRunner(t *testing.T) {
-	c, s, cloud, _ := setup()
+	c, s, cloud, now := setup()
 	d := &deregistrar{}
 	c.Runners = d
 	cloud.loseResponse = true
@@ -334,6 +340,9 @@ func TestCreateConfirmedAbsentDeregistersClaimedRunner(t *testing.T) {
 	}
 	if s.a.Phase != l.Deleted {
 		t.Fatal(s.a)
+	}
+	if s.a.TerminalAt != *now {
+		t.Fatal("TerminalAt must be set on the Creating->Deleted transition", s.a)
 	}
 }
 func TestCapacityRejectionKeepsDeadline(t *testing.T) {

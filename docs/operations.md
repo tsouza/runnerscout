@@ -5,6 +5,17 @@ The operator requires a dedicated Kubernetes namespace, a unique state name and
 scale-set ownership. Never run ARC against that same scale set. Use mounted Secret
 files for GitHub credentials and workload identity for cloud provider credentials.
 
+`-kube-client-qps`/`-kube-client-burst` set the in-cluster Kubernetes API
+client's own rate limit, defaulting to 20 requests/second and burst 40 -
+already well above client-go's library defaults of 5/10, which are sized
+for a generic client, not this controller's own per-Tick call volume (one
+`GET` per retained allocation, sometimes a `PUT`/`DELETE`, on top of
+credential Secret reads). Raise them further under real PR-storm load, or
+lower them under a stricter API server rate-limit policy. The Helm chart
+exposes both as `kubeClient.qps`/`kubeClient.burst` (strings, e.g. `"30"`;
+empty, the default, leaves the binary's own default in effect for that
+flag independently).
+
 Catalog prices are USD microdollars per compute hour and expire after five minutes.
 Refresh from authoritative provider quotes. A partial catalog cannot authorize fallback.
 No total-job cost guarantee includes storage, egress or interruption effects.
