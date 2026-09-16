@@ -11,6 +11,7 @@ import (
 	"github.com/tsouza/runnerscout/internal/operator"
 	"github.com/tsouza/runnerscout/internal/placement"
 	"github.com/tsouza/runnerscout/internal/provider"
+	"github.com/tsouza/runnerscout/internal/testutil"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -150,6 +151,74 @@ func TestNewWorkerRequiresConfiguredAzureProviderWhenEnabled(t *testing.T) {
 	r := &Runtime{Client: fake.NewClientset()}
 	if _, _, err := r.newWorker(Resolved{Config: cfg}, Credentials{}, CleanupMode, func(bool) {}); err == nil {
 		t.Fatal("expected an error when AzurePriceRefresh is enabled without a configured \"azure\" provider")
+	}
+}
+
+func gcpPriceRefreshConfig(enabled bool, providers map[string]provider.Config, requirementProviders []string) operator.Config {
+	return operator.Config{Name: "test", Namespace: "test", GitHubURL: "https://github.com/tsouza/runnerscout", ScaleSetID: 1, MaxRunners: 2, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
+		Requirements:    placement.Requirements{CPU: 1, MemoryMiB: 1, Architecture: "amd64", MaxPriceMicros: 100, Providers: requirementProviders, Regions: []string{"r"}, Policy: "lowest-price"},
+		Providers:       providers,
+		GCPPriceRefresh: enabled,
+	}
+}
+
+func TestNewWorkerWiresGCPPricesWhenExplicitlyEnabled(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(true, map[string]provider.Config{"gcp": {Kind: "gcp", Owner: "test", Project: "project", Subnet: "private"}}, []string{"gcp"})
+	r := &Runtime{Client: fake.NewClientset()}
+	credentials := Credentials{Providers: map[string]map[string]string{"gcp": {"GOOGLE_APPLICATION_CREDENTIALS": testutil.GCPServiceAccountFixture(t), "GCP_BILLING_API_KEY": "fixture-key"}}}
+	worker, cleanup, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	op, ok := worker.(*operator.Operator)
+	if !ok {
+		t.Fatal("expected the real operator worker")
+	}
+	if op.GCPPrices == nil {
+		t.Fatal("GCPPriceRefresh enabled but GCPPrices was not wired")
+	}
+}
+
+func TestNewWorkerLeavesGCPPricesNilWhenDisabled(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(false, map[string]provider.Config{"gcp": {Kind: "gcp", Owner: "test", Project: "project", Subnet: "private"}}, []string{"gcp"})
+	r := &Runtime{Client: fake.NewClientset()}
+	credentials := Credentials{Providers: map[string]map[string]string{"gcp": {"GOOGLE_APPLICATION_CREDENTIALS": testutil.GCPServiceAccountFixture(t), "GCP_BILLING_API_KEY": "fixture-key"}}}
+	worker, cleanup, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	op, ok := worker.(*operator.Operator)
+	if !ok {
+		t.Fatal("expected the real operator worker")
+	}
+	if op.GCPPrices != nil {
+		t.Fatal("GCPPriceRefresh disabled but GCPPrices was wired anyway")
+	}
+}
+
+func TestNewWorkerRequiresConfiguredGCPProviderWhenEnabled(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(true, map[string]provider.Config{"aws": {Kind: "aws", Owner: "test", AccountID: "000000000000", Subnet: "private", SecurityGroup: "private"}}, []string{"aws"})
+	r := &Runtime{Client: fake.NewClientset()}
+	if _, _, err := r.newWorker(Resolved{Config: cfg}, Credentials{}, CleanupMode, func(bool) {}); err == nil {
+		t.Fatal("expected an error when GCPPriceRefresh is enabled without a configured \"gcp\" provider")
+	}
+}
+
+// TestNewWorkerRequiresBillingAPIKeyWhenGCPPriceRefreshEnabled proves
+// GCPPriceRefresh needs its own explicit GCP_BILLING_API_KEY, distinct from
+// whatever credentials already authenticate GCP VM provisioning: the
+// fixture below is a fully valid provisioning credential (construction
+// succeeds, mirroring TestNewWorkerWiresGCPPricesWhenExplicitlyEnabled
+// exactly except for the missing key), so a passing provider construction
+// alone must not be mistaken for a configured billing API key.
+func TestNewWorkerRequiresBillingAPIKeyWhenGCPPriceRefreshEnabled(t *testing.T) {
+	cfg := gcpPriceRefreshConfig(true, map[string]provider.Config{"gcp": {Kind: "gcp", Owner: "test", Project: "project", Subnet: "private"}}, []string{"gcp"})
+	r := &Runtime{Client: fake.NewClientset()}
+	credentials := Credentials{Providers: map[string]map[string]string{"gcp": {"GOOGLE_APPLICATION_CREDENTIALS": testutil.GCPServiceAccountFixture(t)}}}
+	if _, _, err := r.newWorker(Resolved{Config: cfg}, credentials, CleanupMode, func(bool) {}); err == nil {
+		t.Fatal("expected an error when GCPPriceRefresh is enabled without a billing API key")
 	}
 }
 

@@ -220,5 +220,5 @@ func newGCPSDK(environment map[string]string) (*GCPSDK, error) {
 	if err != nil {
 		return nil, errors.New("GCP client configuration invalid")
 	}
-	return &GCPSDK{Service: service}, nil
+	return &GCPSDK{Service: service, BillingAPIKey: environment["GCP_BILLING_API_KEY"]}, nil
 }

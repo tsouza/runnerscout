@@ -219,9 +219,9 @@ does automatically on every run.
 
 `internal/placement.MaxPriceAge` is five minutes. CRD-driven mode gained a
 `CapacityCatalogSpec.priceRefresh` field in issue #143 that can opt a
-catalog's AWS/Azure offerings into the same live refresh
-`operator.Config.AWSPriceRefresh`/`AzurePriceRefresh` already gave
-`cmd/runnerscout`'s mounted-JSON path - but none of
+catalog's AWS/Azure/GCP offerings into the same live refresh
+`operator.Config.AWSPriceRefresh`/`AzurePriceRefresh`/`GCPPriceRefresh`
+already gave `cmd/runnerscout`'s mounted-JSON path - but none of
 `tools/e2e/manifests/capacity-catalog*.yaml.tmpl` sets it (verified by
 reading all three templates directly, not assumed), so this harness's own
 rendered `CapacityCatalog` is still always a static snapshot in practice:

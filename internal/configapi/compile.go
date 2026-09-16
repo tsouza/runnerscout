@@ -128,13 +128,14 @@ func Compile(s Snapshot) (Resolved, error) {
 	}
 	r, p, limits := s.Class.Spec.Resources, s.Class.Spec.Placement, s.ScaleSet.Spec
 	cfg := operator.Config{Name: s.ScaleSet.Name, Namespace: ns, GitHubURL: limits.GitHub.URL, ScaleSetID: limits.GitHub.ScaleSetID, MaxRunners: limits.MaxRunners, ProvisioningSeconds: limits.ProvisioningSeconds, MaxLifetimeSeconds: limits.MaxLifetimeSeconds, Providers: providers, NetworkProfile: networkProfile, NetworkOverlayCIDRs: overlayCIDRs,
-		// AWSPriceRefresh/AzurePriceRefresh mirror the mounted-JSON config's
-		// own top-level flags of the same name, read here from the
-		// catalog's PriceRefresh map instead - see
+		// AWSPriceRefresh/AzurePriceRefresh/GCPPriceRefresh mirror the
+		// mounted-JSON config's own top-level flags of the same name, read
+		// here from the catalog's PriceRefresh map instead - see
 		// api/v1alpha1.CapacityCatalogSpec.PriceRefresh's own doc comment
 		// for why that's the catalog rather than the class or scale set.
 		AWSPriceRefresh:   s.Catalog.Spec.PriceRefresh["aws"],
 		AzurePriceRefresh: s.Catalog.Spec.PriceRefresh["azure"],
+		GCPPriceRefresh:   s.Catalog.Spec.PriceRefresh["gcp"],
 		Requirements:      placement.Requirements{CPU: r.CPU, MemoryMiB: r.MemoryMiB, Architecture: r.Architecture, Vendor: r.Vendor, Capabilities: slices.Clone(r.Capabilities), Providers: names, Regions: slices.Clone(p.Regions), MaxPriceMicros: p.MaxPriceMicros, AllowOnDemand: p.AllowOnDemand, Policy: p.Policy},
 		Retry:             recovery.Policy{Enabled: s.Class.Spec.Retry.Enabled, MaxRetries: s.Class.Spec.Retry.MaxRetries, AcknowledgeRepeatedEffects: s.Class.Spec.Retry.AcknowledgeRepeatedEffects}}
 	cfg.Catalog.Complete = make(map[string]bool)
@@ -142,7 +143,11 @@ func Compile(s Snapshot) (Resolved, error) {
 		cfg.Catalog.Complete[name] = complete
 	}
 	for _, o := range s.Catalog.Spec.Offerings {
-		cfg.Catalog.Offerings = append(cfg.Catalog.Offerings, placement.Offering{ID: o.ID, Provider: o.Provider, Region: o.Region, Zone: o.Zone, Machine: o.Machine, Image: o.Image, CPU: o.CPU, MemoryMiB: o.MemoryMiB, Architecture: o.Architecture, Vendor: o.Vendor, Capabilities: slices.Clone(o.Capabilities), Spot: o.Spot, PriceMicros: o.PriceMicros, Currency: o.Currency, ObservedAt: o.ObservedAt.Time})
+		offering := placement.Offering{ID: o.ID, Provider: o.Provider, Region: o.Region, Zone: o.Zone, Machine: o.Machine, Image: o.Image, CPU: o.CPU, MemoryMiB: o.MemoryMiB, Architecture: o.Architecture, Vendor: o.Vendor, Capabilities: slices.Clone(o.Capabilities), Spot: o.Spot, PriceMicros: o.PriceMicros, Currency: o.Currency, ObservedAt: o.ObservedAt.Time}
+		if o.GCPSkuRefs != nil {
+			offering.GCPSkuRefs = &placement.GCPSkuRefs{CoreSkuID: o.GCPSkuRefs.CoreSkuID, RamSkuID: o.GCPSkuRefs.RamSkuID}
+		}
+		cfg.Catalog.Offerings = append(cfg.Catalog.Offerings, offering)
 	}
 	// A CapacityBudget referenced by more than one RunnerScaleSet is not a
 	// shared pool: each referencing scale set resolves and enforces the same

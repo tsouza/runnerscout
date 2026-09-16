@@ -41,6 +41,23 @@ func azureOffering(id string) placement.Offering {
 	return placement.Offering{ID: id, Provider: "azure", Region: "eastus", Zone: "1", Machine: "Standard_D2s_v3", Image: "i", CPU: 1, MemoryMiB: 1, Architecture: "amd64", Spot: true, PriceMicros: 999999, Currency: "USD", ObservedAt: time.Now().Add(-time.Hour)}
 }
 
+// fakeGCPPrices is a local gcpPriceObserver test double, mirroring
+// fakeAWSPrices/fakeAzurePrices.
+type fakeGCPPrices struct {
+	observe func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error)
+}
+
+func (f *fakeGCPPrices) Observe(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+	return f.observe(ctx, coreSkuID, ramSkuID, cpu, memoryMiB)
+}
+
+// gcpOffering mirrors awsOffering/azureOffering, with GCPSkuRefs already
+// pinned - the precondition refreshGCPPrices requires before it will ever
+// touch a GCP offering (see refreshGCPPrices's own doc comment).
+func gcpOffering(id string) placement.Offering {
+	return placement.Offering{ID: id, Provider: "gcp", Region: "us-central1", Zone: "us-central1-a", Machine: "e2-medium", Image: "i", CPU: 2, MemoryMiB: 4096, Architecture: "amd64", Spot: true, PriceMicros: 999999, Currency: "USD", ObservedAt: time.Now().Add(-time.Hour), GCPSkuRefs: &placement.GCPSkuRefs{CoreSkuID: "core-id", RamSkuID: "ram-id"}}
+}
+
 func TestRefreshAWSPricesNilObserverLeavesCatalogUnmodified(t *testing.T) {
 	o := &Operator{}
 	catalog := placement.Catalog{Offerings: []placement.Offering{awsOffering("a"), azureOffering("b")}, Complete: map[string]bool{"aws": true, "azure": true}}
@@ -242,5 +259,109 @@ func TestHandleDesiredRunnerCountAdmitsViaRefreshedAzurePrice(t *testing.T) {
 	n, e := o.HandleDesiredRunnerCount(ctx, 1)
 	if e != nil || n != 1 {
 		t.Fatalf("expected admission via live-refreshed Azure price, got n=%d e=%v", n, e)
+	}
+}
+
+func TestRefreshGCPPricesNilObserverLeavesCatalogUnmodified(t *testing.T) {
+	o := &Operator{}
+	catalog := placement.Catalog{Offerings: []placement.Offering{gcpOffering("a"), awsOffering("b")}, Complete: map[string]bool{"gcp": true, "aws": true}}
+	before := catalog.Offerings[0]
+	got := o.refreshGCPPrices(context.Background(), catalog)
+	if len(got.Offerings) != 2 || !reflect.DeepEqual(got.Offerings[0], before) {
+		t.Fatalf("catalog changed with nil GCPPrices: %+v", got)
+	}
+	if !reflect.DeepEqual(got.Offerings[1], catalog.Offerings[1]) {
+		t.Fatalf("non-GCP offering changed: %+v", got.Offerings[1])
+	}
+}
+
+func TestRefreshGCPPricesUpdatesOfferingWithPinnedSkuRefs(t *testing.T) {
+	want := prices.Quote{PriceMicros: 42, Currency: "USD", ObservedAt: time.Now()}
+	o := &Operator{GCPPrices: &fakeGCPPrices{observe: func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+		if coreSkuID != "core-id" || ramSkuID != "ram-id" || cpu != 2 || memoryMiB != 4096 {
+			t.Fatalf("unexpected observe args: %s %s %d %d", coreSkuID, ramSkuID, cpu, memoryMiB)
+		}
+		return want, nil
+	}}}
+	catalog := placement.Catalog{Offerings: []placement.Offering{gcpOffering("a")}}
+	got := o.refreshGCPPrices(context.Background(), catalog)
+	offering := got.Offerings[0]
+	if offering.PriceMicros != want.PriceMicros || offering.Currency != want.Currency || !offering.ObservedAt.Equal(want.ObservedAt) {
+		t.Fatalf("offering not refreshed from quote: %+v", offering)
+	}
+}
+
+// TestRefreshGCPPricesNeverTouchesOfferingWithoutPinnedSkuRefs proves a GCP
+// offering with no GCPSkuRefs stays on its static catalog price even when
+// GCPPrices is configured and would otherwise happily answer for it -
+// mirroring refreshAWSPrices/refreshAzurePrices's own "never touch what it
+// wasn't asked to observe" discipline, applied to GCP's per-offering
+// (rather than per-provider) opt-in signal.
+func TestRefreshGCPPricesNeverTouchesOfferingWithoutPinnedSkuRefs(t *testing.T) {
+	o := &Operator{GCPPrices: &fakeGCPPrices{observe: func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+		t.Fatal("Observe must never be called for an offering without GCPSkuRefs")
+		return prices.Quote{}, nil
+	}}}
+	unpinned := gcpOffering("a")
+	unpinned.GCPSkuRefs = nil
+	before := unpinned
+	catalog := placement.Catalog{Offerings: []placement.Offering{unpinned}}
+	got := o.refreshGCPPrices(context.Background(), catalog)
+	if !reflect.DeepEqual(got.Offerings[0], before) {
+		t.Fatalf("unpinned GCP offering was touched: %+v", got.Offerings[0])
+	}
+}
+
+func TestRefreshGCPPricesIsolatesFailurePerOffering(t *testing.T) {
+	staleObservedAt := time.Now().Add(-time.Hour)
+	failing := gcpOffering("fails")
+	failing.ObservedAt = staleObservedAt
+	failing.GCPSkuRefs = &placement.GCPSkuRefs{CoreSkuID: "fail-core", RamSkuID: "fail-ram"}
+	succeeding := gcpOffering("succeeds")
+	untouched := awsOffering("aws")
+	want := prices.Quote{PriceMicros: 7, Currency: "USD", ObservedAt: time.Now()}
+	o := &Operator{GCPPrices: &fakeGCPPrices{observe: func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+		if coreSkuID == "fail-core" {
+			return prices.Quote{}, errors.New("observation failed")
+		}
+		return want, nil
+	}}}
+	catalog := placement.Catalog{Offerings: []placement.Offering{failing, succeeding, untouched}}
+	got := o.refreshGCPPrices(context.Background(), catalog)
+
+	gotFailing, gotSucceeding, gotUntouched := got.Offerings[0], got.Offerings[1], got.Offerings[2]
+	if !gotFailing.ObservedAt.IsZero() {
+		t.Fatalf("failing offering must have ObservedAt zeroed, got %v", gotFailing.ObservedAt)
+	}
+	if gotFailing.PriceMicros != failing.PriceMicros || gotFailing.Currency != failing.Currency {
+		t.Fatalf("failing offering price/currency should be left alone: %+v", gotFailing)
+	}
+	if gotSucceeding.PriceMicros != want.PriceMicros || gotSucceeding.Currency != want.Currency || !gotSucceeding.ObservedAt.Equal(want.ObservedAt) {
+		t.Fatalf("succeeding GCP offering not refreshed: %+v", gotSucceeding)
+	}
+	if !reflect.DeepEqual(gotUntouched, untouched) {
+		t.Fatalf("non-GCP offering must never be touched: %+v", gotUntouched)
+	}
+}
+
+func TestHandleDesiredRunnerCountAdmitsViaRefreshedGCPPrice(t *testing.T) {
+	ctx := context.Background()
+	k := fake.NewClientset()
+	cfg := Config{Name: "test", Namespace: "test", MaxRunners: 10, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}
+	cfg.Requirements = placement.Requirements{CPU: 2, MemoryMiB: 4096, Architecture: "amd64", MaxPriceMicros: 100, Providers: []string{"gcp"}, Regions: []string{"us-central1"}, Policy: "lowest-price"}
+	// The static catalog's ObservedAt is well past placement.MaxPriceAge, so
+	// this offering is inadmissible on the stale data alone.
+	stale := gcpOffering("pool")
+	stale.PriceMicros = 1
+	stale.ObservedAt = time.Now().Add(-2 * placement.MaxPriceAge)
+	cfg.Catalog = placement.Catalog{Complete: map[string]bool{"gcp": true}, Offerings: []placement.Offering{stale}}
+	s := &state.Kubernetes{Maps: k.CoreV1().ConfigMaps("test"), Owner: "test"}
+	fresh := prices.Quote{PriceMicros: 1, Currency: "USD", ObservedAt: time.Now()}
+	o := &Operator{Config: cfg, Client: k, Store: s, GCPPrices: &fakeGCPPrices{observe: func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+		return fresh, nil
+	}}}
+	n, e := o.HandleDesiredRunnerCount(ctx, 1)
+	if e != nil || n != 1 {
+		t.Fatalf("expected admission via live-refreshed GCP price, got n=%d e=%v", n, e)
 	}
 }

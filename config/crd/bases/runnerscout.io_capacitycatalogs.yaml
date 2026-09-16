@@ -60,6 +60,28 @@ spec:
                       enum:
                       - USD
                       type: string
+                    gcpSkuRefs:
+                      description: |-
+                        GCPSkuRefs pins the exact Cloud Billing Catalog SKU IDs a human has
+                        already identified as this offering's compute-core and RAM charges
+                        (see docs/prices-gcp.md). The controller only ever re-queries the
+                        current price of these exact, already-known SKU IDs - it never
+                        infers or guesses a machine-type-to-SKU mapping (see
+                        docs/prices-gcp.background.md for why that's a deliberately rejected
+                        design). It is read only when Provider is "gcp" and the catalog's
+                        PriceRefresh["gcp"] is true; nil (the default) leaves this offering
+                        on its static PriceMicros exactly as before this field existed.
+                      properties:
+                        coreSkuId:
+                          minLength: 1
+                          type: string
+                        ramSkuId:
+                          minLength: 1
+                          type: string
+                      required:
+                      - coreSkuId
+                      - ramSkuId
+                      type: object
                     id:
                       type: string
                     image:
@@ -109,14 +131,17 @@ spec:
                 description: |-
                   PriceRefresh opts specific providers in this catalog into live spot
                   price observation on every admission cycle - the CRD-mode equivalent
-                  of the mounted-JSON operator.Config.AWSPriceRefresh/AzurePriceRefresh
-                  flags. Keyed by provider name ("aws" or "azure"), exactly like
-                  Complete above - catalog-level rather than per-offering, since
-                  neither refresh path this drives (Operator.refreshAWSPrices/
-                  refreshAzurePrices) is selective by individual offering: enabling a
-                  provider here refreshes every eligible offering from that provider in
-                  this catalog. Absent or false for a provider leaves that provider's
-                  offerings on their static PriceMicros unchanged.
+                  of the mounted-JSON operator.Config.AWSPriceRefresh/AzurePriceRefresh/
+                  GCPPriceRefresh flags. Keyed by provider name ("aws", "azure" or
+                  "gcp"), exactly like Complete above - catalog-level rather than
+                  per-offering, since none of the refresh paths this drives
+                  (Operator.refreshAWSPrices/refreshAzurePrices/refreshGCPPrices) is
+                  selective by individual offering: enabling a provider here refreshes
+                  every eligible offering from that provider in this catalog. A "gcp"
+                  entry additionally requires each offering to carry its own
+                  GCPSkuRefs (see Offering.GCPSkuRefs) - this map alone never triggers
+                  a GCP price lookup by itself. Absent or false for a provider leaves
+                  that provider's offerings on their static PriceMicros unchanged.
                 type: object
             required:
             - complete

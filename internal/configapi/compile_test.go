@@ -271,12 +271,12 @@ func TestCompileStaleCatalogAllowsRecoveryButNotAdmission(t *testing.T) {
 
 func TestCompileWiresPriceRefreshFromCatalog(t *testing.T) {
 	s := fixture()
-	s.Catalog.Spec.PriceRefresh = map[string]bool{"aws": true, "azure": true}
+	s.Catalog.Spec.PriceRefresh = map[string]bool{"aws": true, "azure": true, "gcp": true}
 	r, err := Compile(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Config.AWSPriceRefresh || !r.Config.AzurePriceRefresh {
+	if !r.Config.AWSPriceRefresh || !r.Config.AzurePriceRefresh || !r.Config.GCPPriceRefresh {
 		t.Fatalf("catalog PriceRefresh not wired onto Config: %+v", r.Config)
 	}
 }
@@ -287,8 +287,32 @@ func TestCompileLeavesPriceRefreshFalseWhenAbsentFromCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Config.AWSPriceRefresh || r.Config.AzurePriceRefresh {
+	if r.Config.AWSPriceRefresh || r.Config.AzurePriceRefresh || r.Config.GCPPriceRefresh {
 		t.Fatalf("PriceRefresh defaulted true without any catalog entry: %+v", r.Config)
+	}
+}
+
+func TestCompilePropagatesGCPSkuRefsOntoOffering(t *testing.T) {
+	s := fixture()
+	s.Catalog.Spec.Offerings = []api.Offering{{ID: "pool", Provider: "gcp", Region: "us-central1", Zone: "us-central1-a", Machine: "e2-medium", Image: "image", CPU: 2, MemoryMiB: 4096, Architecture: "amd64", Spot: true, PriceMicros: 100000, Currency: "USD", ObservedAt: metav1.NewTime(time.Unix(1, 0)), GCPSkuRefs: &api.GCPSkuRefs{CoreSkuID: "core-id", RamSkuID: "ram-id"}}}
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Config.Catalog.Offerings) != 1 || r.Config.Catalog.Offerings[0].GCPSkuRefs == nil || r.Config.Catalog.Offerings[0].GCPSkuRefs.CoreSkuID != "core-id" || r.Config.Catalog.Offerings[0].GCPSkuRefs.RamSkuID != "ram-id" {
+		t.Fatalf("GCPSkuRefs not propagated onto compiled offering: %+v", r.Config.Catalog.Offerings)
+	}
+}
+
+func TestCompileLeavesGCPSkuRefsNilWhenAbsentFromCRD(t *testing.T) {
+	s := fixture()
+	s.Catalog.Spec.Offerings = []api.Offering{{ID: "pool", Provider: "gcp", Region: "us-central1", Zone: "us-central1-a", Machine: "e2-medium", Image: "image", CPU: 2, MemoryMiB: 4096, Architecture: "amd64", Spot: true, PriceMicros: 100000, Currency: "USD", ObservedAt: metav1.NewTime(time.Unix(1, 0))}}
+	r, err := Compile(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.Catalog.Offerings[0].GCPSkuRefs != nil {
+		t.Fatalf("GCPSkuRefs materialized without any CRD field set: %+v", r.Config.Catalog.Offerings[0])
 	}
 }
 
