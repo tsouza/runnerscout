@@ -176,6 +176,64 @@ func TestDeadlineInclusiveNoCloudEffect(t *testing.T) {
 	if s.a.Phase != l.TimedOut || p.created != 0 {
 		t.Fatal(s.a)
 	}
+	if s.a.TerminalAt != *now {
+		t.Fatal("TerminalAt must be set on the TimedOut transition", s.a)
+	}
+}
+
+type deregistrar struct {
+	calls int
+	id    string
+	fail  bool
+}
+
+func (d *deregistrar) DeregisterRunner(_ context.Context, id string) error {
+	d.calls++
+	d.id = id
+	if d.fail {
+		return errors.New("deregistration failed")
+	}
+	return nil
+}
+
+func TestTimedOutDeregistersClaimedRunner(t *testing.T) {
+	c, s, _, now := setup()
+	d := &deregistrar{}
+	c.Runners = d
+	*now = s.a.Deadline
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if d.calls != 1 || d.id != "rs-test" {
+		t.Fatal("must deregister the claimed runner before persisting TimedOut", d)
+	}
+	if s.a.Phase != l.TimedOut {
+		t.Fatal(s.a)
+	}
+}
+
+// A failed deregistration attempt must never be masked by persisting TimedOut
+// anyway - that would strand the orphaned GitHub runner registration forever,
+// since Step treats TimedOut as a permanent no-op. The allocation must stay
+// Pending so a later Step call retries.
+func TestTimedOutRetriesDeregistrationUntilConfirmed(t *testing.T) {
+	c, s, _, now := setup()
+	d := &deregistrar{fail: true}
+	c.Runners = d
+	*now = s.a.Deadline
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("a failed deregistration must surface as an error")
+	}
+	if s.a.Phase != l.Pending || d.calls != 1 {
+		t.Fatal("must not persist TimedOut over an unconfirmed orphaned registration", s.a)
+	}
+	d.fail = false
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.TimedOut || d.calls != 2 {
+		t.Fatal("must retry deregistration on the next Step and then persist TimedOut", s.a, d)
+	}
 }
 func TestCapacityRejectionKeepsDeadline(t *testing.T) {
 	c, s, p, _ := setup()

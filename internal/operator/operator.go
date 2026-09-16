@@ -253,7 +253,7 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 			return r.EncodedJITConfig, nil
 		}, NetworkPeers: networkPeers}
 	}
-	o.Controller = &lifecycle.Controller{Store: s, Providers: providers, Now: time.Now}
+	o.Controller = &lifecycle.Controller{Store: s, Providers: providers, Now: time.Now, Runners: &runnerDeregistrar{client: g}}
 	return o
 }
 func (o *Operator) binding() string {
@@ -578,6 +578,14 @@ const (
 	// currently active ones) gets a goroutine, most of which are
 	// near-instant no-ops (Deleted/TimedOut phases return immediately).
 	tickStepConcurrency = 20
+	// terminalRetention bounds how long a Deleted/TimedOut allocation's
+	// ConfigMap record survives past its own TerminalAt before Tick prunes
+	// it - otherwise every terminal record accumulates forever, and
+	// updateAdmission's own o.Store.List(ctx) (see HandleDesiredRunnerCount)
+	// pays an ever-growing per-tick Kubernetes API cost for records that are
+	// all provably inert. A conservative 24h keeps steady-state Store size
+	// bounded to roughly one deployment-day's worth of churn.
+	terminalRetention = 24 * time.Hour
 )
 
 func (o *Operator) Tick(ctx context.Context) error {
@@ -700,6 +708,38 @@ func (o *Operator) Tick(ctx context.Context) error {
 	}
 	if e := o.processInterruptionRetries(ctx); e != nil {
 		failures = append(failures, e)
+	}
+	if e := o.pruneTerminalAllocations(ctx, f, allocs); e != nil {
+		failures = append(failures, e)
+	}
+	return errors.Join(failures...)
+}
+
+// pruneTerminalAllocations deletes each Deleted/TimedOut allocation's
+// ConfigMap record once it is past terminalRetention. allocs is the pre-Step
+// snapshot Tick already loaded: Step never changes an already-terminal
+// allocation (Controller.Step no-ops for Deleted/TimedOut), so it remains an
+// accurate view of every candidate's Phase and TerminalAt. A Deleted record
+// is only pruned once f.Released[id] is true - the same fleet-level flag
+// HandleDesiredRunnerCount sets the first time it decrements Admitted for
+// this ID - so a record is never removed from the Store before that one-time
+// admission accounting has had a chance to observe it via Store.List.
+// TimedOut carries no such dependency: it is excluded from the active count
+// immediately, and its Admitted slot is released only by Reconcile's own
+// zero-demand cohort reset, never by anything keyed off the record's
+// continued existence.
+func (o *Operator) pruneTerminalAllocations(ctx context.Context, f fleet, allocs []lifecycle.Allocation) error {
+	var failures []error
+	for _, a := range allocs {
+		if a.TerminalAt.IsZero() || time.Since(a.TerminalAt) < terminalRetention {
+			continue
+		}
+		if a.Phase != lifecycle.TimedOut && !(a.Phase == lifecycle.Deleted && f.Released[a.ID]) {
+			continue
+		}
+		if e := o.Store.Delete(ctx, a.ID); e != nil {
+			failures = append(failures, e)
+		}
 	}
 	return errors.Join(failures...)
 }
