@@ -24,41 +24,46 @@ EXTENDS Naturals
 
 CONSTANTS
   AllocIDs,
+  MaxAttempts,
   MaxClock,
   SpacingEnabled
 
 ASSUME AllocIDs # {}
+ASSUME MaxAttempts \in Nat
 ASSUME MaxClock \in Nat
 ASSUME SpacingEnabled \in BOOLEAN
 
-Phases == {"Ready", "JITIssued", "Provisioned", "JITFailed"}
+Phases == {"Pending", "JITIssued", "Provisioned"}
 
-VARIABLES phase, started, jitToken, clock
+VARIABLES phase, started, jitToken, clock, attempts
 
-vars == <<phase, started, jitToken, clock>>
+vars == <<phase, started, jitToken, clock, attempts>>
 
 TypeOK ==
   /\ phase \in [AllocIDs -> Phases]
   /\ started \in [AllocIDs -> 0..MaxClock]
   /\ jitToken \in 0..1
   /\ clock \in 0..MaxClock
+  /\ attempts \in [AllocIDs -> 0..MaxAttempts]
 
 Init ==
-  /\ phase = [id \in AllocIDs |-> "Ready"]
+  /\ phase = [id \in AllocIDs |-> "Pending"]
   /\ started = [id \in AllocIDs |-> 0]
   /\ jitToken = 1
   /\ clock = 0
+  /\ attempts = [id \in AllocIDs |-> 0]
 
 (* A Bootstrap call begins. When spacing is enabled, it requires the    *)
 (* single token and consumes it; when disabled, it ignores the token    *)
 (* entirely, so an arbitrary batch can begin in the same clock slot.    *)
 JITRequest(id) ==
-  /\ phase[id] = "Ready"
+  /\ phase[id] = "Pending"
+  /\ attempts[id] < MaxAttempts
   /\ (SpacingEnabled => jitToken = 1)
   /\ phase' = [phase EXCEPT ![id] = "JITIssued"]
   /\ started' = [started EXCEPT ![id] = clock]
   /\ jitToken' = IF SpacingEnabled THEN 0 ELSE jitToken
-  /\ UNCHANGED clock
+  /\ UNCHANGED <<clock, attempts>>
 
 (* The spacing interval elapses and the limiter refills one token.      *)
 JITAdvance ==
@@ -67,16 +72,17 @@ JITAdvance ==
   /\ clock < MaxClock
   /\ clock' = clock + 1
   /\ jitToken' = 1
-  /\ UNCHANGED <<phase, started>>
+  /\ UNCHANGED <<phase, started, attempts>>
 
 JITSucceed(id) ==
   /\ phase[id] = "JITIssued"
   /\ phase' = [phase EXCEPT ![id] = "Provisioned"]
-  /\ UNCHANGED <<started, jitToken, clock>>
+  /\ UNCHANGED <<started, jitToken, clock, attempts>>
 
 JITFail(id) ==
   /\ phase[id] = "JITIssued"
-  /\ phase' = [phase EXCEPT ![id] = "JITFailed"]
+  /\ phase' = [phase EXCEPT ![id] = "Pending"]
+  /\ attempts' = [attempts EXCEPT ![id] = attempts[id] + 1]
   /\ UNCHANGED <<started, jitToken, clock>>
 
 Next ==

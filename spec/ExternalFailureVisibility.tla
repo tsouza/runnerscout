@@ -1,77 +1,85 @@
 ---- MODULE ExternalFailureVisibility ----
 (***************************************************************************)
-(* Model of the diagnosability gap behind issue #176: an external         *)
-(* preparation failure (GitHub JIT-config generation) was swallowed at    *)
-(* several layers, so an allocation's observable Condition pointed at    *)
-(* generic create preparation instead of the subsystem that actually     *)
-(* failed. The same shape applies to any external side effect whose      *)
-(* failure is collapsed to a fixed sentinel, so this module models two   *)
-(* representatives: the JIT prep call and a cloud create call.           *)
+(* Model of the diagnosability gap behind issue #176, kept in sync with   *)
+(* lifecycle.Step's actual shape: a JIT preparation failure returns an    *)
+(* allocation to Pending and records a Condition; a cloud-create failure  *)
+(* leaves it in Creating and currently records only the pre-call          *)
+(* "CreateCommitmentUnknown" sentinel.                                    *)
 (*                                                                       *)
-(* PreserveJITCause = FALSE reproduces #176 before #178: a failed JIT    *)
-(* request records "CreatePreparationFailed" rather than "JITFailure".  *)
-(* PreserveCloudCause = FALSE is the extrapolated sibling: a failed      *)
-(* cloud create records the same generic sentinel rather than            *)
-(* "CloudCreateFailure".                                                  *)
+(* PreserveJITCause = FALSE reproduces #176 before #178: a failed JIT     *)
+(* request records "CreatePreparationFailed" instead of "JITFailure".    *)
+(* PreserveCloudCreateCause = FALSE is the current code: a failed cloud   *)
+(* create records "CreateCommitmentUnknown", not "CloudCreateFailure".   *)
+(* PreserveCloudCreateCause = TRUE is the extrapolated fix: the cloud     *)
+(* failure's own cause becomes observable.                                *)
 (*                                                                       *)
-(* The module checks only the observable-cause safety property; it does  *)
-(* not model retry, deadlines, or the real HTTP status text. TLA+        *)
-(* distinguishes the failure classes as labels, standing in for the      *)
-(* real error text the Go code now threads through.                      *)
+(* The module checks only the observable-cause safety property; it does   *)
+(* not model retries, deadlines, or real HTTP status text. TLA+ uses      *)
+(* distinct labels in place of the real error strings the Go code threads *)
+(* through.                                                               *)
 (***************************************************************************)
 EXTENDS Naturals
 
 CONSTANTS
   AllocIDs,
   PreserveJITCause,
-  PreserveCloudCause
+  PreserveCloudCreateCause
 
 ASSUME AllocIDs # {}
 ASSUME PreserveJITCause \in BOOLEAN
-ASSUME PreserveCloudCause \in BOOLEAN
+ASSUME PreserveCloudCreateCause \in BOOLEAN
 
-Phases == {"Ready", "CloudIssued", "PrepFailed", "CloudFailed", "Provisioned"}
-Conditions == {"None", "JITFailure", "CloudCreateFailure", "CreatePreparationFailed"}
+Phases == {"Pending", "Creating", "Provisioned"}
+Conditions == {"None", "JITFailure", "CloudCreateFailure", "CreatePreparationFailed", "CreateCommitmentUnknown", "VMCreated"}
+LastFailure == {"None", "JIT", "Cloud"}
 
-VARIABLES phase, condition
+VARIABLES phase, condition, lastFailure
 
-vars == <<phase, condition>>
+vars == <<phase, condition, lastFailure>>
 
 TypeOK ==
   /\ phase \in [AllocIDs -> Phases]
   /\ condition \in [AllocIDs -> Conditions]
+  /\ lastFailure \in [AllocIDs -> LastFailure]
 
 Init ==
-  /\ phase = [id \in AllocIDs |-> "Ready"]
+  /\ phase = [id \in AllocIDs |-> "Pending"]
   /\ condition = [id \in AllocIDs |-> "None"]
+  /\ lastFailure = [id \in AllocIDs |-> "None"]
 
-(* JIT preparation succeeds; the allocation can proceed to cloud create. *)
+(* JIT preparation succeeds. Step moves Pending -> Creating and records  *)
+(* the pre-create commitment sentinel before any cloud effect.          *)
 PrepSucceed(id) ==
-  /\ phase[id] = "Ready"
-  /\ phase' = [phase EXCEPT ![id] = "CloudIssued"]
-  /\ UNCHANGED condition
+  /\ phase[id] = "Pending"
+  /\ phase' = [phase EXCEPT ![id] = "Creating"]
+  /\ condition' = [condition EXCEPT ![id] = "CreateCommitmentUnknown"]
+  /\ lastFailure' = [lastFailure EXCEPT ![id] = "None"]
 
-(* JIT preparation fails before any cloud effect. The observable cause   *)
-(* is preserved or swallowed according to PreserveJITCause.              *)
+(* JIT preparation fails before any cloud effect. Step returns to       *)
+(* Pending and records either the real JIT cause or the pre-#178         *)
+(* generic preparation sentinel.                                        *)
 PrepFail(id) ==
-  /\ phase[id] = "Ready"
-  /\ phase' = [phase EXCEPT ![id] = "PrepFailed"]
+  /\ phase[id] = "Pending"
+  /\ phase' = [phase EXCEPT ![id] = "Pending"]
   /\ condition' = [condition EXCEPT ![id] =
        IF PreserveJITCause THEN "JITFailure" ELSE "CreatePreparationFailed"]
+  /\ lastFailure' = [lastFailure EXCEPT ![id] = "JIT"]
 
 CloudSucceed(id) ==
-  /\ phase[id] = "CloudIssued"
+  /\ phase[id] = "Creating"
   /\ phase' = [phase EXCEPT ![id] = "Provisioned"]
-  /\ UNCHANGED condition
+  /\ condition' = [condition EXCEPT ![id] = "VMCreated"]
+  /\ lastFailure' = [lastFailure EXCEPT ![id] = "None"]
 
-(* The extrapolated sibling: a real cloud create failure is either        *)
-(* preserved as CloudCreateFailure or collapsed to the same generic      *)
-(* preparation sentinel that hid the JIT failure in #176.                *)
+(* The current code leaves a cloud-create failure in Creating with the   *)
+(* same pre-call "CreateCommitmentUnknown" sentinel. The extrapolated    *)
+(* fix would record "CloudCreateFailure" instead.                        *)
 CloudFail(id) ==
-  /\ phase[id] = "CloudIssued"
-  /\ phase' = [phase EXCEPT ![id] = "CloudFailed"]
+  /\ phase[id] = "Creating"
+  /\ phase' = [phase EXCEPT ![id] = "Creating"]
   /\ condition' = [condition EXCEPT ![id] =
-       IF PreserveCloudCause THEN "CloudCreateFailure" ELSE "CreatePreparationFailed"]
+       IF PreserveCloudCreateCause THEN "CloudCreateFailure" ELSE "CreateCommitmentUnknown"]
+  /\ lastFailure' = [lastFailure EXCEPT ![id] = "Cloud"]
 
 Next ==
   \E id \in AllocIDs :
@@ -82,12 +90,11 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-(* The observable cause must name the subsystem that actually failed,    *)
-(* never collapse an external failure to the generic preparation         *)
-(* sentinel. This is exactly the property #176 showed was absent.        *)
+(* The observable Condition must name the subsystem that actually failed, *)
+(* never collapse an external failure to a sentinel that hides it.       *)
 FailureCauseVisible ==
   \A id \in AllocIDs :
-    /\ phase[id] = "PrepFailed" => condition[id] = "JITFailure"
-    /\ phase[id] = "CloudFailed" => condition[id] = "CloudCreateFailure"
+    /\ lastFailure[id] = "JIT" => condition[id] = "JITFailure"
+    /\ lastFailure[id] = "Cloud" => condition[id] = "CloudCreateFailure"
 
 ====

@@ -54,9 +54,9 @@ java -jar spec/.tools/tla2tools.jar -deadlock -cleanup -config spec/<name>.cfg s
 | | | `post175` | Clean (PR #175: both terminal phases release their slot) |
 | `JITRequest.tla` | the shared `jitLimiter` spacing for GitHub JIT-config requests added by #179 | `spacing_disabled` | **Violates** `NoJitBurst` (reproduces the pre-#179 burst shape: two allocations can start JIT requests in the same clock slot) |
 | | | `spacing_enabled` | Clean (the burst-1 limiter requires an intervening `JITAdvance`) |
-| `ExternalFailureVisibility.tla` | the observable-cause swallowing behind #176, extrapolated to cloud-create failures | `pre178` | **Violates** `FailureCauseVisible` (a JIT failure is recorded as the generic preparation sentinel) |
-| | | `cloud_swallow` | **Violates** `FailureCauseVisible` (the same sentinel hides a cloud-create failure) |
-| | | `fixed` | Clean (both external failure classes preserve their own cause) |
+| `ExternalFailureVisibility.tla` | the observable-cause swallowing behind #176, kept in sync with `Step`'s JIT and cloud-create paths | `pre178` | **Violates** `FailureCauseVisible` (a JIT failure is recorded as the generic preparation sentinel) |
+| | | `current` | **Violates** `FailureCauseVisible` (current code: JIT cause is preserved, but a cloud-create failure is still recorded as `CreateCommitmentUnknown`) |
+| | | `post_cloud_fix` | Clean (the extrapolated fix: cloud-create failures also preserve their own cause) |
 
 Every "Violates" row above is a **deliberate** counterexample or witness
 config - see each `.tla` file's own header comment for what it demonstrates

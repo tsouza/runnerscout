@@ -71,10 +71,10 @@ RUNS = [
      "PR #179: the shared burst-1 limiter spaces JIT requests apart"),
     ("ExternalFailureVisibility_pre178.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
      "issue #176: a JIT failure was collapsed to the generic preparation sentinel"),
-    ("ExternalFailureVisibility_cloud_swallow.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
-     "extrapolated sibling: a cloud-create failure collapsed to the same generic sentinel"),
-    ("ExternalFailureVisibility_fixed.cfg", "ExternalFailureVisibility.tla", None,
-     "both external failure classes preserve their observable cause"),
+    ("ExternalFailureVisibility_current.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
+     "current code: JIT cause preserved, cloud-create failure still collapsed to CreateCommitmentUnknown"),
+    ("ExternalFailureVisibility_post_cloud_fix.cfg", "ExternalFailureVisibility.tla", None,
+     "extrapolated fix: both external failure classes preserve their observable cause"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)

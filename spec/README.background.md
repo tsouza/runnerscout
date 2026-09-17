@@ -255,18 +255,22 @@ then swallowed and misattributed to GCP.
 
 `JITRequest.tla` models only the spacing property the mitigation adds: a
 shared burst-1 token prevents two allocations from starting JIT requests in
-the same clock slot. It does not model GitHub's undocumented limit, retries,
-or real HTTP statuses, because those are not part of this codebase's
-state space. The meaningful result is the `spacing_disabled` counterexample;
-the `spacing_enabled` run is a guard-restatement sanity check, not an
-independent discovery, and the module's header says so.
+the same clock slot. It keeps the failed-request path in the model: a failed
+JIT request returns the allocation to `Pending` and consumes an attempt, so
+the model does not silently pretend failure is terminal. It still does not
+model GitHub's undocumented limit or real HTTP statuses, because those are
+not part of this codebase's state space. The meaningful result is the
+`spacing_disabled` counterexample; the `spacing_enabled` run is a
+guard-restatement sanity check, not an independent discovery, and the
+module's header says so.
 
 `ExternalFailureVisibility.tla` models the diagnosability property that was
 actually broken: an observable condition must name the failing subsystem
 instead of collapsing every preparation failure to one sentinel. It covers
-the original JIT case (`pre178`) and one extrapolated sibling (`cloud_swallow`,
-a real cloud-create failure hidden behind the same sentinel), because the
-swallowing shape is not specific to JIT. TLA+ models the failure causes as
+the original JIT case (`pre178`) and the current cloud-create gap (`current`,
+a real cloud-create failure still recorded as `CreateCommitmentUnknown`),
+because the swallowing shape is not specific to JIT. `post_cloud_fix` is the
+extrapolated fix, not current behavior. TLA+ models the failure causes as
 distinct labels, not as the real error strings, so a clean run here means the
 classification invariant holds, not that the Go text itself is correct.
 
