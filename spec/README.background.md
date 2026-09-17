@@ -244,6 +244,36 @@ parameterized, and the pre-174 config's three-step counterexample
 (`Claim -> ToTimedOut`, no third step ever enabled) reproduces the real
 incident's shape exactly.
 
+## JIT spacing and external-failure visibility: a different class than the others
+
+`JITRequest.tla` and `ExternalFailureVisibility.tla` were added after
+issue #176 exposed a gap the earlier modules could not catch by construction.
+The earlier modules model runnerscout's own state machines; #176 was not a
+state-machine invariant violation but an external side effect (`GitHub JIT
+config generation`) failing under a concurrent burst, whose real error was
+then swallowed and misattributed to GCP.
+
+`JITRequest.tla` models only the spacing property the mitigation adds: a
+shared burst-1 token prevents two allocations from starting JIT requests in
+the same clock slot. It keeps the failed-request path in the model: a failed
+JIT request returns the allocation to `Pending` and consumes an attempt, so
+the model does not silently pretend failure is terminal. It still does not
+model GitHub's undocumented limit or real HTTP statuses, because those are
+not part of this codebase's state space. The meaningful result is the
+`spacing_disabled` counterexample; the `spacing_enabled` run is a
+guard-restatement sanity check, not an independent discovery, and the
+module's header says so.
+
+`ExternalFailureVisibility.tla` models the diagnosability property that was
+actually broken: an observable condition must name the failing subsystem
+instead of collapsing every preparation failure to one sentinel. It covers
+the original JIT case (`pre178`) and the current gaps across WireGuard,
+cloud-create, observe, and delete failures (`current`), because the
+swallowing shape is not specific to JIT. `post_all_fixes` is the extrapolated
+fix, not current behavior. TLA+ models the failure causes as distinct labels,
+not as the real error strings, so a clean run here means the classification
+invariant holds, not that the Go text itself is correct.
+
 ## Why `make tlc` and not CI
 
 These models check themselves, not the Go code - there is no mechanism

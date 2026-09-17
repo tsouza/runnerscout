@@ -65,6 +65,16 @@ RUNS = [
      "issue #174 as it shipped in v1.2.0: TimedOut never released its slot"),
     ("AdmissionSlot_post175.cfg", "AdmissionSlot.tla", None,
      "PR #175: both terminal phases release their slot"),
+    ("JITRequest_spacing_disabled.cfg", "JITRequest.tla", "NoJitBurst",
+     "pre-#179: a concurrently-admitted batch can start JIT requests in the same slot"),
+    ("JITRequest_spacing_enabled.cfg", "JITRequest.tla", None,
+     "PR #179: the shared burst-1 limiter spaces JIT requests apart"),
+    ("ExternalFailureVisibility_pre178.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
+     "issue #176: a JIT failure was collapsed to the generic preparation sentinel"),
+    ("ExternalFailureVisibility_current.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
+     "current code: JIT cause preserved, WireGuard/cloud-create/observe/delete failures still collapsed"),
+    ("ExternalFailureVisibility_post_all_fixes.cfg", "ExternalFailureVisibility.tla", None,
+     "extrapolated fix: every external failure class preserves its observable cause"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)
