@@ -228,7 +228,15 @@ jobs:
         run: |
           bare="${VERSION#v}"
           helm package charts/runnerscout --destination "$RUNNER_TEMP" --version "$bare" --app-version "$bare"
-          helm push "$RUNNER_TEMP/runnerscout-$bare.tgz" oci://ghcr.io/tsouza/runnerscout/charts | tee "$RUNNER_TEMP/push.log"
+          # helm push writes its "Pushed:"/"Digest:" progress lines to
+          # stderr, not stdout - confirmed the hard way: a v1.2.6 run
+          # pushed the chart successfully (visible in the raw job log) but
+          # this step still failed, because `| tee push.log` only ever
+          # captured the piped stdout stream, leaving push.log without
+          # those lines, so the grep below silently matched nothing (exit
+          # 1) and set -e killed the step before signing/attestation ever
+          # ran. 2>&1 merges stderr into the same stream tee captures.
+          helm push "$RUNNER_TEMP/runnerscout-$bare.tgz" oci://ghcr.io/tsouza/runnerscout/charts 2>&1 | tee "$RUNNER_TEMP/push.log"
           digest="$(grep -oP 'Digest: \Ksha256:\w+' "$RUNNER_TEMP/push.log")"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "ref=ghcr.io/tsouza/runnerscout/charts/runnerscout:$bare" >> "$GITHUB_OUTPUT"
