@@ -274,6 +274,55 @@ fix, not current behavior. TLA+ models the failure causes as distinct labels,
 not as the real error strings, so a clean run here means the classification
 invariant holds, not that the Go text itself is correct.
 
+## ListenerSession.tla: the subsystem every other module sits downstream of
+
+Every module in this directory - `RunnerRegistration`, `TickConcurrency`,
+`BudgetAdmission`, `RetryBound`, `AdmissionSlot`, `JITRequest`,
+`ExternalFailureVisibility` - models something that happens *after*
+`HandleDesiredRunnerCount` already has a demand count to act on. None of
+them model where that count comes from: the scale-set listener's own
+session (`github.com/actions/scaleset`'s `MessageSessionClient.GetMessage`,
+driving `TotalAssignedJobs`). Asked directly why an exhaustive-modeling
+mandate had missed this, the honest answer was that framing it as "outside
+what the modeling was aimed at" was itself the same unjustified scope-
+narrowing the mandate was meant to rule out - the listener pipeline was
+never disclosed as excluded the way the four items in "why the remaining
+events were set aside" above were; it just never got the first-principles
+"what are all its states and actions" pass any subsystem here deserves.
+
+The trigger was a live production report: a scale set stopped observing any
+GitHub demand at all, with no error anywhere in the controller (Tick
+succeeding, CR changes reacting correctly, admission bookkeeping doing
+exactly what it was told) - because what it was told was persistently zero.
+A suspend/resume cycle, forcing a fresh listener session, resolved it.
+Reading `session_client.go` directly (not guessing) confirms why: a
+`202 Accepted` long-poll response decodes to `(nil, nil)` - "no new message
+right now" - identically whether nothing is genuinely queued or the session
+has gone quietly orphaned on GitHub's own side. Only a `401` triggers the
+client's one built-in recovery path (`refreshMessageSession`), and an
+orphaned session, by definition, never returns one. `ListenerSession.tla`'s
+`NoSilentlyStrandedDemand` witness is exactly that shape: `SessionGoesStale`
+then `JobBecomesAvailable` reaches a state with real demand pending and no
+action able to fire except an external `ForceFreshSession` - which nothing
+inside `Listener.Run` or `MessageSessionClient.GetMessage` triggers on its
+own. This is a disclosed, unfixed limitation of the protocol as vendored,
+not a runnerscout logic bug and not something this pass attempts to patch -
+the value here is turning an ad hoc, hour-long diagnostic (inferring
+staleness from absence of ConfigMap changes) into a documented, named
+property so the next occurrence is recognized immediately instead of
+re-investigated from scratch.
+
+Separately, and independently of the modeling gap: `runLeader` (operator.go)
+constructed the listener with no `Logger` set, which `listener.Config`
+defaults to a discard handler - every one of the listener's own diagnostic
+lines (`TotalAssignedJobs` on each poll, message IDs) was silently thrown
+away regardless of whether a TLA+ model existed for this subsystem or not.
+That is a dependency-wiring omission, not a state-space question - no model,
+however exhaustive, represents "does this Go constructor set this field."
+It is fixed in the same change, because it is real, but it is a different
+kind of gap than the one this section is about, and conflating the two would
+overstate what modeling this subsystem actually closes.
+
 ## Why `make tlc` and not CI
 
 These models check themselves, not the Go code - there is no mechanism

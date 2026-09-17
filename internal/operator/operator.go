@@ -936,7 +936,14 @@ func (o *Operator) runLeader(ctx context.Context) error {
 		defer cancel()
 		_ = session.Close(closeCtx)
 	}()
-	l, e := listener.New(session, listener.Config{ScaleSetID: o.Config.ScaleSetID, MaxRunners: o.Config.MaxRunners})
+	// Logger: without this, listener.Config.Validate defaults it to a
+	// discard handler - every one of the listener's own diagnostic log
+	// lines (the initial and per-message TotalAssignedJobs, "Getting next
+	// message"/lastMessageID) is silently thrown away, leaving no way to
+	// tell "GitHub is genuinely never sending this scale set a job" apart
+	// from "we're receiving jobs but failing to act on them" from this
+	// controller's own logs at all.
+	l, e := listener.New(session, listener.Config{ScaleSetID: o.Config.ScaleSetID, MaxRunners: o.Config.MaxRunners, Logger: slog.Default()})
 	if e != nil {
 		return e
 	}

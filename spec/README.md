@@ -57,6 +57,7 @@ java -jar spec/.tools/tla2tools.jar -deadlock -cleanup -config spec/<name>.cfg s
 | `ExternalFailureVisibility.tla` | the observable-cause swallowing behind #176, expanded across JIT, WireGuard, cloud-create, observe, and delete failures | `pre178` | **Violates** `FailureCauseVisible` (a JIT failure is recorded as the generic preparation sentinel) |
 | | | `current` | **Violates** `FailureCauseVisible` (current code preserves only JIT; WireGuard/cloud-create/observe/delete failures still collapse) |
 | | | `post_all_fixes` | Clean (the extrapolated fix: every external failure class preserves its own cause) |
+| `ListenerSession.tla` | the scale-set listener's own demand-observation protocol (`MessageSessionClient.GetMessage`/`TotalAssignedJobs`) - the one subsystem every other module here sits downstream of and none of them model | `stale_session_witness` | **Violates** `NoSilentlyStrandedDemand` (a listener session silently orphaned on GitHub's side strands real queued demand indefinitely - confirmed in production; a `202`/no-new-message poll response is indistinguishable from a genuinely idle scale set at the protocol level, and the client has no internal recovery path for it) |
 
 Every "Violates" row above is a **deliberate** counterexample or witness
 config - see each `.tla` file's own header comment for what it demonstrates

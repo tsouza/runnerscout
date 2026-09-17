@@ -75,6 +75,8 @@ RUNS = [
      "current code: JIT cause preserved, WireGuard/cloud-create/observe/delete failures still collapsed"),
     ("ExternalFailureVisibility_post_all_fixes.cfg", "ExternalFailureVisibility.tla", None,
      "extrapolated fix: every external failure class preserves its observable cause"),
+    ("ListenerSession_stale_session_witness.cfg", "ListenerSession.tla", "NoSilentlyStrandedDemand",
+     "a silently-orphaned listener session strands real GitHub demand indefinitely"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)
