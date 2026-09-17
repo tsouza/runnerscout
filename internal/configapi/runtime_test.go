@@ -400,11 +400,38 @@ func TestRuntimeProtectsBeforeSessionAndReloadsOnlySemanticChanges(t *testing.T)
 	if len(f.workers) != 1 || runtimeReason(t, f.r) != "Reconciled" {
 		t.Fatal("status write restarted the session")
 	}
+	// A metadata-only Secret write - resourceVersion moves, .data does not -
+	// must not restart the session either, the same way the CRD status
+	// write above doesn't. This is the exact production shape a peer
+	// session traced: a listener session restarting every 60-90s with real
+	// queued demand never getting admitted, because some unrelated process
+	// touching a watched credential Secret's metadata looked identical to
+	// a rotation before this fix.
+	untouched, err := f.r.Client.CoreV1().Secrets("test").Get(context.Background(), "github", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	untouched.ResourceVersion = "metadata-only-touch"
+	if _, err = f.r.Client.CoreV1().Secrets("test").Update(context.Background(), untouched, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRuntime(t, f.r)
+	if len(f.workers) != 1 || f.cleanups != 0 {
+		t.Fatal("a Secret resourceVersion bump with unchanged data restarted the session")
+	}
+
 	secret, err := f.r.Client.CoreV1().Secrets("test").Get(context.Background(), "github", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A real rotation changes .data, not just resourceVersion - a live
+	// Secret's resourceVersion also bumps on a metadata-only write with
+	// .data byte-for-byte unchanged (see
+	// TestLoadedKeyIgnoresSecretResourceVersionChurnWithUnchangedData in
+	// load_test.go for that case, which this test must not conflate with
+	// an actual rotation the way an earlier version of it did).
 	secret.ResourceVersion = "2"
+	secret.Data["token"] = []byte("rotated-fixture-token")
 	if _, err = f.r.Client.CoreV1().Secrets("test").Update(context.Background(), secret, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
