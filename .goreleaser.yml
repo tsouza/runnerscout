@@ -58,10 +58,19 @@ dockers_v2:
 # a short-lived certificate from Sigstore's public Fulcio CA, and publishes
 # to Sigstore's public Rekor transparency log - no stored private key,
 # matching the old pipeline's own signing approach exactly.
+#
+# ${artifact}@${digest}, not bare ${artifact}: a plain tag reference (the
+# v1.2.3 run signed ghcr.io/tsouza/runnerscout:1.2.3 and :<commit-sha> this
+# way) means the tag could move between goreleaser's own push and this sign
+# step, so cosign would sign whatever the tag happens to resolve to at sign
+# time, not provably the image just pushed - cosign's own CLI warns exactly
+# this ("uses a tag, not a digest ... will be removed in a future release").
+# ${artifact}@${digest} is goreleaser's own documented default args value
+# when args is left unset; this repo only overrides it for --yes.
 docker_signs:
   - artifacts: images
     cmd: cosign
-    args: ["sign", "--yes", "${artifact}"]
+    args: ["sign", "--yes", "${artifact}@${digest}"]
     output: true
 
 checksum:
