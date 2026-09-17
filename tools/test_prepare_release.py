@@ -114,21 +114,37 @@ class ChangelogFile(unittest.TestCase):
             self.assertTrue(path.read_text().startswith('# Changelog\n\n## v0.1.0'))
 
 
+CHART_FIXTURE = (
+    'apiVersion: v2\nname: runnerscout\nversion: 0.1.0-dev.1\n'
+    'appVersion: development\ndescription: x\n'
+    'annotations:\n  artifacthub.io/images: |\n'
+    '    - name: runnerscout\n      image: ghcr.io/tsouza/runnerscout:v0.1.0-dev.1\n'
+)
+
+
 class ChartVersionBump(unittest.TestCase):
-    def test_updates_both_fields_only(self):
+    def test_updates_all_three_fields_only(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / 'Chart.yaml'
-            path.write_text('apiVersion: v2\nname: runnerscout\nversion: 0.1.0-dev.1\nappVersion: development\ndescription: x\n')
+            path.write_text(CHART_FIXTURE)
             bump_chart_version('v1.2.3', path)
             text = path.read_text()
             self.assertIn('version: 1.2.3\n', text)
             self.assertIn('appVersion: 1.2.3\n', text)
+            self.assertIn('image: ghcr.io/tsouza/runnerscout:v1.2.3\n', text)
             self.assertIn('description: x\n', text)  # untouched lines survive
 
     def test_missing_fields_raise_rather_than_silently_no_op(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / 'Chart.yaml'
             path.write_text('apiVersion: v2\nname: runnerscout\n')
+            with self.assertRaises(ValueError):
+                bump_chart_version('v1.2.3', path)
+
+    def test_missing_artifacthub_image_line_raises(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / 'Chart.yaml'
+            path.write_text('apiVersion: v2\nname: runnerscout\nversion: 0.1.0\nappVersion: development\n')
             with self.assertRaises(ValueError):
                 bump_chart_version('v1.2.3', path)
 

@@ -115,13 +115,18 @@ def bump_chart_version(new_version: str, path: Path) -> None:
     # dump reformats the whole document (key ordering, quoting, comments
     # dropped) - Chart.yaml has no comments today, but a full round-trip
     # would silently start discarding any added later. This only ever
-    # touches the two lines it names.
+    # touches the three lines it names.
     bare = new_version.lstrip('v')
     text = path.read_text()
     text, n1 = re.subn(r'(?m)^version:\s*.*$', f'version: {bare}', text, count=1)
     text, n2 = re.subn(r'(?m)^appVersion:\s*.*$', f'appVersion: {bare}', text, count=1)
-    if n1 != 1 or n2 != 1:
-        raise ValueError(f'{path} does not have exactly one version:/appVersion: line each')
+    # The artifacthub.io/images annotation's embedded image tag - if this
+    # isn't bumped alongside version/appVersion, Artifact Hub's rendered
+    # chart page silently keeps pointing at a stale image tag forever after
+    # the first release under this annotation.
+    text, n3 = re.subn(r'(?m)^(\s*image: ghcr\.io/tsouza/runnerscout:)v.*$', rf'\g<1>{new_version}', text, count=1)
+    if n1 != 1 or n2 != 1 or n3 != 1:
+        raise ValueError(f'{path} does not have exactly one version:/appVersion:/artifacthub image line each')
     path.write_text(text)
 
 
