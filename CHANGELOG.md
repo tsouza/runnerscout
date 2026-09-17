@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.7
+
+### Fixed
+- capture helm push's stderr, not just stdout, in the chart-oci job (#202)
+
 ## v1.2.6
 
 ### Added
