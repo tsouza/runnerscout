@@ -77,6 +77,12 @@ RUNS = [
      "extrapolated fix: every external failure class preserves its observable cause"),
     ("ListenerSession_stale_session_witness.cfg", "ListenerSession.tla", "NoSilentlyStrandedDemand",
      "a silently-orphaned listener session strands real GitHub demand indefinitely"),
+    ("ExternalCallBudget_pre_fix.cfg", "ExternalCallBudget.tla", "NeverPermanentlyStuck",
+     "pre-fix: a stall at any of six unbounded external call sites hangs reconciliation forever"),
+    ("ExternalCallBudget_partial_fix_witness.cfg", "ExternalCallBudget.tla", "NeverPermanentlyStuck",
+     "leaving even one of the six call sites unbounded still permanently strands reconciliation"),
+    ("ExternalCallBudget_post_fix.cfg", "ExternalCallBudget.tla", None,
+     "this PR: all six call sites bounded, a stall at any of them recovers"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)

@@ -140,6 +140,46 @@ func TestRefreshAWSPricesIsolatesFailurePerOffering(t *testing.T) {
 	}
 }
 
+// A real production incident: a leader pod stuck with idle CPU and no log
+// line for 49+ minutes, because nothing bounded a sequential external call
+// under an unbounded, cancel-only ctx (runLeader's own, ultimately what
+// refreshAWSPrices is called with via HandleDesiredRunnerCount from the
+// listener's own message loop). This is the same mechanism as
+// externalCallBudget's other two call sites (runLeader's own startup
+// sequence, pruneTerminalAllocations's DeregisterRunner loop) - proven once
+// here since all three refresh* functions share this exact wrapping. A
+// stalled offering must not block a later one in the same refresh pass.
+func TestRefreshAWSPricesBoundsAnUnresponsiveObserver(t *testing.T) {
+	previous := externalCallBudget
+	externalCallBudget = 100 * time.Millisecond
+	defer func() { externalCallBudget = previous }()
+
+	hangs := awsOffering("hangs")
+	hangs.Machine = "m5.hangs"
+	after := awsOffering("after-hang")
+	var calls []string
+	o := &Operator{AWSPrices: &fakeAWSPrices{observe: func(ctx context.Context, region, zone, instanceType string) (prices.Quote, error) {
+		calls = append(calls, instanceType)
+		if instanceType == "m5.hangs" {
+			<-ctx.Done()
+			return prices.Quote{}, ctx.Err()
+		}
+		return prices.Quote{PriceMicros: 7, Currency: "USD", ObservedAt: time.Now()}, nil
+	}}}
+	catalog := placement.Catalog{Offerings: []placement.Offering{hangs, after}}
+
+	done := make(chan placement.Catalog, 1)
+	go func() { done <- o.refreshAWSPrices(context.Background(), catalog) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refreshAWSPrices did not bound the stalled observation - it hung past externalCallBudget")
+	}
+	if len(calls) != 2 {
+		t.Fatal("a stalled offering must not prevent a later one from being observed", calls)
+	}
+}
+
 func TestHandleDesiredRunnerCountAdmitsViaRefreshedAWSPrice(t *testing.T) {
 	ctx := context.Background()
 	k := fake.NewClientset()

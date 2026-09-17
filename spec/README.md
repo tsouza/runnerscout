@@ -58,6 +58,9 @@ java -jar spec/.tools/tla2tools.jar -deadlock -cleanup -config spec/<name>.cfg s
 | | | `current` | **Violates** `FailureCauseVisible` (current code preserves only JIT; WireGuard/cloud-create/observe/delete failures still collapse) |
 | | | `post_all_fixes` | Clean (the extrapolated fix: every external failure class preserves its own cause) |
 | `ListenerSession.tla` | the scale-set listener's own demand-observation protocol (`MessageSessionClient.GetMessage`/`TotalAssignedJobs`) - the one subsystem every other module here sits downstream of and none of them model | `stale_session_witness` | **Violates** `NoSilentlyStrandedDemand` (a listener session silently orphaned on GitHub's side strands real queued demand indefinitely - confirmed in production; a `202`/no-new-message poll response is indistinguishable from a genuinely idle scale set at the protocol level, and the client has no internal recovery path for it) |
+| `ExternalCallBudget.tla` | every external (GitHub/cloud) call reachable from `runLeader`'s cancel-only, no-deadline ctx outside Step's own already-bounded per-allocation goroutine - six real call sites, enumerated exactly | `pre_fix` | **Violates** `NeverPermanentlyStuck` (any one of the six stalling hangs reconciliation forever - reproduces a real incident: a leader pod idle, no log line, readyz 503, for 49+ minutes, identically on restart) |
+| | | `partial_fix_witness` | **Violates** `NeverPermanentlyStuck` (leaving even one of the six unbounded - not just the one the incident report pointed at directly - still permanently strands reconciliation) |
+| | | `post_fix` | Clean (all six call sites now wrapped in their own `externalCallBudget`/`githubStartupBudget` context) |
 
 Every "Violates" row above is a **deliberate** counterexample or witness
 config - see each `.tla` file's own header comment for what it demonstrates

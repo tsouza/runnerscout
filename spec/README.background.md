@@ -323,6 +323,51 @@ It is fixed in the same change, because it is real, but it is a different
 kind of gap than the one this section is about, and conflating the two would
 overstate what modeling this subsystem actually closes.
 
+## ExternalCallBudget.tla: extrapolating one incident to every call site it implicates
+
+`ListenerSession.tla` (above) was triggered by one report of a scale set
+stuck at zero admitted jobs. While investigating it, a second, more serious
+report arrived from the same deployment: a leader pod that acquired its
+lease and then made no progress at all - no log line, idle CPU, readyz
+stuck at 503 - for 49+ minutes, reproduced identically within 2.5 minutes
+of a restart. Read directly from the code, not guessed: `runLeader`'s own
+`ctx` (from `WithLease`'s `context.WithCancel`) has no deadline, and lease
+*renewal* is a separate goroutine that keeps succeeding as long as the
+Kubernetes API is reachable - entirely independent of GitHub or cloud
+connectivity. Nothing upstream ever cancels a stalled external call, so any
+one of them, reachable from that `ctx` without its own timeout, hangs
+forever - and so does everything sequenced after it.
+
+The incident report pointed at one place: `runLeader`'s own scale-set
+lookup and listener-session establishment, right after "Successfully
+acquired lease" and before anything else logs. Fixing only that would have
+repeated the exact shape of the `AdmissionSlot.tla`/`ListenerSession.tla`
+misses above - patching the one instance a report happened to surface
+instead of the class of bug it belongs to. Auditing every direct external
+call in this package outside Step's own already-bounded per-allocation
+goroutine (`tickStepBudget`/`tickCreateOrDeleteBudget` already wrap every
+`Step` call, so those needed no change) found two more, unreported,
+call sites with the identical shape: `pruneTerminalAllocations`'s
+`DeregisterRunner` loop (one candidate stalling blocks every later one in
+the same pass), and `refreshAWSPrices`/`refreshAzurePrices`/
+`refreshGCPPrices`'s own per-offering `Observe` loops (a stalled price
+observation blocks `HandleDesiredRunnerCount`, which blocks the listener's
+own message loop - the same "admission stops entirely" symptom as the
+lookup/session hang, via a different call path entirely).
+
+`ExternalCallBudget.tla` models the six call sites as one set rather than
+one incident: `pre_fix` reproduces the original shape (nothing bounded),
+`partial_fix_witness` proves that bounding only the two call sites the
+incident report actually named is not sufficient - any of the remaining
+four left unbounded still permanently strands reconciliation - and
+`post_fix` certifies the shipped state, all six wrapped in
+`externalCallBudget` (a new shared budget; `githubStartupBudget` already
+existed for the two `runLeader` steps specifically). Bounding a call does
+not fix whatever external condition stalled it - the model's own
+`Recover` action is deliberately silent about what happens next (a
+Kubernetes restart on a fatal error, or the next loop iteration reached) -
+it only prevents that stall from becoming permanent and invisible.
+
 ## Why `make tlc` and not CI
 
 These models check themselves, not the Go code - there is no mechanism
