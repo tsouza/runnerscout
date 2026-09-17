@@ -483,9 +483,9 @@ accepts it) — introducing a second, secret-bearing path here would add a
 durable credential this workflow has no need for, purely to mirror AWS's
 shape rather than because Azure's own qualification needs it. Workload
 Identity Federation alone is sufficient, matches this repository's existing
-OIDC-preferred posture (GHCR/cosign in `release-build.yml`, AWS's own OIDC
-path above), and is what the task setting this workflow up asked for
-explicitly.
+OIDC-preferred posture (GHCR/cosign via `.goreleaser.yml`'s `docker_signs`,
+run from `release.yml`; AWS's own OIDC path above), and is what the task
+setting this workflow up asked for explicitly.
 
 ### Why two separate OIDC token exchanges in one job
 

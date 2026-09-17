@@ -1,0 +1,105 @@
+# Stages a release: runs tools/prepare_release.py to bump
+# charts/runnerscout/Chart.yaml's version/appVersion and CHANGELOG.md, then
+# opens a chore(release) PR with those changes for a human to review and
+# merge. Merging that PR is what actually triggers a release - see
+# release.yml's own header and docs/releases.md. This workflow never
+# creates a tag, pushes an image, or publishes anything by itself.
+name: Prepare release
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver component to bump from the latest vMAJOR.MINOR.PATCH tag
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+permissions:
+  contents: read
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # contents: write to push the release branch; pull-requests: write to
+    # open the PR - both as a floor beneath RELEASE_PAT below, which needs
+    # no permissions: grant of its own (a PAT's scopes are fixed when it is
+    # minted, not by the workflow that uses it).
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # GitHub's own recursion guard means an event authored by the default
+      # GITHUB_TOKEN (a push, or a PR opened via `gh pr create` using it)
+      # does not trigger other workflows' own push:/pull_request: triggers -
+      # checked against ci.yml's actual trigger block and this repo's own
+      # branch protection ruleset (`gh api repos/tsouza/runnerscout/
+      # rulesets/23094721`, which requires the `verify`/`vulnerability`
+      # checks before merge): without a real PAT, the PR this job opens
+      # would never get ci.yml's checks to run at all, and branch
+      # protection would block it from ever becoming mergeable. RELEASE_PAT
+      # (a fine-grained PAT with contents:write + pull-requests:write on
+      # this repo, added as a repository secret) sidesteps the guard by
+      # authoring the push/PR as a real identity instead of the bot token -
+      # matching cerberus's own equivalent exactly, for the exact same
+      # documented reason, not guessed. Falls back to github.token via the
+      # `||` expression below if the secret is absent (never empty-string
+      # blank; a plain `||` chain is the standard way to do this without
+      # ever writing a secret value into a step output, which GitHub's own
+      # docs advise against - outputs are not masked as reliably as direct
+      # secret/env usage): the PR still opens, but its CI needs a manual
+      # nudge (close/reopen, or an empty commit) before it can be merged -
+      # see docs/releases.md.
+      # `secrets` is not an available context in a step-level `if:` (only
+      # `env:`/`with:` and job-level contexts - found by actually running
+      # actionlint, not assumed). This checks a boolean derived from it
+      # instead, so the secret's actual value is never written anywhere,
+      # including this step's own output.
+      - name: Check whether RELEASE_PAT is configured
+        id: pat
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [ -n "$RELEASE_PAT" ]; then
+            echo "set=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "set=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Warn if RELEASE_PAT is not configured
+        if: steps.pat.outputs.set == 'false'
+        run: |
+          echo "::warning::RELEASE_PAT is not set - the release PR will open, but GitHub's own recursion guard means its CI will not run automatically, and this repo's branch protection requires those checks before merge. Close and reopen the PR (or push an empty commit to it) to get CI to run, or add a RELEASE_PAT secret to fix this permanently - see docs/releases.md."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history + tags: prepare_release.py walks commits since the latest tag
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_PAT || github.token }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      # No PyYAML needed: tools/prepare_release.py bumps Chart.yaml with a
+      # targeted line substitution, not a YAML parse - see its own comment
+      # for why (preserving anything a future full round-trip would drop).
+      - name: Compute the next version and stage its changes
+        id: version
+        run: python3 tools/prepare_release.py --bump "${{ inputs.bump }}" >> "$GITHUB_OUTPUT"
+      - name: Open the chore(release) PR
+        env:
+          # Same fallback as the checkout step's own token: above - `gh pr
+          # create` makes its own API call independent of the git push
+          # credentials persisted by checkout, so it needs the same choice
+          # made again here, not inherited from that step.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          branch="release/${version}"
+          git checkout -b "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add charts/runnerscout/Chart.yaml CHANGELOG.md
+          git commit -m "chore(release): ${version}"
+          git push origin "$branch"
+          gh pr create \
+            --title "chore(release): ${version}" \
+            --body-file release-pr-body.md \
+            --head "$branch"
