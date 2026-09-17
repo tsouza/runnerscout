@@ -266,7 +266,7 @@ func New(c Config, k kubernetes.Interface, g *scaleset.Client) *Operator {
 				return "", errors.New("GitHub JIT client unavailable during recovery")
 			}
 			if e := jitLimiter.Wait(ctx); e != nil {
-				return "", fmt.Errorf("GitHub JIT request throttled: %w", e)
+				return "", fmt.Errorf("waiting for GitHub JIT request spacing: %w", e)
 			}
 			r, e := g.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: id, WorkFolder: "_work"}, c.ScaleSetID)
 			if e != nil {
@@ -646,24 +646,6 @@ const (
 	// currently active ones) gets a goroutine, most of which are
 	// near-instant no-ops (Deleted/TimedOut phases return immediately).
 	tickStepConcurrency = 20
-	// githubJITRequestInterval spaces successive GenerateJitRunnerConfig
-	// calls at least this far apart, even when several allocations are
-	// admitted in the same batch and their Step calls all reach Bootstrap
-	// within the same sub-millisecond window - issue #176: a batch of
-	// concurrently-admitted allocations consistently exhausted all local
-	// attempts with zero GCP API calls ever dispatched (each failed inside
-	// Bootstrap, before ever reaching the GCP provider), while an
-	// allocation admitted in isolation always succeeded. GitHub does not
-	// document a rate limit for this endpoint specifically, but "burst
-	// fails together, solo succeeds" is the signature of a burst-sensitive
-	// backend limit, not a defect in how this codebase issues the request.
-	// This is a mitigation for that evidence, not a confirmed root cause -
-	// #178 means the next recurrence, if any, carries GitHub's own error
-	// text directly instead of requiring this kind of inference. 250ms
-	// costs a 5-allocation batch at most ~1.25s against a 5-minute Step
-	// budget - negligible either way if the real cause turns out to be
-	// something else.
-	githubJITRequestInterval = 250 * time.Millisecond
 	// terminalRetention bounds how long a Deleted/TimedOut allocation's own
 	// ConfigMap record (one per allocation, in the Store) survives past its
 	// TerminalAt before Tick prunes it - otherwise every terminal record
@@ -678,6 +660,27 @@ const (
 	// address.
 	terminalRetention = 24 * time.Hour
 )
+
+// githubJITRequestInterval spaces successive GenerateJitRunnerConfig calls at
+// least this far apart, even when several allocations are admitted in the
+// same batch and their Step calls all reach Bootstrap within the same
+// sub-millisecond window - issue #176: a batch of concurrently-admitted
+// allocations consistently exhausted all local attempts with zero GCP API
+// calls ever dispatched (each failed inside Bootstrap, before ever reaching
+// the GCP provider), while an allocation admitted in isolation always
+// succeeded. GitHub does not document a rate limit for this endpoint
+// specifically, but "burst fails together, solo succeeds" is the signature
+// of a burst-sensitive backend limit, not a defect in how this codebase
+// issues the request. This is a mitigation for that evidence, not a
+// confirmed root cause - #178 means the next recurrence, if any, carries
+// GitHub's own error text directly instead of requiring this kind of
+// inference. At the default 250ms, the last of five calls starts about 1.0s
+// after the first, and the last of a full 10-allocation batch (MaxRunners's
+// hard cap) starts about 2.25s after the first - negligible against a
+// 5-minute Step budget either way if the real cause turns out to be
+// something else. It is a var rather than a const only so tests can widen
+// the window without weakening the production default.
+var githubJITRequestInterval = 250 * time.Millisecond
 
 func (o *Operator) Tick(ctx context.Context) error {
 	o.mu.Lock()
