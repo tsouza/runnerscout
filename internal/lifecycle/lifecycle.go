@@ -387,7 +387,10 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		}
 		a.Resources = resources
 		if e != nil || creation.ResourceID == "" {
-			if !empty {
+			if e != nil {
+				a.Condition = "CreateCommitmentUnknown: " + e.Error()
+			}
+			if !empty || a.Condition != "CreateCommitmentUnknown" {
 				if err := save(); err != nil {
 					return err
 				}
@@ -420,6 +423,14 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return err
 		}
 		if e != nil || !ob.Known {
+			cause := "provider returned unknown create reconciliation"
+			if e != nil {
+				cause = e.Error()
+			}
+			a.Condition = "CreateReconciliationUnknown: " + cause
+			if err := save(); err != nil {
+				return err
+			}
 			return errors.New("create reconciliation unknown")
 		}
 		if !ob.Exists {
@@ -455,6 +466,14 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 		}
 		ob, e := p.Observe(ctx, a)
 		if e != nil || !ob.Known {
+			cause := "provider returned unknown resource observation"
+			if e != nil {
+				cause = e.Error()
+			}
+			a.Condition = "ResourceObservationUnknown: " + cause
+			if err := save(); err != nil {
+				return err
+			}
 			return errors.New("resource observation unknown")
 		}
 		if err := c.rememberResources(ctx, &a, ob.Resources); err != nil {
@@ -477,6 +496,14 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 	if a.Phase == Deleting {
 		ob, e := p.Observe(ctx, a)
 		if e != nil || !ob.Known {
+			cause := "provider returned unknown cleanup observation"
+			if e != nil {
+				cause = e.Error()
+			}
+			a.Condition = "CleanupObservationUnknown: " + cause
+			if err := save(); err != nil {
+				return err
+			}
 			return errors.New("cleanup observation unknown")
 		}
 		if err := c.rememberResources(ctx, &a, ob.Resources); err != nil {
@@ -492,6 +519,10 @@ func (c *Controller) Step(ctx context.Context, id string) error {
 			return save()
 		}
 		if err := p.Delete(ctx, a); err != nil {
+			a.Condition = "CleanupUnconfirmed: " + err.Error()
+			if saveErr := save(); saveErr != nil {
+				return saveErr
+			}
 			return errors.New("delete not confirmed; cleanup retained")
 		}
 		return nil
