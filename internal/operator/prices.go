@@ -125,15 +125,19 @@ func (o *Operator) refreshAzurePrices(ctx context.Context, catalog placement.Cat
 // used for admission - same clone-before-mutate, same per-offering
 // isolation, same "failure zeroes only ObservedAt" semantics, same
 // "nil observer means fully inert" semantics as refreshAWSPrices/
-// refreshAzurePrices. It differs from both in exactly one respect: the
+// refreshAzurePrices. It differs from both in two respects: the
 // per-offering gate is GCPSkuRefs != nil, not Spot - see
 // placement.Offering.GCPSkuRefs and gcpPriceObserver's own doc comment for
 // why a pinned SKU carries no such restriction (the human who pinned it
 // already chose whichever SKU matches this offering's actual billing
 // model, spot or on-demand; GCPSkuClient.Observe never assumes one or the
-// other). An offering with Provider == "gcp" but GCPSkuRefs == nil is left
-// on its static price exactly like every non-GCP offering - this is the
-// deliberately narrow, no-guessing design docs/prices-gcp.md and
+// other) - and the per-call timeout is gcpPriceRefreshBudget, not
+// externalCallBudget, because GCPSkuClient.Observe's own worst case is
+// legitimately much longer than a single AWS/Azure price lookup - see that
+// var's own comment for the production incident that made the difference
+// load-bearing. An offering with Provider == "gcp" but GCPSkuRefs == nil is
+// left on its static price exactly like every non-GCP offering - this is
+// the deliberately narrow, no-guessing design docs/prices-gcp.md and
 // docs/prices-gcp.background.md describe, not an oversight.
 func (o *Operator) refreshGCPPrices(ctx context.Context, catalog placement.Catalog) placement.Catalog {
 	if o.GCPPrices == nil {
@@ -145,7 +149,7 @@ func (o *Operator) refreshGCPPrices(ctx context.Context, catalog placement.Catal
 		if offerings[i].Provider != "gcp" || offerings[i].GCPSkuRefs == nil {
 			continue
 		}
-		callCtx, cancel := context.WithTimeout(ctx, externalCallBudget)
+		callCtx, cancel := context.WithTimeout(ctx, gcpPriceRefreshBudget)
 		quote, err := o.GCPPrices.Observe(callCtx, offerings[i].GCPSkuRefs.CoreSkuID, offerings[i].GCPSkuRefs.RamSkuID, offerings[i].CPU, offerings[i].MemoryMiB)
 		cancel()
 		if err != nil {
