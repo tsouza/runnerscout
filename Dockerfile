@@ -1,22 +1,15 @@
 # syntax=docker/dockerfile:1
-FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS build
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-# Overrides internal/version.Version, reported to GitHub's Actions Runner
-# Scale Set API (scaleset.SystemInfo) and anywhere else this binary
-# identifies its own build. release-build.yml passes the real release tag
-# here; an unset/local build keeps the package's own "development" default.
-ARG VERSION=development
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/ cmd/
-COPY internal/ internal/
-COPY api/ api/
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X github.com/tsouza/runnerscout/internal/version.Version=${VERSION}" -o /out/runnerscout ./cmd/runnerscout
-
+# The binary is built by goreleaser (see .goreleaser.yml's builds: section
+# and its own comment for why), never by this file - $TARGETPLATFORM (e.g.
+# "linux/amd64") is a BuildKit-populated global build arg; goreleaser's
+# dockers_v2 stages the binary it built for that exact platform at
+# $TARGETPLATFORM/runnerscout in the build context automatically. `make
+# image` and ci.yml's runtime-image job reproduce that same staging via
+# `goreleaser build --single-target` before invoking a plain `docker build`,
+# so this file works identically from all three call sites.
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:1c2c046bc09ed40fad370b599a0b1ae7987f55b01e247cf27a7c27cd97e5bbc7 AS runtime
-COPY --from=build /out/runnerscout /usr/local/bin/runnerscout
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/runnerscout /usr/local/bin/runnerscout
 ENV HOME=/tmp/home
 USER 10001:10001
 EXPOSE 8080

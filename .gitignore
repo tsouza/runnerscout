@@ -45,3 +45,11 @@ __pycache__/
 # prepare-release.yml's own `gh pr create --body-file` step - never
 # committed, regenerated fresh by every prepare-release.yml run.
 /release-pr-body.md
+
+# `make image`'s scratch staging directory: `goreleaser build
+# --single-target` writes the binary here (at linux/$GOARCH/runnerscout,
+# matching Docker's own $TARGETPLATFORM convention) so the Dockerfile's
+# COPY finds it under a plain `docker build .` - see the Dockerfile's own
+# comment. Removed by the same make target; ignored as a safety net if a
+# build fails partway through.
+/linux/

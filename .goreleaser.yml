@@ -1,18 +1,37 @@
 version: 2
 
-# No real builds:/archives: - deliberately. runnerscout is only ever
-# deployed as a container via Helm; nobody consumes a standalone binary
-# today, so a goreleaser-produced tar.gz would be a new artifact surface
-# with no consumer. dockers_v2 below builds the image directly from the
-# existing multi-stage Dockerfile, which already does its own `go build` -
-# goreleaser orchestrates that build/push/sign, it does not replace it.
-# goreleaser has no top-level "no builds at all" switch - omitting builds:
-# entirely makes it infer a default one against the repo root (which has no
-# main package; every cmd/ here is a subdirectory) and fail. skip: true is
-# the documented way to disable it explicitly instead.
+# No archives: - deliberately. runnerscout is only ever deployed as a
+# container via Helm; nobody consumes a standalone binary today, so a
+# goreleaser-produced tar.gz would be a new artifact surface with no
+# consumer. The binary below exists only to feed the Dockerfile's COPY -
+# see dockers_v2 - never published on its own.
+#
+# goreleaser builds the binary itself (rather than the Dockerfile running
+# `go build` in its own stage, as the old pipeline's Dockerfile did): a
+# Dockerfile that compiles from source makes goreleaser's own dockers_v2
+# unable to tell what it's shipping, which it flags on every release
+# ("no binaries or packages found for the given platform - COPY/ADD may
+# not work", "extra_files may contain unnecessary build files" for go.mod/
+# cmd//internal//api/ - confirmed on the v1.2.3 release run). This is
+# goreleaser's own canonical pattern instead: it cross-compiles, the
+# Dockerfile only COPYs the result in. `make image` and ci.yml's
+# runtime-image job run `goreleaser build --single-target --snapshot` for
+# the same reason before their own plain `docker build`, so every path
+# that produces this image goes through the same compile step.
 builds:
-  - id: unused
-    skip: true
+  - id: runnerscout
+    main: ./cmd/runnerscout
+    binary: runnerscout
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    # v-prefixed to match internal/version.Version's own documented format
+    # and every tagged release before this pipeline (see dockers_v2.tags'
+    # own comment on the same point for image tags).
+    ldflags:
+      - -s -w -X github.com/tsouza/runnerscout/internal/version.Version=v{{.Version}}
 
 before:
   hooks:
@@ -27,28 +46,29 @@ before:
 dockers_v2:
   - id: runnerscout-image
     dockerfile: Dockerfile
-    # dockers_v2 builds in a synthesized context containing only the
-    # Dockerfile by default (found by actually running a snapshot build
-    # locally, not assumed) - these paths must match the Dockerfile's own
-    # COPY instructions exactly, or the build fails with "not found".
-    extra_files:
-      - go.mod
-      - go.sum
-      - cmd/
-      - internal/
-      - api/
+    # No extra_files: the builds: binary above is what the Dockerfile
+    # COPYs in now - dockers_v2 stages it into the per-platform build
+    # context automatically at $TARGETPLATFORM/runnerscout, matching the
+    # Dockerfile's own COPY instruction exactly.
     images:
       - ghcr.io/tsouza/runnerscout
     platforms:
       - linux/amd64
       - linux/arm64
-    build_args:
-      VERSION: "{{.Version}}"
     labels:
       org.opencontainers.image.version: "{{.Version}}"
       org.opencontainers.image.revision: "{{.FullCommit}}"
+    # v-prefixed: every release before this pipeline (and the Helm chart's
+    # own documented values.yaml example, `ghcr.io/tsouza/runnerscout:v1.0.0`)
+    # used a v-prefixed image tag. `.Version` itself is bare ("1.2.3", not
+    # "v1.2.3") - a bare `{{.Version}}` here silently broke that convention
+    # on the v1.2.3 release: the image published as :1.2.3, not :v1.2.3,
+    # which is not the same reference and is not automatically resolved by
+    # a puller that (correctly, by every prior release's own convention)
+    # asks for the v-prefixed tag - confirmed via a real ImagePullBackOff
+    # this caused, not a hypothetical.
     tags:
-      - "{{.Version}}"
+      - "v{{.Version}}"
       - "{{.FullCommit}}"
     # buildx-native SBOM attestation on the image index - no separate syft
     # step needed, replacing anchore/sbom-action from the old pipeline.
