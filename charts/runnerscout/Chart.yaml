@@ -5,3 +5,13 @@ type: application
 version: 1.2.5
 appVersion: 1.2.5
 kubeVersion: ">=1.37.0-0 <1.38.0-0"
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/tsouza/runnerscout
+    - name: documentation
+      url: https://github.com/tsouza/runnerscout/blob/main/docs/operations.md
+  artifacthub.io/images: |
+    - name: runnerscout
+      image: ghcr.io/tsouza/runnerscout:v1.2.4

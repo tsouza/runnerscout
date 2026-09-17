@@ -14,6 +14,8 @@
   <a href="https://github.com/tsouza/runnerscout/releases/latest"><img src="https://img.shields.io/github/v/release/tsouza/runnerscout?include_prereleases&style=flat-square" alt="Latest release"></a>
   <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/tsouza/runnerscout?style=flat-square" alt="Go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/tsouza/runnerscout?style=flat-square" alt="License"></a>
+  <a href="https://deepwiki.com/tsouza/runnerscout"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <a href="https://artifacthub.io/packages/search?repo=runnerscout"><img src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/runnerscout" alt="Artifact Hub"></a>
 </p>
 
 ---
