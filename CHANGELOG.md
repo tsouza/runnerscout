@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.4
+
+### Fixed
+- update .dockerignore for the goreleaser-built-binary Dockerfile (#194)
+- mkdir the goreleaser build output directory before -o writes to it (#193)
+- restore v-prefixed image tags; build via goreleaser, not in-Dockerfile (#191)
+- sign release images by digest, not by tag (#190)
+
 ## v1.2.3
 
 ### Fixed
