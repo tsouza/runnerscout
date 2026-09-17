@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
@@ -25,11 +26,21 @@ ROOT = Path(__file__).resolve().parent.parent
 VERSION_RE = re.compile(r'^\d+\.\d+\.\d+$')
 
 
-def chart_app_version(chart_path: Path) -> str:
+def chart_app_version(chart_path: Path) -> Optional[str]:
     document = yaml.safe_load(chart_path.read_text())
     version = document.get('appVersion')
+    # Chart.yaml's appVersion is only ever a bare MAJOR.MINOR.PATCH once
+    # prepare_release.py's own bump_chart_version has written one - between
+    # releases it holds the non-semver placeholder ("development") the
+    # chart shipped with from its very first commit (PR #7) and that the
+    # pre-goreleaser pipeline never touched (it overrode the value at build
+    # time via `helm package --app-version` instead of editing the file).
+    # That placeholder is this gate's own steady state on ordinary commits
+    # to main, not a malformed input - treating it as "nothing to publish"
+    # (None) rather than raising is what keeps this job from failing red on
+    # every single push that isn't a chore(release) merge.
     if not isinstance(version, str) or not VERSION_RE.fullmatch(version):
-        raise ValueError(f'{chart_path} appVersion {version!r} is not a bare MAJOR.MINOR.PATCH string')
+        return None
     return version
 
 
@@ -40,6 +51,8 @@ def tag_exists(tag: str, repo: Path) -> bool:
 
 def assess(chart_path: Path, repo: Path) -> dict:
     app_version = chart_app_version(chart_path)
+    if app_version is None:
+        return {'publish': False, 'version': None}
     tag = 'v' + app_version
     publish = not tag_exists(tag, repo)
     return {'publish': publish, 'version': tag}
@@ -52,11 +65,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = assess(Path(args.chart), Path(args.repo))
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+    except (OSError, yaml.YAMLError) as exc:
         print(f'release_gate: {exc}', file=sys.stderr)
         return 1
     print(f"publish={'true' if result['publish'] else 'false'}")
-    print(f"version={result['version']}")
+    print(f"version={result['version'] or ''}")
     return 0
 
 
