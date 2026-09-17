@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.6
+
+### Added
+- publish the Helm chart as an OCI artifact, list it on Artifact Hub (#200)
+
 ## v1.2.5
 
 ### Added
