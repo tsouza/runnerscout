@@ -98,13 +98,16 @@ jobs:
     timeout-minutes: 30
     # contents: write to create+push the release tag and create the GitHub
     # Release; packages: write to push the image to ghcr.io; id-token:
-    # write for cosign's keyless OIDC signing. Narrowest grant, at the one
-    # job that needs all three - matching this repo's existing permission-
+    # write for cosign's keyless OIDC signing AND the provenance attestation
+    # below (both use Sigstore's OIDC-backed keyless flow); attestations:
+    # write for that attestation's own record. Narrowest grant, at the one
+    # job that needs all four - matching this repo's existing permission-
     # scoping discipline (see the old release.yml/release-build.yml).
     permissions:
       contents: write
       packages: write
       id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -162,3 +165,16 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      # SLSA build provenance for the Helm chart archive - the one real
+      # downloadable release artifact this repo publishes (no binary
+      # archives - see .goreleaser.yml's own comment). Lets a consumer
+      # verify the chart they downloaded was built in this repo at this
+      # exact commit via `gh attestation verify runnerscout-X.Y.Z.tgz
+      # --owner tsouza`, the same guarantee cosign's image signing already
+      # gives the container image, extended to the chart. Matches
+      # ../cerberus's own use of this action for its release binaries.
+      - name: Attest Helm chart provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: release-artifacts/chart/*.tgz
