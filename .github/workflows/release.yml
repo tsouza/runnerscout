@@ -45,7 +45,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 25
     permissions:
       contents: read
       issues: read
@@ -54,8 +54,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Unchanged from the old tag-triggered pipeline - only the trigger
-      # context around it changed (push to main instead of a pushed tag).
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      # This push-to-main trigger fires on the same event as ci.yml, which
+      # races this job against ci.yml's own heavy post-merge jobs
+      # (kubernetes-integration, cloud-emulators, chart, runtime-image can
+      # each run several minutes) - confirmed in production: preflight ran
+      # and failed seconds after a merge with every REQUIRED check still
+      # queued. release_preflight.py's own single-snapshot design is
+      # unchanged; this step is what makes "the moment preflight snapshots"
+      # actually be after CI has settled, the way the old tag-push trigger
+      # did implicitly by being paced by a human.
+      - name: Wait for this commit's required checks to settle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/wait_for_checks.py \
+            --candidate "${{ github.sha }}" \
+            --gh gh
       # gh-tsouza is a local-machine-only wrapper; plain gh, authenticated
       # with this workflow's own GITHUB_TOKEN, is used in CI.
       - name: Run release preflight gate
