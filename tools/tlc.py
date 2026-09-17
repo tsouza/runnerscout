@@ -78,11 +78,11 @@ RUNS = [
     ("ListenerSession_stale_session_witness.cfg", "ListenerSession.tla", "NoSilentlyStrandedDemand",
      "a silently-orphaned listener session strands real GitHub demand indefinitely"),
     ("ExternalCallBudget_pre_fix.cfg", "ExternalCallBudget.tla", "NeverPermanentlyStuck",
-     "pre-fix: a stall at any of seven unbounded external call sites hangs reconciliation forever"),
+     "pre-fix: a stall at any unbounded external call site hangs reconciliation forever"),
     ("ExternalCallBudget_partial_fix_witness.cfg", "ExternalCallBudget.tla", "NeverPermanentlyStuck",
-     "the real intermediate state: six sites fixed, AzureInterruptionPoll found and fixed only after auditing further"),
+     "the real intermediate state: seven sites fixed, retry.go's AttemptJobs/RerunFailedJobs found only after an adversarial review"),
     ("ExternalCallBudget_post_fix.cfg", "ExternalCallBudget.tla", None,
-     "shipped: all seven call sites bounded, a stall at any of them recovers"),
+     "shipped: every known call site bounded, a stall at any of them recovers"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)

@@ -77,7 +77,9 @@ const (
 // evidence (JobID) read back unchanged, ruling out both "not yet
 // materialized" and "the run's own history moved underneath us".
 func (o *Operator) reconcilePendingRerun(ctx context.Context, owner, repo string, runID int64, pr pendingRerun) (rerunOutcome, pendingRerun) {
-	nextJobs, nextErr := o.GitHubJobs.AttemptJobs(ctx, owner, repo, runID, pr.Attempt+1)
+	nextCallCtx, nextCancel := context.WithTimeout(ctx, externalCallBudget)
+	nextJobs, nextErr := o.GitHubJobs.AttemptJobs(nextCallCtx, owner, repo, runID, pr.Attempt+1)
+	nextCancel()
 	if nextErr == nil && len(nextJobs) > 0 {
 		return rerunConfirmedHappened, pr
 	}
@@ -86,7 +88,9 @@ func (o *Operator) reconcilePendingRerun(ctx context.Context, owner, repo string
 		// nothing definitive either way. Stay parked; try again next pass.
 		return rerunStillAmbiguous, pr
 	}
-	originalJobs, origErr := o.GitHubJobs.AttemptJobs(ctx, owner, repo, runID, pr.Attempt)
+	origCallCtx, origCancel := context.WithTimeout(ctx, externalCallBudget)
+	originalJobs, origErr := o.GitHubJobs.AttemptJobs(origCallCtx, owner, repo, runID, pr.Attempt)
+	origCancel()
 	if origErr != nil {
 		return rerunStillAmbiguous, pr
 	}
@@ -165,11 +169,16 @@ func (o *Operator) processInterruptionRetries(ctx context.Context) error {
 		retriesUsed := f.RetriesUsedByRun[a.RunID]
 		attempt := retriesUsed + 1
 		_, stillPending := f.PendingReruns[a.RunID]
-		jobs, fetchErr := o.GitHubJobs.AttemptJobs(ctx, a.Owner, a.Repo, a.RunID, attempt)
+		fetchCallCtx, fetchCancel := context.WithTimeout(ctx, externalCallBudget)
+		jobs, fetchErr := o.GitHubJobs.AttemptJobs(fetchCallCtx, a.Owner, a.Repo, a.RunID, attempt)
+		fetchCancel()
 		if fetchErr == nil {
 			evidence := recovery.Evidence{ScaleSetJobID: a.ScaleSetJobID, RunnerName: a.ID, RunID: a.RunID, Attempt: attempt, ProviderInterrupted: true, Jobs: jobs, RetriesUsed: retriesUsed, RequestPending: stillPending}
 			if j, eligErr := recovery.Eligible(o.Config.Retry, evidence); eligErr == nil {
-				switch rerunErr := o.GitHubJobs.RerunFailedJobs(ctx, a.Owner, a.Repo, a.RunID); {
+				rerunCallCtx, rerunCancel := context.WithTimeout(ctx, externalCallBudget)
+				rerunErr := o.GitHubJobs.RerunFailedJobs(rerunCallCtx, a.Owner, a.Repo, a.RunID)
+				rerunCancel()
+				switch {
 				case rerunErr == nil:
 					f.RetriesUsedByRun[a.RunID] = attempt
 				case errors.Is(rerunErr, githubjobs.ErrRerunRejected):

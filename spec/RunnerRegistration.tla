@@ -164,6 +164,17 @@ Claim(id) ==
   /\ githubReg' = [githubReg EXCEPT ![id] = "Registered"]
   /\ UNCHANGED <<phase, pruned>>
 
+(* Since Claim's own guard above now requires Creating, githubReg[id] is    *)
+(* always "NotRegistered" for any id still in Pending - meaning            *)
+(* DeregOnPendingTimedOut has no observable effect in ANY config, not just *)
+(* one: Deregister(id) is a no-op whenever githubReg[id] isn't "Registered" *)
+(* already, by its own definition above. Kept as a constant (rather than   *)
+(* removed) because it still faithfully models PR #163's own real          *)
+(* configuration - that PR's dereg call at this exact transition genuinely *)
+(* exists in Step - even though nothing in this state space can any longer *)
+(* reach a state where firing it changes anything. See                    *)
+(* RunnerRegistration_pending_only.cfg's own comment for what its          *)
+(* counterexample actually exercises instead.                              *)
 PendingTimedOut(id) ==
   /\ phase[id] = "Pending"
   /\ phase' = [phase EXCEPT ![id] = "TimedOut"]

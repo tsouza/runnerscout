@@ -47,11 +47,21 @@ Init ==
   /\ totalAssignedJobs = 0
 
 (* A real GitHub-side event, entirely external to this listener: a workflow *)
-(* job becomes queued and eligible for this scale set. *)
+(* job becomes queued and eligible for this scale set. acquired' = FALSE   *)
+(* starts this job's own cycle unacquired, regardless of a prior job's     *)
+(* outcome - an earlier version of this module left acquired unreset here, *)
+(* which meant DeliverMessage's own ~acquired guard could never be         *)
+(* satisfied again after the very first delivery, for the rest of any      *)
+(* behavior: a second real job, arriving to a still-healthy Fresh session, *)
+(* would sit undelivered forever with nothing to distinguish that state    *)
+(* from the one this module exists to find, and NoSilentlyStrandedDemand   *)
+(* would not catch it, since it only ever checks session = "Stale". A      *)
+(* later review caught this; see README.background.md.                    *)
 JobBecomesAvailable ==
   /\ ~demand
   /\ demand' = TRUE
-  /\ UNCHANGED <<session, acquired, totalAssignedJobs>>
+  /\ acquired' = FALSE
+  /\ UNCHANGED <<session, totalAssignedJobs>>
 
 (* getMessage's 200 OK path: only reachable while session = Fresh, since a   *)
 (* Stale session (by this module's own definition of the word) never        *)

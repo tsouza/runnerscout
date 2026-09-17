@@ -301,12 +301,12 @@ func TestPruneSurvivesAFailedFleetSave(t *testing.T) {
 // A real production incident: a leader pod stuck with idle CPU and no log
 // line for 49+ minutes, reproduced identically on restart, because nothing
 // bounded a sequential external call under Tick's own cancel-only ctx.
-// pruneTerminalAllocations's DeregisterRunner loop is the second such call
-// site (the first, runLeader's own scale-set lookup and session
-// establishment, is bounded by githubStartupBudget) - this proves it is
-// bounded too, and specifically that one stalled candidate cannot block
-// every later one in the same pass: two candidates past retention, the
-// first configured to hang, the second must still be reached.
+// pruneTerminalAllocations's DeregisterRunner loop is one of several such
+// call sites - see externalCallBudget's own comment (operator.go) for the
+// full, current list - this proves it is bounded too, and specifically
+// that one stalled candidate cannot block every later one in the same
+// pass: two candidates past retention, the first configured to hang, the
+// second must still be reached.
 func TestPruneBoundsAnUnresponsiveDeregistrar(t *testing.T) {
 	previous := externalCallBudget
 	externalCallBudget = 100 * time.Millisecond

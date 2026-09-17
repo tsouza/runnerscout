@@ -16,9 +16,13 @@ one of the transitions that can leave it orphaned.
 
 `RunnerRegistration.tla` operationalized that finding: TLC found a real
 three-step counterexample against the code as it stood right after PR #163
-(`Claim -> ToCreating -> CreateConfirmedAbsent`), landing in
+(`ToCreating -> Claim -> CreateConfirmedAbsent`), landing in
 `phase=Deleted, githubReg=Registered` - precisely the `Creating -> Deleted`
-gap the research had flagged. That became issue #167 and PR #168.
+gap the research had flagged. That became issue #167 and PR #168. (This
+sentence's own action order was corrected later, once `Claim`/`ToCreating`'s
+guards were fixed to match Step's real causal order - see "Six call sites,
+then seven, then nine" below for how that was found; the counterexample
+itself, and everything issues #167/#168 fixed, is unchanged.)
 
 ## Why the model kept growing
 
@@ -329,6 +333,20 @@ It is fixed in the same change, because it is real, but it is a different
 kind of gap than the one this section is about, and conflating the two would
 overstate what modeling this subsystem actually closes.
 
+A later adversarial review caught a real bug in the model itself:
+`acquired` was set `TRUE` by `DeliverMessage` and never reset anywhere,
+so `DeliverMessage`'s own `~acquired` guard could never be satisfied again
+after the very first job in any behavior - a second real job, arriving to
+a still-healthy `Fresh` session, would sit undelivered forever with nothing
+distinguishing that state from the one this module exists to find, and
+`NoSilentlyStrandedDemand` would not have caught it (it only ever checks
+`session = "Stale"`). Fixed by resetting `acquired' = FALSE` as part of
+`JobBecomesAvailable` - each new job starts its own delivery cycle
+unacquired, regardless of a prior job's outcome, matching the real
+protocol (`AcquireJobs` is called fresh per message, never a one-time
+flag). The existing `stale_session_witness` config's result is unchanged -
+this bug never affected the property that config actually checks.
+
 ## ExternalCallBudget.tla: extrapolating one incident to every call site it implicates
 
 `ListenerSession.tla` (above) was triggered by one report of a scale set
@@ -366,15 +384,18 @@ incident: `pre_fix` reproduces the original shape (nothing bounded),
 `partial_fix_witness` proves that bounding only the two call sites the
 incident report actually named is not sufficient - any of the remaining
 sites left unbounded still permanently strands reconciliation - and
-`post_fix` certifies the shipped state, every one wrapped in
-`externalCallBudget` (a new shared budget; `githubStartupBudget` already
-existed for the two `runLeader` steps specifically). Bounding a call does
+`post_fix` certifies the shipped state: every site wrapped in one of two
+new budgets introduced together in this same change - `externalCallBudget`
+for every site except runLeader's own two startup steps, which use the
+separately-named `githubStartupBudget` (2 minutes, matching that a scale-set
+lookup and session establishment legitimately need more room than a single
+lightweight API call - see that var's own comment). Bounding a call does
 not fix whatever external condition stalled it - the model's own
 `Recover` action is deliberately silent about what happens next (a
 Kubernetes restart on a fatal error, or the next loop iteration reached) -
 it only prevents that stall from becoming permanent and invisible.
 
-## Six call sites, verified, still not exhaustive - a seventh found by asking again
+## Six call sites, then seven, then nine - completeness claims that kept being wrong
 
 The module's own first version stopped at six call sites and said so in its
 own header comment: "CallSites enumerates them exactly." Asked directly to
@@ -389,7 +410,7 @@ Azure Storage Queue dequeue would have hung every subsequent `Tick`
 indefinitely, the same incident shape this module exists to prevent - and
 was not caught by the first pass despite that pass's own stated goal of
 enumerating "exactly." Fixed the same way as the other six (wrapped in
-`externalCallBudget`), and `CallSites` now has seven members;
+`externalCallBudget`), and `CallSites` grew to seven members;
 `partial_fix_witness` was updated to reflect the real historical state this
 repository passed through (six bounded, `AzureInterruptionPoll` not yet
 found) rather than an arbitrary hypothetical omission, since that state
@@ -413,13 +434,38 @@ structurally impossible to model) and the second was an unacknowledged
 simplification the project's own convention (state what you abstract and
 why) requires calling out explicitly rather than leaving implicit.
 
-None of these four findings - the seventh call site, the stale
-`ExternalFailureVisibility` config, the backwards `Claim`/`ToCreating`
-ordering, or the silent `Prune` simplification - were found by any model's
-author re-reading their own work. All four were found by a fresh check
-whose only job was to disbelieve each claim until it held up against the
-code as it stood at the moment of checking, not as it stood when the model
-was written.
+That pass's own report described its work as complete. It was not: a
+second, independently dispatched adversarial review, run specifically
+against the diff about to be released rather than against any one module in
+isolation, found an eighth and ninth call site the first review had also
+missed - `retry.go`'s `reconcilePendingRerun` (two `AttemptJobs` calls) and
+`processInterruptionRetries` (one `AttemptJobs`, one `RerunFailedJobs`),
+reachable from the same unbounded `ctx` one line away from the
+already-fixed `pruneTerminalAllocations` call. This one was the most severe
+of the nine: `internal/githubjobs.Client` falls back to `http.DefaultClient`
+(`Timeout: 0`) when unconfigured, which is exactly how production
+constructs it, so unlike the scaleset client's own 5-minute per-attempt
+default, this site had no fallback bound at all before being wrapped.
+`CallSites` grew to nine; `partial_fix_witness` was updated again to
+reflect the newer real intermediate state (seven bounded, the two
+`retry.go` sites not yet found). The same review also caught a comment on
+`externalCallBudget` itself that said "applied everywhere" and then
+enumerated a list missing `pollAzureInterruptions` - the exact site the
+prior round had just added, pointing back at that same comment as its own
+authority - a dangling cross-reference in a `.cfg` file's comment to a file
+this same change deletes, and a background-doc claim that `githubStartupBudget`
+"already existed" when it was introduced in this same unreleased diff.
+`CallSites`'s own comment was rewritten afterward to stop asserting the
+list is exhaustive - it documents the result of the most recent audit, not
+a proof no tenth site exists, precisely because the second claim of
+exhaustiveness was as wrong as the first.
+
+None of these findings - across either review round - were found by any
+model's or fix's own author re-reading their own work. All of them were
+found by a fresh check whose only job was to disbelieve each claim until it
+held up against the code as it stood at the moment of checking, not as it
+stood when the model or comment was written - including disbelieving the
+first review's own claim to have already done that.
 
 ## Why `make tlc` and not CI
 

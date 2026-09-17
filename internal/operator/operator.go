@@ -667,18 +667,41 @@ const (
 // ultimately runLeader's cancel-only, no-deadline ctx (see
 // githubStartupBudget's own comment for why that matters: lease renewal
 // keeps succeeding independent of external connectivity, so nothing
-// upstream ever cancels a stalled call on its own). Applied everywhere this
-// package makes such a call outside a Step goroutine's own bound:
-// pruneTerminalAllocations's DeregisterRunner loop (one candidate blocking
-// every later one in the same pass), and refreshAWSPrices/
-// refreshAzurePrices/refreshGCPPrices's own per-offering Observe loops
-// (one offering blocking every later one, and indirectly blocking
-// HandleDesiredRunnerCount's caller - the listener's own message loop, so
-// a stalled price observation would stop admission entirely, the same
-// incident shape as the startup hang this budget was first added for, via
-// a different call path). A var rather than a const only so tests can
-// shrink the window without weakening the production default - see
-// githubJITRequestInterval's own comment for the same pattern.
+// upstream ever cancels a stalled call on its own). This is the canonical
+// list of every call site it wraps - keep it in sync with spec/
+// ExternalCallBudget.tla's own CallSites set, which enumerates the same
+// sites for exactly this reason (an earlier version of both this comment
+// and that set were each independently incomplete; see
+// spec/README.background.md for how that was found):
+//   - pruneTerminalAllocations's DeregisterRunner loop
+//   - refreshAWSPrices/refreshAzurePrices/refreshGCPPrices's own
+//     per-offering Observe loops
+//   - pollAzureInterruptions's single Poll call (azure_interruptions.go)
+//   - retry.go's reconcilePendingRerun (two AttemptJobs calls) and
+//     processInterruptionRetries (one AttemptJobs, one RerunFailedJobs) -
+//     internal/githubjobs.Client falls back to http.DefaultClient
+//     (Timeout: 0) when unconfigured, which is exactly how production
+//     constructs it (cmd/runnerscout/main.go never sets HTTPClient), so
+//     this was the one site with no fallback bound at all before this var
+//     wrapped it
+//
+// A stalled call anywhere on this list blocks HandleDesiredRunnerCount's
+// caller - the listener's own message loop - so admission stops entirely,
+// the same incident shape as the startup hang this budget was first added
+// for, via whichever call path stalled.
+//
+// HONESTY NOTE: this bounds one call, not the loop it sits inside. Each of
+// the four loop-based sites above re-arms a fresh externalCallBudget per
+// item, so N stalled items in the same pass cost up to N times this budget
+// sequentially - minutes, for a large N, not the unbounded hang this fixes,
+// but not instant either. Neither this comment nor
+// spec/ExternalCallBudget.tla's per-call model claims otherwise; the
+// property that module actually checks is "no single stall is permanent,"
+// not "a pass through a large batch is fast."
+//
+// A var rather than a const only so tests can shrink the window without
+// weakening the production default - see githubJITRequestInterval's own
+// comment for the same pattern.
 var externalCallBudget = 30 * time.Second
 
 // githubJITRequestInterval spaces successive GenerateJitRunnerConfig calls at

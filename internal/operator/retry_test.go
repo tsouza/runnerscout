@@ -31,15 +31,29 @@ type fakeGitHubJobs struct {
 	reranRun    int64
 	rerunCalled int
 	rerunErr    error
+	// hang, when set, makes AttemptJobs/RerunFailedJobs block until the
+	// context they are called with is cancelled/expires - proving each
+	// external call site in retry.go supplies its own bounded context
+	// (externalCallBudget) rather than the bare ctx Tick itself was given,
+	// mirroring fakeDeregistrar/fakeAzureInterruptions's own hang field.
+	hang bool
 }
 
 func (f *fakeGitHubJobs) AttemptJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]recovery.RESTJob, error) {
+	if f.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if r, ok := f.responses[attempt]; ok {
 		return r.jobs, r.err
 	}
 	return f.jobs, f.fetchErr
 }
 func (f *fakeGitHubJobs) RerunFailedJobs(ctx context.Context, owner, repo string, runID int64) error {
+	if f.hang {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	f.rerunCalled++
 	f.reranOwner, f.reranRepo, f.reranRun = owner, repo, runID
 	return f.rerunErr
@@ -314,5 +328,39 @@ func TestInterruptionRetryReconciliationConfirmsRerunDidNotHappen(t *testing.T) 
 	got, e := s.Load(ctx, "rs-test")
 	if e != nil || got.RetryProcessed {
 		t.Fatal("the allocation remains unprocessed while the fresh retry is unresolved", got, e)
+	}
+}
+
+// A real production incident: a leader pod stuck with idle CPU and no log
+// line, because nothing bounded a sequential external call under Tick's own
+// cancel-only ctx. internal/githubjobs.Client falls back to
+// http.DefaultClient (Timeout: 0) when no HTTPClient is configured - exactly
+// production's own construction (cmd/runnerscout/main.go never sets one) -
+// so this call site had no fallback bound at all, unlike the scaleset
+// client's own 5-minute default. This is the eighth such site, found only
+// by auditing every remaining external call in the package after the first
+// seven were already fixed and believed complete.
+func TestProcessInterruptionRetriesBoundsAnUnresponsiveGitHubJobs(t *testing.T) {
+	previous := externalCallBudget
+	externalCallBudget = 100 * time.Millisecond
+	defer func() { externalCallBudget = previous }()
+
+	gh := &fakeGitHubJobs{hang: true}
+	policy := recovery.Policy{Enabled: true, MaxRetries: 2, AcknowledgeRepeatedEffects: true}
+	o, s := retryOperator(t, gh, policy)
+	// ctx is cancel-only, deliberately with no deadline of its own -
+	// matching Tick's own ctx in production. A test-owned deadline here
+	// would let the test still pass even if processInterruptionRetries
+	// stopped applying externalCallBudget itself.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	seedAllocation(t, ctx, s, interruptedAllocation())
+
+	done := make(chan error, 1)
+	go func() { done <- o.processInterruptionRetries(ctx) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("processInterruptionRetries did not bound the stalled AttemptJobs call - it hung past externalCallBudget")
 	}
 }

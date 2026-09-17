@@ -69,13 +69,21 @@ func TestRunLeaderSurfacesListenerDiagnostics(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	defer slog.SetDefault(previous)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- o.runLeader(ctx) }()
+
 	// The initial session statistics are logged before the listener's own
-	// polling loop starts - give it a moment to reach that line, then stop.
-	time.Sleep(200 * time.Millisecond)
+	// polling loop starts. Poll for the log line rather than sleeping a
+	// fixed duration and hoping - a fixed sleep is exactly the kind of
+	// timing assumption that flakes under load (a slow CI runner, GC
+	// pause, or scheduler contention delaying the goroutine past whatever
+	// fixed window was guessed).
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(buf.String(), "totalAssignedJobs") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	cancel()
 	select {
 	case <-done:

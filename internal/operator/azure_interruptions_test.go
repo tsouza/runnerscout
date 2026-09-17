@@ -196,11 +196,10 @@ func TestPollAzureInterruptionsPollErrorReturnsNilMap(t *testing.T) {
 // A real production incident: a leader pod stuck with idle CPU and no log
 // line for 49+ minutes, because nothing bounded a sequential external call
 // under runLeader's unbounded, cancel-only ctx. This is the same mechanism
-// as externalCallBudget's other call sites (runLeader's own startup
-// sequence, pruneTerminalAllocations's DeregisterRunner loop,
-// refreshAWSPrices/refreshAzurePrices/refreshGCPPrices) - a seventh site,
-// found only by auditing every external call in this package rather than
-// trusting the first six to be exhaustive.
+// as externalCallBudget's other call sites - see that var's own comment
+// (operator.go) for the full, current list - found only by auditing every
+// external call in this package rather than trusting an earlier audit to
+// have already been exhaustive.
 func TestPollAzureInterruptionsBoundsAnUnresponsivePoll(t *testing.T) {
 	previous := externalCallBudget
 	externalCallBudget = 100 * time.Millisecond

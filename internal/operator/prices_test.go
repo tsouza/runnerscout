@@ -145,10 +145,10 @@ func TestRefreshAWSPricesIsolatesFailurePerOffering(t *testing.T) {
 // under an unbounded, cancel-only ctx (runLeader's own, ultimately what
 // refreshAWSPrices is called with via HandleDesiredRunnerCount from the
 // listener's own message loop). This is the same mechanism as
-// externalCallBudget's other two call sites (runLeader's own startup
-// sequence, pruneTerminalAllocations's DeregisterRunner loop) - proven once
-// here since all three refresh* functions share this exact wrapping. A
-// stalled offering must not block a later one in the same refresh pass.
+// externalCallBudget's other call sites - see that var's own comment
+// (operator.go) for the full, current list - proven once here since all
+// three refresh* functions share this exact wrapping. A stalled offering
+// must not block a later one in the same refresh pass.
 func TestRefreshAWSPricesBoundsAnUnresponsiveObserver(t *testing.T) {
 	previous := externalCallBudget
 	externalCallBudget = 100 * time.Millisecond

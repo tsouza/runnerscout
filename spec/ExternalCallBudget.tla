@@ -12,25 +12,23 @@
 (* ctx without its own per-call timeout, is never cancelled by anything    *)
 (* upstream - it hangs forever, and so does everything sequenced after it. *)
 (*                                                                          *)
-(* Seven real call sites in this package make an external call outside     *)
-(* Step's own already-bounded per-allocation goroutine (tickStepBudget/     *)
-(* tickCreateOrDeleteBudget already wrap every Step call, so those are not *)
-(* modeled here - this module covers only what those two budgets do not).  *)
-(* CallSites enumerates them exactly: runLeader's own GetRunnerScaleSetByID *)
-(* and MessageSessionClient calls (the two steps of establishing GitHub    *)
-(* connectivity before the listener can even start), the three Observe     *)
-(* loops in prices.go (refreshAWSPrices/refreshAzurePrices/refreshGCPPrices, *)
-(* one call site each despite the shared shape - each is an independent    *)
-(* function with its own nil-gate), pruneTerminalAllocations's own         *)
-(* DeregisterRunner loop, and pollAzureInterruptions's single Poll call     *)
-(* (azure_interruptions.go) - found only by auditing every external call   *)
-(* in this package after the first six were fixed, not by the incident     *)
-(* report itself, which named only the two runLeader steps. That the first *)
-(* version of this module stopped at six - after already stating its whole *)
-(* purpose was extrapolating past the one incident-named pair - is exactly *)
-(* the same shape of miss AdmissionSlot.tla's own background section       *)
-(* documents: a completeness claim ("enumerates them exactly") that had    *)
-(* not actually been checked against the rest of the codebase. It has now. *)
+(* CallSites below lists every external call outside Step's own already-   *)
+(* bounded per-allocation goroutine (tickStepBudget/tickCreateOrDeleteBudget *)
+(* already wrap every Step call, so those are not modeled here) that this  *)
+(* module's own author could find as of this module's last revision:       *)
+(* runLeader's own GetRunnerScaleSetByID and MessageSessionClient calls,    *)
+(* the three Observe loops in prices.go, pruneTerminalAllocations's own     *)
+(* DeregisterRunner loop, pollAzureInterruptions's single Poll call, and    *)
+(* retry.go's AttemptJobs/RerunFailedJobs calls. This list has already      *)
+(* been wrong twice - first stopping at six sites while the module's own    *)
+(* header claimed "enumerates them exactly" (a completeness claim that had  *)
+(* not actually been checked against the rest of the codebase - see        *)
+(* README.background.md), then again at seven after an eighth,             *)
+(* retry.go's own GitHub REST calls, was found by an adversarial review     *)
+(* specifically checking this module against the code rather than trusting *)
+(* its own prior claim of completeness. Given that history, this comment    *)
+(* deliberately does not assert this list is exhaustive now either - it is *)
+(* the result of the most recent audit, not a proof no ninth site exists.   *)
 (* BoundedCallSites is the one constant that changes between configs,      *)
 (* standing in for whether externalCallBudget (or githubStartupBudget, for *)
 (* the two runLeader steps) actually wraps that call in the real code.     *)
@@ -39,7 +37,7 @@ EXTENDS Naturals
 
 CallSites == {"ScaleSetLookup", "SessionEstablish", "PruneDeregister",
                "AWSPriceRefresh", "AzurePriceRefresh", "GCPPriceRefresh",
-               "AzureInterruptionPoll"}
+               "AzureInterruptionPoll", "RetryAttemptJobs", "RetryRerunFailedJobs"}
 
 CONSTANT BoundedCallSites
 ASSUME BoundedCallSites \subseteq CallSites
@@ -86,9 +84,18 @@ Spec == Init /\ [][Next]_vars
 (* The property the incident violated: reconciliation must never become    *)
 (* permanently stuck just because one external call stalled. Checked       *)
 (* against BoundedCallSites = {} (the pre-fix shape - every one of these    *)
-(* seven calls used the bare, deadline-less ctx) and against                *)
+(* calls used the bare, deadline-less ctx) and against                     *)
 (* BoundedCallSites = CallSites (the shipped fix - every one of them is now *)
 (* wrapped in its own externalCallBudget/githubStartupBudget context).      *)
+(*                                                                          *)
+(* HONESTY NOTE: this models one call, not a loop of them. Four of the real *)
+(* sites (PruneDeregister, the three price refreshes, RetryAttemptJobs/     *)
+(* RetryRerunFailedJobs) sit inside a per-item loop that re-arms a fresh    *)
+(* budget every iteration - N stalled items cost up to N times the budget   *)
+(* sequentially, not the single bounded delay this action implies. Clean    *)
+(* here means "no single stall is permanent," not "a large batch recovers   *)
+(* quickly" - see externalCallBudget's own comment (operator.go) for the    *)
+(* real cost of that gap.                                                   *)
 NeverPermanentlyStuck == ~stuck
 
 ====
