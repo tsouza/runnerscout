@@ -3,7 +3,10 @@ package configapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -278,6 +281,13 @@ type runtimeWorker struct {
 	paused, draining, drained atomic.Bool
 	started, finish, stopped  chan struct{}
 	beforeStart               func() error
+	// sessionErr is what RunSession/RunRecovery return when finish fires
+	// instead of ctx being cancelled - simulating a real internal error
+	// (e.g. runLeader/listener.Run returning one) exiting the session on
+	// its own, the same shape a stalled GitHub connection or a config
+	// change looks identical to from the reconcile loop's own perspective
+	// without this - see TestRuntimeLogsWorkerErrorBeforeRestarting.
+	sessionErr error
 }
 
 func (w *runtimeWorker) RunSession(ctx context.Context) error  { return w.run(ctx, false) }
@@ -299,10 +309,14 @@ func (w *runtimeWorker) run(ctx context.Context, cleanup bool) error {
 		case <-ctx.Done():
 		case <-w.finish:
 		}
-	} else {
-		<-ctx.Done()
+		return nil
 	}
-	return nil
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-w.finish:
+		return w.sessionErr
+	}
 }
 
 type runtimeFixture struct {
@@ -400,11 +414,38 @@ func TestRuntimeProtectsBeforeSessionAndReloadsOnlySemanticChanges(t *testing.T)
 	if len(f.workers) != 1 || runtimeReason(t, f.r) != "Reconciled" {
 		t.Fatal("status write restarted the session")
 	}
+	// A metadata-only Secret write - resourceVersion moves, .data does not -
+	// must not restart the session either, the same way the CRD status
+	// write above doesn't. This is the exact production shape a peer
+	// session traced: a listener session restarting every 60-90s with real
+	// queued demand never getting admitted, because some unrelated process
+	// touching a watched credential Secret's metadata looked identical to
+	// a rotation before this fix.
+	untouched, err := f.r.Client.CoreV1().Secrets("test").Get(context.Background(), "github", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	untouched.ResourceVersion = "metadata-only-touch"
+	if _, err = f.r.Client.CoreV1().Secrets("test").Update(context.Background(), untouched, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRuntime(t, f.r)
+	if len(f.workers) != 1 || f.cleanups != 0 {
+		t.Fatal("a Secret resourceVersion bump with unchanged data restarted the session")
+	}
+
 	secret, err := f.r.Client.CoreV1().Secrets("test").Get(context.Background(), "github", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A real rotation changes .data, not just resourceVersion - a live
+	// Secret's resourceVersion also bumps on a metadata-only write with
+	// .data byte-for-byte unchanged (see
+	// TestLoadedKeyIgnoresSecretResourceVersionChurnWithUnchangedData in
+	// load_test.go for that case, which this test must not conflate with
+	// an actual rotation the way an earlier version of it did).
 	secret.ResourceVersion = "2"
+	secret.Data["token"] = []byte("rotated-fixture-token")
 	if _, err = f.r.Client.CoreV1().Secrets("test").Update(context.Background(), secret, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -421,6 +462,56 @@ func TestRuntimeProtectsBeforeSessionAndReloadsOnlySemanticChanges(t *testing.T)
 	if !f.workers[1].paused.Load() || f.workers[1].draining.Load() || len(f.workers) != 2 {
 		t.Fatal("invalid reference must pause new admissions while preserving accepted jobs")
 	}
+}
+
+// A worker's own session (RunSession, wrapping runLeader/listener.Run) can
+// exit on its own - an internal error, not a configuration change - and the
+// reconcile loop always falls through to a full rebuild either way (r.stop()
+// clears r.worker before the loaded.Key() equality check ever gets a chance
+// to run, so a matching Key() cannot short-circuit an already-exited
+// worker). Before this test, that real cause was silently discarded: a
+// worker exiting on a real error and a worker exiting because its own
+// configuration changed were indistinguishable from the logs alone - a
+// second, related gap a peer session found while investigating restarts
+// that a Secret resourceVersion fix alone did not fully explain.
+func TestRuntimeLogsWorkerErrorBeforeRestarting(t *testing.T) {
+	f := newRuntimeFixture(t)
+	reconcileRuntime(t, f.r)
+	awaitRuntime(t, f.workers[0].started)
+	reconcileRuntime(t, f.r)
+
+	var buf syncBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(previous)
+
+	f.workers[0].sessionErr = errors.New("fixture: session exited on its own")
+	close(f.workers[0].finish)
+	awaitRuntime(t, f.workers[0].stopped)
+
+	reconcileRuntime(t, f.r)
+	if len(f.workers) != 2 {
+		t.Fatal("an exited worker must still be replaced", len(f.workers))
+	}
+	if !strings.Contains(buf.String(), "fixture: session exited on its own") {
+		t.Fatal("the worker's own error was not logged before restarting", buf.String())
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestRuntimeCheckpointLossOrCorruptionPausesAndCannotBeReplaced(t *testing.T) {

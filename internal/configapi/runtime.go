@@ -3,6 +3,7 @@ package configapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -372,6 +373,20 @@ func (r *Runtime) Reconcile(ctx context.Context) error {
 	if r.worker != nil {
 		select {
 		case <-r.worker.done:
+			// Unlike the CleanupMode branch above, this path always falls
+			// through to a full worker rebuild regardless of whether
+			// loaded.Key() actually changed (r.stop() below clears
+			// r.worker to nil, so the Key()-equality short-circuit right
+			// after this block can never fire for an already-exited
+			// worker) - so worker.err is the only signal available for
+			// telling "the session exited because its own configuration
+			// changed" apart from "it exited on its own, e.g. an internal
+			// runLeader/listener.Run error", and it was previously
+			// discarded silently here. Both looked identical from the
+			// outside: a stopped worker, then a freshly started one.
+			if r.worker.err != nil {
+				slog.Warn("session worker exited; restarting", "error", r.worker.err)
+			}
 			if err := r.stop(); err != nil {
 				return err
 			}

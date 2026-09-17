@@ -47,6 +47,16 @@ func (l Loaded) Key() string {
 	for _, revision := range l.Revisions {
 		identities = append(identities, identity{revision.Resource, revision.Name, revision.UID})
 	}
+	// secretIdentity deliberately omits SecretRevision.ResourceVersion, the
+	// same way identity above already omits it for CRD/ConfigMap
+	// revisions - see SecretRevision.ContentHash's own doc comment for why
+	// hashing a live Secret's raw resourceVersion here reopens exactly the
+	// restart loop this function's own comment disclaims.
+	type secretIdentity struct{ Name, UID, ContentHash string }
+	secrets := make([]secretIdentity, 0, len(l.Credentials.Revisions))
+	for _, revision := range l.Credentials.Revisions {
+		secrets = append(secrets, secretIdentity{revision.Name, revision.UID, revision.ContentHash})
+	}
 	var network *api.NetworkProfileSpec
 	if l.Snapshot.Network != nil {
 		network = &l.Snapshot.Network.Spec
@@ -58,7 +68,7 @@ func (l Loaded) Key() string {
 		Suspend    bool
 		Network    *api.NetworkProfileSpec
 		Identities []identity
-		Secrets    []SecretRevision
-	}{l.Resolved.Config, l.Resolved.Auth, l.Resolved.Credentials, l.Resolved.Suspend, network, identities, l.Credentials.Revisions})
+		Secrets    []secretIdentity
+	}{l.Resolved.Config, l.Resolved.Auth, l.Resolved.Credentials, l.Resolved.Suspend, network, identities, secrets})
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }

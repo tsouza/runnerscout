@@ -60,6 +60,48 @@ func TestLoadedKeyIgnoresStatusButDetectsIdentityAndSecretRotation(t *testing.T)
 	}
 }
 
+// A live Kubernetes Secret's own resourceVersion bumps on any write to the
+// object - including one that never touches .data at all (an annotation or
+// label change, or any other metadata-only update some other process makes
+// to a watched credential Secret). Key()'s own doc comment already promises
+// "status writes and unrelated metadata updates cannot trigger listener
+// restart loops" - this proves that promise now actually holds for Secrets
+// specifically, not just for the CRD/ConfigMap revisions
+// TestLoadedKeyIgnoresStatusButDetectsIdentityAndSecretRotation above
+// already covers. Confirmed in production: a listener session restarting
+// every 60-90s with real queued demand never getting admitted, traced to
+// exactly this - resourceVersion bumping with .data byte-for-byte
+// unchanged.
+func TestLoadedKeyIgnoresSecretResourceVersionChurnWithUnchangedData(t *testing.T) {
+	ctx := context.Background()
+	reader := readerFixture(t)
+	_, client := credentialFixture(t)
+	load := func() Loaded {
+		t.Helper()
+		value, err := Load(ctx, reader, client.CoreV1().Secrets("test"), "test", "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	first := load()
+
+	secret, err := client.CoreV1().Secrets("test").Get(ctx, "github", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the resourceVersion moves - .data is untouched, exactly a
+	// metadata-only write from some unrelated process.
+	secret.ResourceVersion = "metadata-only-touch"
+	if _, err := client.CoreV1().Secrets("test").Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if next := load(); next.Key() != first.Key() {
+		t.Fatal("a Secret resourceVersion bump with unchanged data restarted the listener session", first.Key(), next.Key())
+	}
+}
+
 func TestCleanupCredentialsDoNotRequireGitHubSecret(t *testing.T) {
 	resolved, client := credentialFixture(t)
 	if err := client.CoreV1().Secrets("test").Delete(context.Background(), "github", metav1.DeleteOptions{}); err != nil {

@@ -2,7 +2,9 @@ package configapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -24,6 +26,47 @@ type SecretRevision struct {
 	Name            string
 	UID             string
 	ResourceVersion string
+	// ContentHash is a sha256 over this Secret's own .data (sorted by key),
+	// never the raw bytes. Load.Key() hashes this, not ResourceVersion - a
+	// live Kubernetes Secret's resourceVersion bumps on any write to the
+	// object, including a metadata-only or status-only change with .data
+	// byte-for-byte unchanged (a real observed cause: something touching
+	// annotations/labels on a watched credential Secret with no rotation
+	// involved at all). Key()'s own doc comment says "status writes and
+	// unrelated metadata updates cannot trigger listener restart loops" -
+	// hashing ResourceVersion directly violated exactly that, restarting
+	// the listener session (and losing all in-flight admission progress)
+	// on every such touch. Confirmed in production via the listener's own
+	// diagnostic logging (PR #183's Logger fix): "Getting next message
+	// lastMessageID=0" repeating every 60-90s with a fresh "Handling
+	// initial session statistics" each time - a brand new session every
+	// reconcile, never surviving long enough to admit anything, exactly
+	// the restart loop this comment already disclaimed but this struct's
+	// own ResourceVersion field was still causing. Computed
+	// once resolveSecrets has already confirmed (via ResourceVersion, kept
+	// on this struct for exactly that unrelated purpose - see this
+	// function's own concurrent-recheck loop) that no mutation happened
+	// mid-read, so it reflects a single consistent snapshot of .data.
+	ContentHash string
+}
+
+// secretDataHash hashes a Secret's .data deterministically - map iteration
+// order is not - so identical content always produces the identical hash
+// regardless of how Kubernetes happens to have ordered the map this time.
+func secretDataHash(data map[string][]byte) string {
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	hash := sha256.New()
+	for _, key := range keys {
+		hash.Write([]byte(key))
+		hash.Write([]byte{0})
+		hash.Write(data[key])
+		hash.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
 func (Credentials) String() string   { return "credentials (redacted)" }
@@ -109,7 +152,7 @@ func resolveSecrets(ctx context.Context, client typed.SecretInterface, resolved 
 		if current.Namespace != old.Namespace || current.Name != old.Name || current.UID != old.UID || current.ResourceVersion != old.ResourceVersion || current.DeletionTimestamp != nil {
 			return Credentials{}, ErrChanged
 		}
-		result.Revisions = append(result.Revisions, SecretRevision{Name: name, UID: string(current.UID), ResourceVersion: current.ResourceVersion})
+		result.Revisions = append(result.Revisions, SecretRevision{Name: name, UID: string(current.UID), ResourceVersion: current.ResourceVersion, ContentHash: secretDataHash(current.Data)})
 	}
 	slices.SortFunc(result.Revisions, func(a, b SecretRevision) int { return strings.Compare(a.Name, b.Name) })
 	return result, nil
