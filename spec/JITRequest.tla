@@ -26,14 +26,16 @@ CONSTANTS
   AllocIDs,
   MaxAttempts,
   MaxClock,
-  SpacingEnabled
+  SpacingEnabled,
+  EnableWaitCancellation
 
 ASSUME AllocIDs # {}
 ASSUME MaxAttempts \in Nat
 ASSUME MaxClock \in Nat
 ASSUME SpacingEnabled \in BOOLEAN
+ASSUME EnableWaitCancellation \in BOOLEAN
 
-Phases == {"Pending", "JITIssued", "Provisioned"}
+Phases == {"Pending", "JITIssued", "Provisioned", "TimedOut"}
 
 VARIABLES phase, started, jitToken, clock, attempts
 
@@ -52,6 +54,23 @@ Init ==
   /\ jitToken = 1
   /\ clock = 0
   /\ attempts = [id \in AllocIDs |-> 0]
+
+(* A cancelled/invalidated context fails the limiter wait before a JIT    *)
+(* request is ever issued; the allocation stays Pending and retries.      *)
+WaitCanceled(id) ==
+  /\ EnableWaitCancellation
+  /\ phase[id] = "Pending"
+  /\ attempts[id] < MaxAttempts
+  /\ phase' = phase
+  /\ attempts' = [attempts EXCEPT ![id] = attempts[id] + 1]
+  /\ UNCHANGED <<started, jitToken, clock>>
+
+(* Retry exhaustion sends the allocation to the terminal timeout phase.  *)
+Timeout(id) ==
+  /\ phase[id] = "Pending"
+  /\ attempts[id] >= MaxAttempts
+  /\ phase' = [phase EXCEPT ![id] = "TimedOut"]
+  /\ UNCHANGED <<started, jitToken, clock, attempts>>
 
 (* A Bootstrap call begins. When spacing is enabled, it requires the    *)
 (* single token and consumes it; when disabled, it ignores the token    *)
@@ -88,6 +107,8 @@ JITFail(id) ==
 Next ==
   \/ JITAdvance
   \/ \E id \in AllocIDs :
+       \/ WaitCanceled(id)
+       \/ Timeout(id)
        \/ JITRequest(id)
        \/ JITSucceed(id)
        \/ JITFail(id)

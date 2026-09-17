@@ -267,12 +267,12 @@ module's header says so.
 `ExternalFailureVisibility.tla` models the diagnosability property that was
 actually broken: an observable condition must name the failing subsystem
 instead of collapsing every preparation failure to one sentinel. It covers
-the original JIT case (`pre178`) and the current cloud-create gap (`current`,
-a real cloud-create failure still recorded as `CreateCommitmentUnknown`),
-because the swallowing shape is not specific to JIT. `post_cloud_fix` is the
-extrapolated fix, not current behavior. TLA+ models the failure causes as
-distinct labels, not as the real error strings, so a clean run here means the
-classification invariant holds, not that the Go text itself is correct.
+the original JIT case (`pre178`) and the current gaps across WireGuard,
+cloud-create, observe, and delete failures (`current`), because the
+swallowing shape is not specific to JIT. `post_all_fixes` is the extrapolated
+fix, not current behavior. TLA+ models the failure causes as distinct labels,
+not as the real error strings, so a clean run here means the classification
+invariant holds, not that the Go text itself is correct.
 
 ## Why `make tlc` and not CI
 

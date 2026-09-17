@@ -72,9 +72,9 @@ RUNS = [
     ("ExternalFailureVisibility_pre178.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
      "issue #176: a JIT failure was collapsed to the generic preparation sentinel"),
     ("ExternalFailureVisibility_current.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
-     "current code: JIT cause preserved, cloud-create failure still collapsed to CreateCommitmentUnknown"),
-    ("ExternalFailureVisibility_post_cloud_fix.cfg", "ExternalFailureVisibility.tla", None,
-     "extrapolated fix: both external failure classes preserve their observable cause"),
+     "current code: JIT cause preserved, WireGuard/cloud-create/observe/delete failures still collapsed"),
+    ("ExternalFailureVisibility_post_all_fixes.cfg", "ExternalFailureVisibility.tla", None,
+     "extrapolated fix: every external failure class preserves its observable cause"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)
