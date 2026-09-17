@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +61,39 @@ func fixtureClient(t *testing.T, runners map[string]int, removed *[]int) *scales
 	return client
 }
 
+// jitFixtureClient builds a *scaleset.Client backed by a local HTTP fixture
+// that serves the endpoints GenerateJitRunnerConfig depends on. generateJIT
+// supplies the /generatejitconfig response, so a test can exercise either a
+// successful JIT config or a real GitHub-side failure without duplicating the
+// token/registration fixture.
+func jitFixtureClient(t *testing.T, generateJIT func(http.ResponseWriter)) *scaleset.Client {
+	t.Helper()
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
+	token := "eyJhbGciOiJIUzI1NiJ9." + payload + ".c2ln"
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/runners/registration-token"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"fixture"}`))
+		case strings.HasSuffix(req.URL.Path, "/actions/runner-registration"):
+			_ = json.NewEncoder(w).Encode(map[string]string{"url": server.URL + "/tenant/123/", "token": token})
+		case strings.Contains(req.URL.Path, "/generatejitconfig"):
+			generateJIT(w)
+		default:
+			t.Errorf("unexpected fixture request %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: server.URL + "/org", PersonalAccessToken: "fixture"}, scaleset.WithRetryMax(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
 // internal/configapi/runtime.go's CleanupMode and RecoveryMode both call
 // operator.New with a nil *scaleset.Client (they never open a GitHub
 // session, by design) and then run Tick in a loop - the exact shape this
@@ -83,30 +117,10 @@ func TestNewLeavesRunnersNilWithoutAGitHubClient(t *testing.T) {
 // lifecycle.go ever saw the real cause, which is exactly why the incident
 // looked like a GCP-provider problem instead of a GitHub one.
 func TestBootstrapPreservesGitHubJITFailureCause(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
-	token := "eyJhbGciOiJIUzI1NiJ9." + payload + ".c2ln"
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(req.URL.Path, "/runners/registration-token"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"token":"fixture"}`))
-		case strings.HasSuffix(req.URL.Path, "/actions/runner-registration"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"url": server.URL + "/tenant/123/", "token": token})
-		case strings.Contains(req.URL.Path, "/generatejitconfig"):
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = w.Write([]byte(`{"message":"rate limited"}`))
-		default:
-			t.Errorf("unexpected fixture request %s %s", req.Method, req.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
-	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: server.URL + "/org", PersonalAccessToken: "fixture"}, scaleset.WithRetryMax(0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := jitFixtureClient(t, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"rate limited"}`))
+	})
 	cfg := Config{Name: "test", Namespace: "test", ScaleSetID: 1, MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
 		Providers: map[string]provider.Config{"a": {Kind: "aws"}}}
 	o := New(cfg, fake.NewClientset(), client)
@@ -128,48 +142,44 @@ func TestBootstrapPreservesGitHubJITFailureCause(t *testing.T) {
 // sensitive backend limit. jitLimiter mitigates that without penalizing the
 // common case: an isolated Bootstrap call must never wait.
 func TestBootstrapThrottlesConcurrentGitHubJITRequests(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
-	token := "eyJhbGciOiJIUzI1NiJ9." + payload + ".c2ln"
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(req.URL.Path, "/runners/registration-token"):
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"token":"fixture"}`))
-		case strings.HasSuffix(req.URL.Path, "/actions/runner-registration"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"url": server.URL + "/tenant/123/", "token": token})
-		case strings.Contains(req.URL.Path, "/generatejitconfig"):
-			_ = json.NewEncoder(w).Encode(map[string]string{"encodedJITConfig": "fixture-jit"})
-		default:
-			t.Errorf("unexpected fixture request %s %s", req.Method, req.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
-	client, err := scaleset.NewClientWithPersonalAccessToken(scaleset.NewClientWithPersonalAccessTokenConfig{GitHubConfigURL: server.URL + "/org", PersonalAccessToken: "fixture"}, scaleset.WithRetryMax(0))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Widen the spacing window so the timing assertions below depend on the
+	// limiter, not on local fixture HTTP latency under a loaded CI worker.
+	// The production default is restored by t.Cleanup before any other test.
+	oldInterval := githubJITRequestInterval
+	githubJITRequestInterval = time.Second
+	t.Cleanup(func() { githubJITRequestInterval = oldInterval })
+
+	var jitRequests atomic.Int32
+	client := jitFixtureClient(t, func(w http.ResponseWriter) {
+		jitRequests.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]string{"encodedJITConfig": "fixture-jit"})
+	})
 	cfg := Config{Name: "test", Namespace: "test", ScaleSetID: 1, MaxRunners: 1, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600,
-		Providers: map[string]provider.Config{"a": {Kind: "aws"}}}
+		Providers: map[string]provider.Config{"a": {Kind: "aws"}, "b": {Kind: "gcp"}}}
 	o := New(cfg, fake.NewClientset(), client)
-	command := o.Controller.Providers["a"].(*provider.Command)
+	first := o.Controller.Providers["a"].(*provider.Command)
+	second := o.Controller.Providers["b"].(*provider.Command)
 
 	start := time.Now()
-	if _, err := command.Bootstrap(context.Background(), "rs-first"); err != nil {
+	if _, err := first.Bootstrap(context.Background(), "rs-first"); err != nil {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > githubJITRequestInterval/2 {
 		t.Fatal("an isolated Bootstrap call must not be throttled", elapsed)
 	}
+	if got := jitRequests.Load(); got != 1 {
+		t.Fatal("isolated Bootstrap did not make exactly one JIT request", got)
+	}
 
 	start = time.Now()
-	if _, err := command.Bootstrap(context.Background(), "rs-second"); err != nil {
+	if _, err := second.Bootstrap(context.Background(), "rs-second"); err != nil {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed < githubJITRequestInterval/2 {
-		t.Fatal("a second Bootstrap call arriving immediately after the first must be throttled", elapsed)
+		t.Fatal("a second provider's immediate Bootstrap call must be throttled by the shared limiter", elapsed)
+	}
+	if got := jitRequests.Load(); got != 2 {
+		t.Fatal("second Bootstrap did not make exactly one JIT request", got)
 	}
 }
 
