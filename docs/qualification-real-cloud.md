@@ -111,8 +111,8 @@ Two independent layers, either one alone sufficient for the common case:
 ### AWS credentials
 
 OIDC role assumption is preferred, matching this repo's existing GHCR/
-cosign OIDC pattern (`release-build.yml`). A static-key fallback is also
-supported:
+cosign OIDC pattern (`.goreleaser.yml`'s `docker_signs`, run from
+`release.yml`). A static-key fallback is also supported:
 
 - **OIDC** (preferred): set the `AWS_QUALIFICATION_ROLE_ARN` repository
   secret to an IAM role ARN (a role ARN is not sensitive on its own, but it

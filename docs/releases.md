@@ -6,90 +6,119 @@ never is.
 
 ## Automated pipeline
 
-Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`:
+Releases go through a `chore(release)` pull request, not a directly pushed
+tag:
 
-1. **`preflight`** resolves the tagged commit's exact SHA and runs
-   `python3 tools/release_preflight.py --candidate <sha> --gh gh` (plain `gh`,
-   authenticated with the workflow's own `GITHUB_TOKEN` — `gh-tsouza` is a
-   local-machine-only wrapper for interactive human sessions and is not used
-   in CI). This blocks on any open pull request or open issue, on the
-   candidate not being `main`'s current head, and on any of the 7 named
-   checks (`verify`, `vulnerability`, `kubernetes-integration`, `analyze`,
-   `cloud-emulators`, `chart`, `runtime-image`) not being `COMPLETED` +
-   `SUCCESS` against that exact commit, produced by `github-actions`. Its
-   manifest is uploaded as a build artifact whether the gate passes or fails,
-   so a blocked release's reasons are inspectable from the Actions UI.
-2. **`build`** runs only if `preflight` passes. It invokes
-   `.github/workflows/release-build.yml` as a reusable workflow
-   (`workflow_call`) against the same resolved SHA, producing the multi-arch
-   image OCI archive, Helm chart package, SPDX SBOM and checksums as workflow
-   artifacts. `release-build.yml` keeps its standalone `workflow_dispatch`
-   trigger for ad hoc manual builds against any commit, but that path only
-   ever runs the `build` job, never the `publish` or `release` jobs below.
-3. **`publish`**, a job inside `release-build.yml`, runs only when the
-   caller passes `publish: true` as a `workflow_call` input — which today
-   only ever happens from `release.yml`'s `build` job above, after
-   `preflight` has passed; `release-build.yml`'s `workflow_dispatch` trigger
-   does not declare that input, so a direct manual run can never set it. It
-   pushes the multi-arch image just built to
-   `ghcr.io/tsouza/runnerscout`, tagged with both the resolved commit SHA and
-   the release tag, using the workflow's own `GITHUB_TOKEN` (`packages:
-   write` permission) — GHCR accepts this for a public repository with no
-   registry secret configured. It then signs the pushed image keylessly with
-   `cosign sign` and attests the SBOM keylessly with `cosign attest --type
-   spdxjson`, both using the workflow's own GitHub Actions OIDC identity
-   (`id-token: write` permission) to obtain a short-lived certificate from
-   Sigstore's public Fulcio CA — no signing key is stored anywhere, and the
-   signature, certificate and attestation are published to Sigstore's public
-   Rekor transparency log. A downstream consumer verifies the image with:
+1. A human dispatches `.github/workflows/prepare-release.yml`
+   (`workflow_dispatch`, choosing `patch`/`minor`/`major`). It runs
+   `python3 tools/prepare_release.py --bump <level>`, which computes the
+   next `vMAJOR.MINOR.PATCH` from the latest matching tag, bumps
+   `charts/runnerscout/Chart.yaml`'s `version`/`appVersion` fields, and
+   renders a new section into `CHANGELOG.md` from commit subjects since
+   that tag (bucketed by their `type:`/`type(scope):` prefix - `fix`,
+   `feat`, `docs`, `chore`, etc. - into Added/Fixed/Changed/Documentation/
+   Chores/Other; anything unrecognized lands in Other rather than being
+   dropped). The workflow then commits those two files to a `release/vX.Y.Z`
+   branch and opens `chore(release): vX.Y.Z` as a normal pull request -
+   nothing is tagged, built, or published yet.
 
-   ```sh
-   cosign verify ghcr.io/tsouza/runnerscout@<digest> \
-     --certificate-identity-regexp '^https://github\.com/tsouza/runnerscout/\.github/workflows/release-build\.yml@refs/tags/v.*$' \
-     --certificate-oidc-issuer https://token.actions.githubusercontent.com
-   ```
+   Pushing that branch and opening the PR uses an optional `RELEASE_PAT`
+   repository secret (a fine-grained personal access token scoped to this
+   repo with `contents: write` + `pull-requests: write`) instead of the
+   workflow's own default `GITHUB_TOKEN`, falling back to `GITHUB_TOKEN` if
+   the secret is not configured. This matters because GitHub's own
+   recursion guard does not let an event authored by the default
+   `GITHUB_TOKEN` trigger other workflows' `push:`/`pull_request:`
+   triggers - without `RELEASE_PAT`, `ci.yml` would never run on the
+   opened PR, and this repository's own branch protection (requiring the
+   `verify`/`vulnerability` checks before merge) would leave it permanently
+   unmergeable. Without `RELEASE_PAT` configured, `prepare-release.yml`
+   still opens the PR (with a `::warning::` annotation on the run) but its
+   CI needs a manual nudge - closing and reopening the PR, or pushing an
+   empty commit to it - before it can be merged.
+2. A human reviews and merges that PR like any other. **Merging it is what
+   makes a release happen** - there is no separate "now actually release"
+   step.
+3. `.github/workflows/release.yml` triggers on every push to `main` and
+   runs three jobs:
+   - **`gate`** runs `python3 tools/release_gate.py`, which reads
+     `charts/runnerscout/Chart.yaml`'s `appVersion` at this commit and
+     checks whether a matching `vMAJOR.MINOR.PATCH` tag already exists. An
+     ordinary merge to `main` (not a release PR) leaves `appVersion`
+     unchanged, so the tag already exists and `gate` outputs `publish=false`
+     - the rest of the workflow is skipped entirely, at essentially no CI
+     cost. Only a just-merged `chore(release)` PR's own commit has a
+     genuinely new `appVersion` with no matching tag yet.
+   - **`preflight`** runs only when `gate` says `publish=true`. Unchanged
+     from the old pipeline: `python3 tools/release_preflight.py --candidate
+     <sha> --gh gh` (plain `gh`, authenticated with the workflow's own
+     `GITHUB_TOKEN` - `gh-tsouza` is a local-machine-only wrapper, not used
+     in CI). This blocks on any open pull request or open issue, on the
+     candidate not being `main`'s current head, and on any of the 7 named
+     checks (`verify`, `vulnerability`, `kubernetes-integration`, `analyze`,
+     `cloud-emulators`, `chart`, `runtime-image`) not being `COMPLETED` +
+     `SUCCESS` against that exact commit, produced by `github-actions`. Its
+     manifest is uploaded as a build artifact whether the gate passes or
+     fails, so a blocked release's reasons are inspectable from the Actions
+     UI.
+   - **`goreleaser`** runs only when both `gate` and `preflight` pass. It
+     creates and pushes the `vX.Y.Z` annotated tag at the merge commit
+     (idempotent: a tag that already exists at this exact commit - e.g. a
+     re-run after a transient failure - is left alone; one that exists
+     anywhere else is a hard error, never silently moved), then runs
+     `goreleaser release --clean` via `goreleaser/goreleaser-action`. Every
+     build/sign/publish/release step lives in `.goreleaser.yml` now, not
+     hand-rolled workflow steps:
+     - `dockers_v2` builds the multi-arch (`linux/amd64`, `linux/arm64`)
+       runtime image directly from the existing multi-stage `Dockerfile`
+       (which does its own `go build` - goreleaser has no `builds:`/
+       `archives:` entries here, since nothing in this repo consumes a
+       standalone binary archive) and pushes it to
+       `ghcr.io/tsouza/runnerscout`, tagged with both the version and the
+       full commit SHA. `sbom: true` attaches a buildx-native SBOM
+       attestation to the image index.
+     - `docker_signs` signs the pushed image keylessly with `cosign sign`,
+       using the job's own GitHub Actions OIDC identity to obtain a
+       short-lived certificate from Sigstore's public Fulcio CA - no signing
+       key stored anywhere, signature and certificate published to
+       Sigstore's public Rekor transparency log. Verify with:
 
-   and the SBOM attestation with `cosign verify-attestation` using the same
-   `--certificate-identity-regexp`/`--certificate-oidc-issuer` pair and
-   `--type spdxjson`.
-4. **`release`**, a job inside `release-build.yml`, runs under the exact
-   same `if: inputs.publish` condition as `publish` (and depends on it via
-   `needs: publish`), so it is reachable only from the same tag-triggered,
-   preflight-gated path. It never creates the git
-   tag itself — that already exists by the time this job runs, since a real
-   `git push` of a `v*.*.*` tag is what triggered `release.yml` in the first
-   place. It creates the GitHub Release object for that tag with
-   `gh release create`, using the workflow's own `GITHUB_TOKEN` (`contents:
-   write` permission, granted only to this job). It attaches three release
-   assets, downloaded from the `build` job's uploaded artifact the same way
-   `publish` downloads the SBOM: the Helm chart package, `checksums.txt` and
-   the SPDX SBOM. The multi-arch image OCI archive is not attached as a
-   release asset — consumers get the image from `ghcr.io/tsouza/runnerscout`
-   itself, verified with `cosign` as described above. Release notes are
-   generated automatically from merged pull requests since the previous
-   release (`gh release create --generate-notes`); the repository has no
-   changelog file or release-notes template of its own, so this is a
-   reasonable default rather than a bespoke convention — a future decision
-   to adopt a specific notes format remains open and is not made by this
-   change. The release is marked a GitHub **prerelease** when the tag's
-   major version is `0` (i.e. any `v0.x.y` tag), matching this document's
-   own statement that pre-1.0 APIs remain experimental; a `v1.0.0` or later
-   tag is never marked prerelease.
+       ```sh
+       cosign verify ghcr.io/tsouza/runnerscout@<digest> \
+         --certificate-identity-regexp '^https://github\.com/tsouza/runnerscout/\.github/workflows/release\.yml@refs/heads/main$' \
+         --certificate-oidc-issuer https://token.actions.githubusercontent.com
+       ```
+     - A `before.hooks` step packages the Helm chart
+       (`helm package --version/--app-version <version>`) into
+       `release-artifacts/chart/` (outside goreleaser's own `dist/`, which
+       errors if anything exists there before it creates it itself).
+       `checksum.extra_files` and `release.extra_files` both reference that
+       chart package, so it is included in `checksums.txt` and attached to
+       the GitHub Release goreleaser creates, alongside every checksummed
+       artifact.
+     - `release` creates the GitHub Release itself (`prerelease: auto`,
+       matching this document's own major-version-only prerelease rule) and
+       attaches the Helm chart package and `checksums.txt`.
 
 Publishing requires no manual step: `ghcr.io/tsouza/runnerscout`'s first-ever
-push (v0.1.0) was public immediately, and both the image signature and SBOM
-attestation verify with an anonymous, unauthenticated pull. If a future
-GitHub account or organization default ever creates the package private
-instead, a repository admin can open the package's own settings and change
-its visibility to public — GitHub does not expose an endpoint the workflow's
-`GITHUB_TOKEN` can call to do this itself.
+push (v0.1.0) was public immediately, and the image signature verifies with
+an anonymous, unauthenticated pull. If a future GitHub account or
+organization default ever creates the package private instead, a repository
+admin can open the package's own settings and change its visibility to
+public - GitHub does not expose an endpoint the workflow's `GITHUB_TOKEN`
+can call to do this itself.
 
-The pipeline runs `preflight` → `build` → `publish`/sign → `release` end to
-end, every stage gated on the same non-bypassable
-`tools/release_preflight.py` check and the same `workflow_call`-only
-condition, and it remains fully inert — no image pushed, no signature
-created, no GitHub Release opened — until a human pushes
-a real `v*.*.*` tag.
+No evidence this repository needs a draft-then-published release flip
+(checked: `gh api repos/tsouza/runnerscout/rulesets` shows only a branch
+protection ruleset on `main`, nothing targeting releases/tags) - goreleaser
+publishes the GitHub Release directly.
+
+The pipeline runs `gate` → `preflight` → `goreleaser` end to end, every
+release-worthy commit gated on the same non-bypassable
+`tools/release_preflight.py` check, and it remains fully inert for an
+ordinary merge to `main` - no tag created, no image pushed, no GitHub
+Release opened - until a `chore(release)` PR that actually bumped
+`Chart.yaml`'s `appVersion` is the thing that merged.
 
 ## Required acceptance
 
@@ -97,7 +126,8 @@ Release is blocked while the repository has any open pull request or open issue.
 All work must be resolved before closure. The release commit must be the current
 `main` head, and its CI must pass; failed, pending, cancelled or missing required
 checks block release. Recheck repository state immediately before promotion.
-The `preflight` job above runs this check automatically for every tag push;
+The `preflight` job above runs this check automatically for every commit
+`gate` recognizes as a release (a merged `chore(release)` PR);
 `python3 tools/release_preflight.py --candidate "$RUNNERSCOUT_RELEASE_COMMIT"`
 also remains runnable by hand with the account-scoped `gh-tsouza` wrapper. The
 preflight retains its read-only repository snapshot under ignored `evidence/`

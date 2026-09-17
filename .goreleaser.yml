@@ -1,0 +1,96 @@
+version: 2
+
+# No real builds:/archives: - deliberately. runnerscout is only ever
+# deployed as a container via Helm; nobody consumes a standalone binary
+# today, so a goreleaser-produced tar.gz would be a new artifact surface
+# with no consumer. dockers_v2 below builds the image directly from the
+# existing multi-stage Dockerfile, which already does its own `go build` -
+# goreleaser orchestrates that build/push/sign, it does not replace it.
+# goreleaser has no top-level "no builds at all" switch - omitting builds:
+# entirely makes it infer a default one against the repo root (which has no
+# main package; every cmd/ here is a subdirectory) and fail. skip: true is
+# the documented way to disable it explicitly instead.
+builds:
+  - id: unused
+    skip: true
+
+before:
+  hooks:
+    - go mod tidy
+    - helm lint charts/runnerscout --strict --kube-version 1.37.0 -f charts/runnerscout/tests/values.json
+    # dist/ is goreleaser-owned - it errors if anything is there before it
+    # creates that directory itself, so the chart package is staged outside
+    # it, in release-artifacts/ (matching the old pipeline's own directory
+    # name for continuity).
+    - sh -c 'mkdir -p release-artifacts/chart && helm package charts/runnerscout --destination release-artifacts/chart --version {{trimprefix .Version "v"}} --app-version {{trimprefix .Version "v"}}'
+
+dockers_v2:
+  - id: runnerscout-image
+    dockerfile: Dockerfile
+    # dockers_v2 builds in a synthesized context containing only the
+    # Dockerfile by default (found by actually running a snapshot build
+    # locally, not assumed) - these paths must match the Dockerfile's own
+    # COPY instructions exactly, or the build fails with "not found".
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd/
+      - internal/
+      - api/
+    images:
+      - ghcr.io/tsouza/runnerscout
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    build_args:
+      VERSION: "{{.Version}}"
+    labels:
+      org.opencontainers.image.version: "{{.Version}}"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+    tags:
+      - "{{.Version}}"
+      - "{{.FullCommit}}"
+    # buildx-native SBOM attestation on the image index - no separate syft
+    # step needed, replacing anchore/sbom-action from the old pipeline.
+    sbom: true
+
+# Keyless: cosign uses this job's own GitHub Actions OIDC identity to obtain
+# a short-lived certificate from Sigstore's public Fulcio CA, and publishes
+# to Sigstore's public Rekor transparency log - no stored private key,
+# matching the old pipeline's own signing approach exactly.
+docker_signs:
+  - artifacts: images
+    cmd: cosign
+    args: ["sign", "--yes", "${artifact}"]
+    output: true
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: release-artifacts/chart/*.tgz
+
+snapshot:
+  # No "+" - a real vX.Y.Z tag's .Version never contains one, but this
+  # template is also used verbatim as a Docker image tag in dockers_v2
+  # below, and Docker tags don't allow "+" (found by actually running
+  # `goreleaser release --snapshot --clean` locally, not assumed).
+  version_template: "{{ incpatch .Version }}-snapshot-{{.ShortCommit}}"
+
+# goreleaser does not generate its own changelog file here - CHANGELOG.md is
+# maintained by tools/prepare_release.py as part of the release PR.
+# GitHub's own native release-notes generation covers the GitHub Release
+# body itself.
+changelog:
+  use: github-native
+
+release:
+  github:
+    owner: tsouza
+    name: runnerscout
+  # Pre-1.0 APIs remain experimental (docs/releases.md) - matches the old
+  # pipeline's own major-version-only prerelease rule.
+  prerelease: auto
+  extra_files:
+    - glob: release-artifacts/chart/*.tgz
+  header: |
+    See CHANGELOG.md for the full categorized changelog.
