@@ -33,6 +33,8 @@ type cloud struct {
 	created, deleted                                     int
 	exists, unknown, loseResponse, capacity, interrupted bool
 	noEffect                                             error
+	observeErr                                           error
+	deleteErr                                            error
 }
 
 func (c *cloud) Create(context.Context, l.Allocation) (string, error) {
@@ -50,9 +52,12 @@ func (c *cloud) Create(context.Context, l.Allocation) (string, error) {
 	return "vm-1", nil
 }
 func (c *cloud) Observe(context.Context, l.Allocation) (l.Observation, error) {
+	if c.observeErr != nil {
+		return l.Observation{}, c.observeErr
+	}
 	return l.Observation{Known: !c.unknown, Exists: c.exists, Interrupted: c.interrupted, ResourceID: "vm-1"}, nil
 }
-func (c *cloud) Delete(context.Context, l.Allocation) error { c.deleted++; return nil }
+func (c *cloud) Delete(context.Context, l.Allocation) error { c.deleted++; return c.deleteErr }
 func setup() (*l.Controller, *store, *cloud, *time.Time) {
 	now := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
 	s := &store{a: l.Allocation{ID: "rs-test", Phase: l.Pending, Deadline: now.Add(time.Minute), MaxAttempts: 3, Requirements: p.Requirements{CPU: 1, MemoryMiB: 1024, Architecture: "amd64", MaxPriceMicros: 100, Providers: []string{"a"}, Regions: []string{"r"}, Policy: "lowest-price"}, Catalog: p.Catalog{Complete: map[string]bool{"a": true}, Offerings: []p.Offering{{ID: "pool", Provider: "a", Region: "r", Zone: "z", Machine: "m", Image: "i", CPU: 1, MemoryMiB: 1024, Architecture: "amd64", Spot: true, PriceMicros: 10, Currency: "USD", ObservedAt: now}}}}}
@@ -140,6 +145,85 @@ func TestCreatePreparationFailureSurfacesItsRealCause(t *testing.T) {
 	}
 	if !strings.Contains(s.a.Condition, "GitHub JIT request failed: unexpected status code: 429") {
 		t.Fatal("Condition must surface the real underlying cause, not a bare fixed string", s.a.Condition)
+	}
+}
+
+// A cloud-create failure that returns an empty receipt must leave the real
+// provider error readable from Condition, not only from the returned error.
+func TestCloudCreateFailureSurfacesItsRealCause(t *testing.T) {
+	c, s, cloud, _ := setup()
+	cloud.loseResponse = true
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("ambiguous create must surface as an error")
+	}
+	if s.a.Phase != l.Creating {
+		t.Fatal("expected ambiguous create to leave the allocation in Creating", s.a)
+	}
+	if !strings.Contains(s.a.Condition, "CreateCommitmentUnknown: connection lost") {
+		t.Fatal("Condition must surface the real cloud-create failure cause", s.a.Condition)
+	}
+}
+
+// Observation failures in Creating and Running must also preserve their real
+// cause in Condition, rather than only returning a fixed error string.
+func TestObservationFailuresSurfaceTheirRealCause(t *testing.T) {
+	c, s, cloud, _ := setup()
+	cloud.loseResponse = true
+	_ = c.Step(context.Background(), "rs-test")
+
+	cloud.observeErr = errors.New("create observe failed")
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("unknown create observation must surface as an error")
+	}
+	if !strings.Contains(s.a.Condition, "CreateReconciliationUnknown: create observe failed") {
+		t.Fatal("Condition must surface the create-observation failure cause", s.a.Condition)
+	}
+
+	cloud.loseResponse = false
+	cloud.observeErr = nil
+	cloud.exists = true
+	cloud.unknown = false
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Running {
+		t.Fatal("expected allocation to reach Running", s.a)
+	}
+
+	cloud.observeErr = errors.New("running observe failed")
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("unknown running observation must surface as an error")
+	}
+	if !strings.Contains(s.a.Condition, "ResourceObservationUnknown: running observe failed") {
+		t.Fatal("Condition must surface the running-observation failure cause", s.a.Condition)
+	}
+
+}
+
+// A delete failure must preserve its real cause in Condition too, mirroring
+// the JIT/cloud-create/observation fixes.
+func TestDeleteFailureSurfacesItsRealCause(t *testing.T) {
+	c, s, cloud, now := setup()
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Running {
+		t.Fatal("expected allocation to reach Running", s.a)
+	}
+	*now = now.Add(10 * time.Minute)
+	if e := c.Step(context.Background(), "rs-test"); e != nil {
+		t.Fatal(e)
+	}
+	if s.a.Phase != l.Deleting {
+		t.Fatal("expected expired allocation to move to Deleting", s.a)
+	}
+
+	cloud.deleteErr = errors.New("delete failed")
+	if e := c.Step(context.Background(), "rs-test"); e == nil {
+		t.Fatal("failed delete must surface as an error")
+	}
+	if !strings.Contains(s.a.Condition, "CleanupUnconfirmed: delete failed") {
+		t.Fatal("Condition must surface the delete failure cause", s.a.Condition)
 	}
 }
 
