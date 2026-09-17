@@ -331,6 +331,61 @@ func TestRefreshGCPPricesUpdatesOfferingWithPinnedSkuRefs(t *testing.T) {
 	}
 }
 
+// A real production incident: GCPSkuClient.Observe paginates the live
+// Cloud Billing catalog until it finds an offering's two pinned SKU IDs -
+// a real reproduction found them at page ~40 and page 64 of the catalog,
+// 88.7s wall-clock total. refreshGCPPrices used to share externalCallBudget
+// (30s, sized for a single-shot AWS/Azure price lookup) with every other
+// site on that var's list, so this call timed out on every single
+// admission cycle for any offering whose SKUs sit that late - proven here
+// by shrinking externalCallBudget far below what the fake observer takes,
+// while gcpPriceRefreshBudget stays large enough: if the code regressed to
+// using externalCallBudget again, this observation would be cancelled
+// mid-flight and the offering would come back with a zeroed ObservedAt,
+// not the live quote asserted below.
+func TestRefreshGCPPricesUsesItsOwnBudgetNotExternalCallBudget(t *testing.T) {
+	previousExternal, previousGCP := externalCallBudget, gcpPriceRefreshBudget
+	externalCallBudget = 10 * time.Millisecond
+	gcpPriceRefreshBudget = 300 * time.Millisecond
+	defer func() { externalCallBudget, gcpPriceRefreshBudget = previousExternal, previousGCP }()
+
+	want := prices.Quote{PriceMicros: 42, Currency: "USD", ObservedAt: time.Now()}
+	o := &Operator{GCPPrices: &fakeGCPPrices{observe: func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+		time.Sleep(50 * time.Millisecond) // longer than externalCallBudget, shorter than gcpPriceRefreshBudget
+		return want, ctx.Err()
+	}}}
+	catalog := placement.Catalog{Offerings: []placement.Offering{gcpOffering("a")}}
+	got := o.refreshGCPPrices(context.Background(), catalog)
+	offering := got.Offerings[0]
+	if offering.PriceMicros != want.PriceMicros || offering.Currency != want.Currency || !offering.ObservedAt.Equal(want.ObservedAt) {
+		t.Fatalf("a call within gcpPriceRefreshBudget but past externalCallBudget was still cut short: %+v", offering)
+	}
+}
+
+// Mirrors TestRefreshAWSPricesBoundsAnUnresponsiveObserver: refreshGCPPrices
+// must still bound a genuinely stalled observer, just to gcpPriceRefreshBudget
+// instead of externalCallBudget - a large, production-appropriate budget is
+// not the same thing as no budget at all.
+func TestRefreshGCPPricesBoundsAnUnresponsiveObserver(t *testing.T) {
+	previous := gcpPriceRefreshBudget
+	gcpPriceRefreshBudget = 100 * time.Millisecond
+	defer func() { gcpPriceRefreshBudget = previous }()
+
+	o := &Operator{GCPPrices: &fakeGCPPrices{observe: func(ctx context.Context, coreSkuID, ramSkuID string, cpu, memoryMiB int) (prices.Quote, error) {
+		<-ctx.Done()
+		return prices.Quote{}, ctx.Err()
+	}}}
+	catalog := placement.Catalog{Offerings: []placement.Offering{gcpOffering("a")}}
+
+	done := make(chan placement.Catalog, 1)
+	go func() { done <- o.refreshGCPPrices(context.Background(), catalog) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refreshGCPPrices did not bound the stalled observation - it hung past gcpPriceRefreshBudget")
+	}
+}
+
 // TestRefreshGCPPricesNeverTouchesOfferingWithoutPinnedSkuRefs proves a GCP
 // offering with no GCPSkuRefs stays on its static catalog price even when
 // GCPPrices is configured and would otherwise happily answer for it -

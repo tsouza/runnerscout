@@ -674,8 +674,9 @@ const (
 // and that set were each independently incomplete; see
 // spec/README.background.md for how that was found):
 //   - pruneTerminalAllocations's DeregisterRunner loop
-//   - refreshAWSPrices/refreshAzurePrices/refreshGCPPrices's own
-//     per-offering Observe loops
+//   - refreshAWSPrices/refreshAzurePrices's own per-offering Observe loops
+//     (refreshGCPPrices's own Observe loop uses gcpPriceRefreshBudget
+//     instead - see that var's own comment for why it was split out)
 //   - pollAzureInterruptions's single Poll call (azure_interruptions.go)
 //   - retry.go's reconcilePendingRerun (two AttemptJobs calls) and
 //     processInterruptionRetries (one AttemptJobs, one RerunFailedJobs) -
@@ -703,6 +704,29 @@ const (
 // weakening the production default - see githubJITRequestInterval's own
 // comment for the same pattern.
 var externalCallBudget = 30 * time.Second
+
+// gcpPriceRefreshBudget bounds refreshGCPPrices's own per-offering Observe
+// call - deliberately not externalCallBudget, unlike every other site on
+// that var's own list. GCPSkuClient.Observe paginates up to
+// gcpMaxSkuPages (64) pages of gcpSkuPageSize (500) SKUs each,
+// sequentially, until it finds the two pinned SKU IDs a given offering
+// needs - Cloud Billing's catalog API has no server-side filter by SKU ID
+// (internal/prices/gcp.go's own comment). Confirmed in production: a real
+// offering's two SKUs sat at page ~40 and page 64 (the very last page
+// gcpMaxSkuPages allows) in the live catalog - 88.7s wall-clock to find
+// both. externalCallBudget's 30s was sized for the single-shot calls on
+// its own list (a spot price history lookup, an STS exchange); it was
+// never load-bearing for a call whose own worst case can legitimately run
+// this long, and reusing it here silently broke admission for every
+// offering whose SKUs happen to sit late in an apparently-growing catalog:
+// GCPPrices.Observe timed out on every single admission cycle,
+// refreshGCPPrices zeroed ObservedAt every time (its own documented
+// failure semantics), and placement.Choose's freshness check then
+// rejected the whole catalog (CatalogNotAdmissible) - every cycle, not
+// intermittently, for as long as that SKU stayed at that page position.
+// 150s leaves real margin above the measured 88.7s while gcpMaxSkuPages
+// remains the actual structural ceiling on how long this can ever take.
+var gcpPriceRefreshBudget = 150 * time.Second
 
 // githubJITRequestInterval spaces successive GenerateJitRunnerConfig calls at
 // least this far apart, even when several allocations are admitted in the
