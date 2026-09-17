@@ -1,10 +1,18 @@
 version: 2
 
-# No archives: - deliberately. runnerscout is only ever deployed as a
-# container via Helm; nobody consumes a standalone binary today, so a
-# goreleaser-produced tar.gz would be a new artifact surface with no
-# consumer. The binary below exists only to feed the Dockerfile's COPY -
-# see dockers_v2 - never published on its own.
+# archives: below is formats: [none] - deliberately. runnerscout is only
+# ever deployed as a container via Helm; nobody consumes a standalone
+# binary today, so a goreleaser-produced tar.gz would be a new artifact
+# surface with no consumer. The binary below exists only to feed the
+# Dockerfile's COPY - see dockers_v2 - never published on its own.
+#
+# goreleaser creates a DEFAULT tar.gz archive per build automatically once
+# builds: is real (unlike the earlier skip:true stub, which produced none)
+# - there is no implicit opt-out. Confirmed the hard way: v1.2.4 published
+# runnerscout_1.2.4_linux_amd64.tar.gz and _arm64.tar.gz as real release
+# assets, exactly the standalone-binary surface already decided against
+# when this pipeline was designed - an explicit archives: block was simply
+# missing.
 #
 # goreleaser builds the binary itself (rather than the Dockerfile running
 # `go build` in its own stage, as the old pipeline's Dockerfile did): a
@@ -32,6 +40,13 @@ builds:
     # own comment on the same point for image tags).
     ldflags:
       - -s -w -X github.com/tsouza/runnerscout/internal/version.Version=v{{.Version}}
+
+# formats: [none] skips archive creation/upload entirely - not "binary"
+# (which still uploads the raw binary directly as a release asset, still a
+# new consumer-facing surface) and not omitting archives: (which defaults
+# to tar.gz, see builds:' own comment above for what that actually did).
+archives:
+  - formats: [none]
 
 before:
   hooks:
