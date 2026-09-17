@@ -244,6 +244,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # goreleaser's snapshot build below computes its version from the
+          # latest tag; the default shallow checkout has no tags at all,
+          # which made it fall back to v0.0.0 (harmless here - nothing
+          # asserts on this image's injected version - but confusing in
+          # its own build log, and worth matching release.yml's own
+          # fetch-depth: 0 for the same reason).
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: go
         with:
@@ -275,8 +282,13 @@ jobs:
       # comment and .goreleaser.yml's builds: section) - this runner is
       # always linux/amd64, matching docker/build-push-action's own
       # default single-platform build below with no platforms: override.
+      # goreleaser's -o opens the destination path directly (it does not
+      # mkdir -p it) - confirmed by this exact step failing with "no such
+      # file or directory" until the mkdir was added.
       - name: Build the runtime binary
-        run: goreleaser build --single-target --snapshot --clean --skip=before -o linux/amd64/runnerscout
+        run: |
+          mkdir -p linux/amd64
+          goreleaser build --single-target --snapshot --clean --skip=before -o linux/amd64/runnerscout
       - name: Build runtime with persistent layer cache
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:

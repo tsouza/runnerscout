@@ -31,6 +31,7 @@ chart: build
 .PHONY: image
 image:
 	rm -rf linux dist
+	mkdir -p linux/$$(go env GOARCH)
 	goreleaser build --single-target --snapshot --clean --skip=before -o linux/$$(go env GOARCH)/runnerscout
 	docker build --tag runnerscout:development .
 	rm -rf linux dist
