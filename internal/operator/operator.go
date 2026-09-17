@@ -661,6 +661,26 @@ const (
 	terminalRetention = 24 * time.Hour
 )
 
+// externalCallBudget bounds a single lightweight external API call made
+// outside Step's own per-allocation budget (tickStepBudget/
+// tickCreateOrDeleteBudget), over whatever ctx its caller was given -
+// ultimately runLeader's cancel-only, no-deadline ctx (see
+// githubStartupBudget's own comment for why that matters: lease renewal
+// keeps succeeding independent of external connectivity, so nothing
+// upstream ever cancels a stalled call on its own). Applied everywhere this
+// package makes such a call outside a Step goroutine's own bound:
+// pruneTerminalAllocations's DeregisterRunner loop (one candidate blocking
+// every later one in the same pass), and refreshAWSPrices/
+// refreshAzurePrices/refreshGCPPrices's own per-offering Observe loops
+// (one offering blocking every later one, and indirectly blocking
+// HandleDesiredRunnerCount's caller - the listener's own message loop, so
+// a stalled price observation would stop admission entirely, the same
+// incident shape as the startup hang this budget was first added for, via
+// a different call path). A var rather than a const only so tests can
+// shrink the window without weakening the production default - see
+// githubJITRequestInterval's own comment for the same pattern.
+var externalCallBudget = 30 * time.Second
+
 // githubJITRequestInterval spaces successive GenerateJitRunnerConfig calls at
 // least this far apart, even when several allocations are admitted in the
 // same batch and their Step calls all reach Bootstrap within the same
@@ -681,6 +701,17 @@ const (
 // something else. It is a var rather than a const only so tests can widen
 // the window without weakening the production default.
 var githubJITRequestInterval = 250 * time.Millisecond
+
+// githubStartupBudget bounds each step of runLeader's own scale-set lookup
+// and listener-session establishment sequence - see the call sites' own
+// comment for why this exists (a real production hang: a leader pod stuck
+// with idle CPU and no log line for 49+ minutes, reproduced identically on
+// restart, because nothing bounded that sequence and lease renewal itself
+// is independent of GitHub connectivity). It is a var rather than a const
+// only so tests can shrink the window without weakening the production
+// default - see githubJITRequestInterval's own comment for the same
+// pattern.
+var githubStartupBudget = 2 * time.Minute
 
 func (o *Operator) Tick(ctx context.Context) error {
 	o.mu.Lock()
@@ -878,7 +909,10 @@ func (o *Operator) pruneTerminalAllocations(ctx context.Context, allocs []lifecy
 		if a.Phase != lifecycle.TimedOut && !(a.Phase == lifecycle.Deleted && f.Released[a.ID]) {
 			continue
 		}
-		if err := o.Controller.Runners.DeregisterRunner(ctx, a.ID); err != nil {
+		callCtx, cancel := context.WithTimeout(ctx, externalCallBudget)
+		err := o.Controller.Runners.DeregisterRunner(callCtx, a.ID)
+		cancel()
+		if err != nil {
 			failures = append(failures, err)
 			continue
 		}
@@ -919,24 +953,54 @@ func (o *Operator) runLeader(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	ss, e := o.GitHub.GetRunnerScaleSetByID(ctx, o.Config.ScaleSetID)
+	// leaderCtx (this method's ctx, from WithLease) is cancel-only - no
+	// deadline. Lease renewal is a separate goroutine inside
+	// client-go's own leaderelection package and keeps succeeding as
+	// long as the Kubernetes API is reachable, entirely independent of
+	// GitHub connectivity - so a GitHub-side stall here never gets
+	// cancelled by anything upstream. The vendored scaleset client's own
+	// per-attempt HTTP timeout (5 minutes, github.com/actions/scaleset's
+	// own default) bounds a single request, but nothing bounded the
+	// whole startup sequence across GetRunnerScaleSetByID plus
+	// MessageSessionClient's own multi-call session-establishment chain
+	// (registration token, admin connection, session POST) - degraded-
+	// but-not-cleanly-failing connectivity could stack retries across
+	// all of those into an unbounded, silent hang with idle CPU and no
+	// log line, readyz stuck at 503 indefinitely: exactly a real
+	// production incident's shape (a leader pod hung with no progress
+	// for 49+ minutes, reproduced identically on restart). Bounding each
+	// step here means a startup that cannot complete promptly fails
+	// loudly and lets Kubernetes restart the pod, instead of hanging
+	// forever with no operator-visible signal at all.
+	lookupCtx, lookupCancel := context.WithTimeout(ctx, githubStartupBudget)
+	ss, e := o.GitHub.GetRunnerScaleSetByID(lookupCtx, o.Config.ScaleSetID)
+	lookupCancel()
 	if e != nil {
-		return errors.New("scale-set lookup failed")
+		return fmt.Errorf("scale-set lookup failed: %w", e)
 	}
 	if ss.Name != o.Config.Name {
 		return errors.New("scale-set name mismatch")
 	}
 	host, _ := os.Hostname()
-	session, e := o.GitHub.MessageSessionClient(ctx, o.Config.ScaleSetID, host+"-"+uuid.NewString())
+	sessionCtx, sessionCancel := context.WithTimeout(ctx, githubStartupBudget)
+	session, e := o.GitHub.MessageSessionClient(sessionCtx, o.Config.ScaleSetID, host+"-"+uuid.NewString())
+	sessionCancel()
 	if e != nil {
-		return errors.New("scale-set session failed")
+		return fmt.Errorf("scale-set session failed: %w", e)
 	}
 	defer func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = session.Close(closeCtx)
 	}()
-	l, e := listener.New(session, listener.Config{ScaleSetID: o.Config.ScaleSetID, MaxRunners: o.Config.MaxRunners})
+	// Logger: without this, listener.Config.Validate defaults it to a
+	// discard handler - every one of the listener's own diagnostic log
+	// lines (the initial and per-message TotalAssignedJobs, "Getting next
+	// message"/lastMessageID) is silently thrown away, leaving no way to
+	// tell "GitHub is genuinely never sending this scale set a job" apart
+	// from "we're receiving jobs but failing to act on them" from this
+	// controller's own logs at all.
+	l, e := listener.New(session, listener.Config{ScaleSetID: o.Config.ScaleSetID, MaxRunners: o.Config.MaxRunners, Logger: slog.Default()})
 	if e != nil {
 		return e
 	}

@@ -16,14 +16,24 @@ import (
 
 // fakeDeregistrar is a test-only lifecycle.RunnerDeregistrar: fail, when set,
 // makes every call return an error regardless of id, so pruning's own retry
-// behavior on a failed verification can be exercised directly.
+// behavior on a failed verification can be exercised directly. hang, when
+// set, blocks until the context it is called with is cancelled/expires -
+// proving pruneTerminalAllocations supplies each candidate its own bounded
+// context (externalCallBudget) rather than the bare, cancel-only ctx Tick
+// itself was given: a fake that never returns on its own would hang the
+// whole test (and, in production, the whole prune pass) if it were.
 type fakeDeregistrar struct {
 	calls []string
 	fail  bool
+	hang  bool
 }
 
-func (d *fakeDeregistrar) DeregisterRunner(_ context.Context, id string) error {
+func (d *fakeDeregistrar) DeregisterRunner(ctx context.Context, id string) error {
 	d.calls = append(d.calls, id)
+	if d.hang {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if d.fail {
 		return errors.New("deregistration verification failed")
 	}
@@ -285,5 +295,67 @@ func TestPruneSurvivesAFailedFleetSave(t *testing.T) {
 	}
 	if _, e := o.Store.Load(ctx, id); e == nil {
 		t.Fatal("expected the record to be pruned once the fleet save succeeds")
+	}
+}
+
+// A real production incident: a leader pod stuck with idle CPU and no log
+// line for 49+ minutes, reproduced identically on restart, because nothing
+// bounded a sequential external call under Tick's own cancel-only ctx.
+// pruneTerminalAllocations's DeregisterRunner loop is the second such call
+// site (the first, runLeader's own scale-set lookup and session
+// establishment, is bounded by githubStartupBudget) - this proves it is
+// bounded too, and specifically that one stalled candidate cannot block
+// every later one in the same pass: two candidates past retention, the
+// first configured to hang, the second must still be reached.
+func TestPruneBoundsAnUnresponsiveDeregistrar(t *testing.T) {
+	previous := externalCallBudget
+	externalCallBudget = 100 * time.Millisecond
+	defer func() { externalCallBudget = previous }()
+
+	ctx := context.Background()
+	k := fake.NewClientset()
+	cfg := Config{Name: "test", Namespace: "test", MaxRunners: 10, ProvisioningSeconds: 60, MaxLifetimeSeconds: 600}
+	o := New(cfg, k, nil)
+	d := &fakeDeregistrar{hang: true}
+	o.Controller.Runners = d
+
+	old := time.Now().Add(-48 * time.Hour)
+	const firstID, secondID = "rs-hangs", "rs-after-hang"
+	for _, id := range []string{firstID, secondID} {
+		a := lifecycle.Allocation{ID: id, Phase: lifecycle.TimedOut, Deadline: old, MaxAttempts: 3, Retire: true, TerminalAt: old}
+		if _, e := o.Store.Save(ctx, a, ""); e != nil {
+			t.Fatal(e)
+		}
+	}
+	cm, f, e := o.loadFleet(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, id := range []string{firstID, secondID} {
+		f.Created[id] = time.Now()
+	}
+	if e := o.saveFleet(ctx, cm, f); e != nil {
+		t.Fatal(e)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- o.Tick(ctx) }()
+	select {
+	case e := <-done:
+		if e == nil {
+			t.Fatal("expected the unresponsive deregistrar to surface as an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Tick did not bound the stalled deregistration - it hung past externalCallBudget")
+	}
+	// Store.List gives no ordering guarantee, so only membership matters -
+	// what this test proves is that a stalled candidate never blocks a
+	// later one, not which one runs first.
+	seen := map[string]bool{}
+	for _, id := range d.calls {
+		seen[id] = true
+	}
+	if len(d.calls) != 2 || !seen[firstID] || !seen[secondID] {
+		t.Fatal("a candidate timing out must not prevent another from being attempted", d.calls)
 	}
 }

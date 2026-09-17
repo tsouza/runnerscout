@@ -65,7 +65,9 @@ func (o *Operator) refreshAWSPrices(ctx context.Context, catalog placement.Catal
 		if offerings[i].Provider != "aws" || !offerings[i].Spot {
 			continue
 		}
-		quote, err := o.AWSPrices.Observe(ctx, offerings[i].Region, offerings[i].Zone, offerings[i].Machine)
+		callCtx, cancel := context.WithTimeout(ctx, externalCallBudget)
+		quote, err := o.AWSPrices.Observe(callCtx, offerings[i].Region, offerings[i].Zone, offerings[i].Machine)
+		cancel()
 		if err != nil {
 			offerings[i].ObservedAt = time.Time{}
 			continue
@@ -103,7 +105,9 @@ func (o *Operator) refreshAzurePrices(ctx context.Context, catalog placement.Cat
 		if offerings[i].Provider != "azure" || !offerings[i].Spot {
 			continue
 		}
-		quote, err := o.AzurePrices.Observe(ctx, offerings[i].Region, offerings[i].Zone, offerings[i].Machine)
+		callCtx, cancel := context.WithTimeout(ctx, externalCallBudget)
+		quote, err := o.AzurePrices.Observe(callCtx, offerings[i].Region, offerings[i].Zone, offerings[i].Machine)
+		cancel()
 		if err != nil {
 			offerings[i].ObservedAt = time.Time{}
 			continue
@@ -141,7 +145,9 @@ func (o *Operator) refreshGCPPrices(ctx context.Context, catalog placement.Catal
 		if offerings[i].Provider != "gcp" || offerings[i].GCPSkuRefs == nil {
 			continue
 		}
-		quote, err := o.GCPPrices.Observe(ctx, offerings[i].GCPSkuRefs.CoreSkuID, offerings[i].GCPSkuRefs.RamSkuID, offerings[i].CPU, offerings[i].MemoryMiB)
+		callCtx, cancel := context.WithTimeout(ctx, externalCallBudget)
+		quote, err := o.GCPPrices.Observe(callCtx, offerings[i].GCPSkuRefs.CoreSkuID, offerings[i].GCPSkuRefs.RamSkuID, offerings[i].CPU, offerings[i].MemoryMiB)
+		cancel()
 		if err != nil {
 			offerings[i].ObservedAt = time.Time{}
 			continue

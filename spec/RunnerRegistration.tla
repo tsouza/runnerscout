@@ -135,21 +135,34 @@ Init ==
 (* registration is already gone or was never made.                        *)
 Deregister(id) == IF githubReg[id] = "Registered" THEN "Deregistered" ELSE githubReg[id]
 
-(* GitHub's scale-set listener protocol claims the job and registers a    *)
-(* runner name via GenerateJitRunnerConfig at or before Creating -- an    *)
-(* event runnerscout does not itself choose to trigger (E8 in the         *)
-(* research report), not tied to any one Step call succeeding.            *)
-Claim(id) ==
+(* Pending -> Creating is Step's own Store.Save, persisted before          *)
+(* CreateWithResources is ever called - unconditional on githubReg.        *)
+ToCreating(id) ==
   /\ phase[id] = "Pending"
+  /\ phase' = [phase EXCEPT ![id] = "Creating"]
+  /\ UNCHANGED <<githubReg, pruned>>
+
+(* GitHub's scale-set listener protocol claims the job and registers a    *)
+(* runner name via GenerateJitRunnerConfig only once Creating (that call  *)
+(* lives inside CreateWithResources, itself only ever reached from the    *)
+(* Creating branch of Step, after the phase transition above has already  *)
+(* been durably persisted) -- an event runnerscout does not itself choose *)
+(* to trigger the timing of (E8 in the research report), not tied to any  *)
+(* one Step call succeeding. This ordering (persist Creating, then        *)
+(* attempt registration - never the reverse) was corrected from an        *)
+(* earlier version of this module that had Claim gated on Pending and a   *)
+(* precondition of ToCreating, backwards from what Step actually does;    *)
+(* see README.background.md for how that was found. The correction        *)
+(* widens reachable states (Creating with NotRegistered is now reachable, *)
+(* matching a real crash window between the Store.Save and the            *)
+(* CreateWithResources call) without changing NoOrphanedRegistration/      *)
+(* NoIrrecoverableOrphan's results - CreateConfirmedAbsent's own guard      *)
+(* never depended on githubReg's value either way.                         *)
+Claim(id) ==
+  /\ phase[id] = "Creating"
   /\ githubReg[id] = "NotRegistered"
   /\ githubReg' = [githubReg EXCEPT ![id] = "Registered"]
   /\ UNCHANGED <<phase, pruned>>
-
-ToCreating(id) ==
-  /\ phase[id] = "Pending"
-  /\ githubReg[id] = "Registered"
-  /\ phase' = [phase EXCEPT ![id] = "Creating"]
-  /\ UNCHANGED <<githubReg, pruned>>
 
 PendingTimedOut(id) ==
   /\ phase[id] = "Pending"
@@ -219,6 +232,17 @@ UnknownLeak(id) ==
 (* module header). PruneReVerifies=FALSE is #161 as it originally         *)
 (* shipped, kept here specifically to demonstrate why that design was     *)
 (* unsafe.                                                                 *)
+(*                                                                         *)
+(* Acknowledged simplification: the real pruneTerminalAllocations also     *)
+(* requires f.Released[id] before a Deleted (not TimedOut) candidate is    *)
+(* eligible at all (see AdmissionSlot.tla, a separate module, for that     *)
+(* admission-bookkeeping gate on its own terms) - this module has no       *)
+(* variable for it and Prune fires for any non-terminal-to-terminal        *)
+(* candidate regardless. That gate only delays when Prune can fire, never  *)
+(* weakens the re-verification this module actually checks, so it does    *)
+(* not change what NoOrphanedRegistration/NoIrrecoverableOrphan prove -    *)
+(* but it is a real omission from this action's guard, not a claim this    *)
+(* module makes and keeps, so it is stated here rather than left implicit. *)
 Prune(id) ==
   /\ phase[id] \in {"Deleted", "TimedOut"}
   /\ ~pruned[id]

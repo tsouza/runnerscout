@@ -71,10 +71,18 @@ RUNS = [
      "PR #179: the shared burst-1 limiter spaces JIT requests apart"),
     ("ExternalFailureVisibility_pre178.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
      "issue #176: a JIT failure was collapsed to the generic preparation sentinel"),
-    ("ExternalFailureVisibility_current.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
-     "current code: JIT cause preserved, WireGuard/cloud-create/observe/delete failures still collapsed"),
+    ("ExternalFailureVisibility_post178_pre182.cfg", "ExternalFailureVisibility.tla", "FailureCauseVisible",
+     "historical: the real state between #178 and #182 - JIT preserved, the other four still collapsed"),
     ("ExternalFailureVisibility_post_all_fixes.cfg", "ExternalFailureVisibility.tla", None,
-     "extrapolated fix: every external failure class preserves its observable cause"),
+     "shipped as of #182: every external failure class preserves its observable cause"),
+    ("ListenerSession_stale_session_witness.cfg", "ListenerSession.tla", "NoSilentlyStrandedDemand",
+     "a silently-orphaned listener session strands real GitHub demand indefinitely"),
+    ("ExternalCallBudget_pre_fix.cfg", "ExternalCallBudget.tla", "NeverPermanentlyStuck",
+     "pre-fix: a stall at any of seven unbounded external call sites hangs reconciliation forever"),
+    ("ExternalCallBudget_partial_fix_witness.cfg", "ExternalCallBudget.tla", "NeverPermanentlyStuck",
+     "the real intermediate state: six sites fixed, AzureInterruptionPoll found and fixed only after auditing further"),
+    ("ExternalCallBudget_post_fix.cfg", "ExternalCallBudget.tla", None,
+     "shipped: all seven call sites bounded, a stall at any of them recovers"),
 ]
 
 VIOLATION_RE = re.compile(r"^Error: Invariant (\S+) is violated\.", re.MULTILINE)
