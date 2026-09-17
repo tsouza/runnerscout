@@ -52,6 +52,11 @@ java -jar spec/.tools/tla2tools.jar -deadlock -cleanup -config spec/<name>.cfg s
 | `RetryBound.tla` | `retry.go`'s bounded interruption-rerun protocol | `max1`/`max2`/`max3` | Clean for every value `recovery.go` actually allows (`MaxRetries \in 1..3`) |
 | `AdmissionSlot.tla` | `admission.State`/`fleet.Released`'s per-allocation slot-release discipline (distinct from `BudgetAdmission.tla`'s aggregate spend ceiling) | `pre174` | **Violates** `EveryTerminalIsReleasable` (reproduces issue #174 exactly as it shipped in v1.2.0: a TimedOut allocation had no path back to a usable slot) |
 | | | `post175` | Clean (PR #175: both terminal phases release their slot) |
+| `JITRequest.tla` | the shared `jitLimiter` spacing for GitHub JIT-config requests added by #179 | `spacing_disabled` | **Violates** `NoJitBurst` (reproduces the pre-#179 burst shape: two allocations can start JIT requests in the same clock slot) |
+| | | `spacing_enabled` | Clean (the burst-1 limiter requires an intervening `JITAdvance`) |
+| `ExternalFailureVisibility.tla` | the observable-cause swallowing behind #176, extrapolated to cloud-create failures | `pre178` | **Violates** `FailureCauseVisible` (a JIT failure is recorded as the generic preparation sentinel) |
+| | | `cloud_swallow` | **Violates** `FailureCauseVisible` (the same sentinel hides a cloud-create failure) |
+| | | `fixed` | Clean (both external failure classes preserve their own cause) |
 
 Every "Violates" row above is a **deliberate** counterexample or witness
 config - see each `.tla` file's own header comment for what it demonstrates

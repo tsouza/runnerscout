@@ -1,0 +1,99 @@
+---- MODULE JITRequest ----
+(***************************************************************************)
+(* Model of the GitHub JIT-config request spacing added for issue #176:   *)
+(* GenerateJitRunnerConfig is a shared external side effect, regardless   *)
+(* of which cloud provider an allocation will later target. A rate        *)
+(* limiter with burst 1 spaces successive Bootstrap calls apart, so a     *)
+(* concurrently-admitted batch cannot fire several requests in the same  *)
+(* instant.                                                              *)
+(*                                                                       *)
+(* SpacingEnabled = FALSE models the code as it shipped before the        *)
+(* mitigation: every allocation may issue a JIT request immediately.     *)
+(* SpacingEnabled = TRUE models the mitigation: a request consumes a     *)
+(* single token, and JITAdvance recharges it, standing in for the        *)
+(* interval passing.                                                     *)
+(*                                                                       *)
+(* HONESTY NOTE: under SpacingEnabled=TRUE, NoJitBurst is a restatement  *)
+(* of the token guard that produces it -- the same "sanity check, not an *)
+(* independent discovery" shape documented for TickConcurrency.tla and  *)
+(* BudgetAdmission.tla. The result that carries signal is the disabled   *)
+(* config's counterexample: it reaches two JIT requests started in the   *)
+(* same clock slot.                                                      *)
+(***************************************************************************)
+EXTENDS Naturals
+
+CONSTANTS
+  AllocIDs,
+  MaxClock,
+  SpacingEnabled
+
+ASSUME AllocIDs # {}
+ASSUME MaxClock \in Nat
+ASSUME SpacingEnabled \in BOOLEAN
+
+Phases == {"Ready", "JITIssued", "Provisioned", "JITFailed"}
+
+VARIABLES phase, started, jitToken, clock
+
+vars == <<phase, started, jitToken, clock>>
+
+TypeOK ==
+  /\ phase \in [AllocIDs -> Phases]
+  /\ started \in [AllocIDs -> 0..MaxClock]
+  /\ jitToken \in 0..1
+  /\ clock \in 0..MaxClock
+
+Init ==
+  /\ phase = [id \in AllocIDs |-> "Ready"]
+  /\ started = [id \in AllocIDs |-> 0]
+  /\ jitToken = 1
+  /\ clock = 0
+
+(* A Bootstrap call begins. When spacing is enabled, it requires the    *)
+(* single token and consumes it; when disabled, it ignores the token    *)
+(* entirely, so an arbitrary batch can begin in the same clock slot.    *)
+JITRequest(id) ==
+  /\ phase[id] = "Ready"
+  /\ (SpacingEnabled => jitToken = 1)
+  /\ phase' = [phase EXCEPT ![id] = "JITIssued"]
+  /\ started' = [started EXCEPT ![id] = clock]
+  /\ jitToken' = IF SpacingEnabled THEN 0 ELSE jitToken
+  /\ UNCHANGED clock
+
+(* The spacing interval elapses and the limiter refills one token.      *)
+JITAdvance ==
+  /\ SpacingEnabled
+  /\ jitToken = 0
+  /\ clock < MaxClock
+  /\ clock' = clock + 1
+  /\ jitToken' = 1
+  /\ UNCHANGED <<phase, started>>
+
+JITSucceed(id) ==
+  /\ phase[id] = "JITIssued"
+  /\ phase' = [phase EXCEPT ![id] = "Provisioned"]
+  /\ UNCHANGED <<started, jitToken, clock>>
+
+JITFail(id) ==
+  /\ phase[id] = "JITIssued"
+  /\ phase' = [phase EXCEPT ![id] = "JITFailed"]
+  /\ UNCHANGED <<started, jitToken, clock>>
+
+Next ==
+  \/ JITAdvance
+  \/ \E id \in AllocIDs :
+       \/ JITRequest(id)
+       \/ JITSucceed(id)
+       \/ JITFail(id)
+
+Spec == Init /\ [][Next]_vars
+
+(* No two allocations may have a JIT request in flight that started in  *)
+(* the same clock slot. Two requests started in different slots (i.e.   *)
+(* after JITAdvance) are allowed, matching a rate limiter's behavior.   *)
+NoJitBurst ==
+  \A i \in AllocIDs, j \in AllocIDs :
+    i # j /\ phase[i] = "JITIssued" /\ phase[j] = "JITIssued"
+      => started[i] # started[j]
+
+====
