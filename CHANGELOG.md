@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.2.5
+
+### Added
+- attest SLSA build provenance for the released Helm chart (#196)
+
+### Fixed
+- give GCP price refresh its own timeout budget, not externalCallBudget (#198)
+- explicitly disable archive creation - goreleaser defaults to one (#197)
+
 ## v1.2.4
 
 ### Fixed
