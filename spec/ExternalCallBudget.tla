@@ -12,25 +12,34 @@
 (* ctx without its own per-call timeout, is never cancelled by anything    *)
 (* upstream - it hangs forever, and so does everything sequenced after it. *)
 (*                                                                          *)
-(* Six real call sites in this package make an external call outside       *)
+(* Seven real call sites in this package make an external call outside     *)
 (* Step's own already-bounded per-allocation goroutine (tickStepBudget/     *)
 (* tickCreateOrDeleteBudget already wrap every Step call, so those are not *)
 (* modeled here - this module covers only what those two budgets do not).  *)
 (* CallSites enumerates them exactly: runLeader's own GetRunnerScaleSetByID *)
 (* and MessageSessionClient calls (the two steps of establishing GitHub    *)
-(* connectivity before the listener can even start), and the three         *)
-(* Observe loops in prices.go (refreshAWSPrices/refreshAzurePrices/        *)
-(* refreshGCPPrices, one call site each despite the shared shape - each is *)
-(* an independent function with its own nil-gate), plus                    *)
-(* pruneTerminalAllocations's own DeregisterRunner loop. BoundedCallSites   *)
-(* is the one constant that changes between configs, standing in for       *)
-(* whether externalCallBudget (or githubStartupBudget, for the two         *)
-(* runLeader steps) actually wraps that call in the real code.             *)
+(* connectivity before the listener can even start), the three Observe     *)
+(* loops in prices.go (refreshAWSPrices/refreshAzurePrices/refreshGCPPrices, *)
+(* one call site each despite the shared shape - each is an independent    *)
+(* function with its own nil-gate), pruneTerminalAllocations's own         *)
+(* DeregisterRunner loop, and pollAzureInterruptions's single Poll call     *)
+(* (azure_interruptions.go) - found only by auditing every external call   *)
+(* in this package after the first six were fixed, not by the incident     *)
+(* report itself, which named only the two runLeader steps. That the first *)
+(* version of this module stopped at six - after already stating its whole *)
+(* purpose was extrapolating past the one incident-named pair - is exactly *)
+(* the same shape of miss AdmissionSlot.tla's own background section       *)
+(* documents: a completeness claim ("enumerates them exactly") that had    *)
+(* not actually been checked against the rest of the codebase. It has now. *)
+(* BoundedCallSites is the one constant that changes between configs,      *)
+(* standing in for whether externalCallBudget (or githubStartupBudget, for *)
+(* the two runLeader steps) actually wraps that call in the real code.     *)
 (***************************************************************************)
 EXTENDS Naturals
 
 CallSites == {"ScaleSetLookup", "SessionEstablish", "PruneDeregister",
-               "AWSPriceRefresh", "AzurePriceRefresh", "GCPPriceRefresh"}
+               "AWSPriceRefresh", "AzurePriceRefresh", "GCPPriceRefresh",
+               "AzureInterruptionPoll"}
 
 CONSTANT BoundedCallSites
 ASSUME BoundedCallSites \subseteq CallSites
@@ -77,8 +86,8 @@ Spec == Init /\ [][Next]_vars
 (* The property the incident violated: reconciliation must never become    *)
 (* permanently stuck just because one external call stalled. Checked       *)
 (* against BoundedCallSites = {} (the pre-fix shape - every one of these    *)
-(* six calls used the bare, deadline-less ctx) and against                 *)
-(* BoundedCallSites = CallSites (this PR's fix - every one of them is now   *)
+(* seven calls used the bare, deadline-less ctx) and against                *)
+(* BoundedCallSites = CallSites (the shipped fix - every one of them is now *)
 (* wrapped in its own externalCallBudget/githubStartupBudget context).      *)
 NeverPermanentlyStuck == ~stuck
 

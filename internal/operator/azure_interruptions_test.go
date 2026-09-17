@@ -23,15 +23,24 @@ import (
 )
 
 // fakeAzureInterruptions is a local azureInterruptionObserver test double,
-// mirroring fakeAWSPrices/fakeAzurePrices in prices_test.go.
+// mirroring fakeAWSPrices/fakeAzurePrices in prices_test.go. hang, when set,
+// blocks until ctx is done and returns ctx.Err() - proving
+// pollAzureInterruptions supplies its own bounded context (externalCallBudget)
+// rather than the bare ctx Tick itself was given, mirroring
+// TestRefreshAWSPricesBoundsAnUnresponsiveObserver in prices_test.go.
 type fakeAzureInterruptions struct {
 	results []azurequeue.Result
 	err     error
 	calls   int
+	hang    bool
 }
 
 func (f *fakeAzureInterruptions) Poll(ctx context.Context) ([]azurequeue.Result, error) {
 	f.calls++
+	if f.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return f.results, f.err
 }
 
@@ -181,6 +190,37 @@ func TestPollAzureInterruptionsPollErrorReturnsNilMap(t *testing.T) {
 	o := &Operator{AzureInterruptions: &fakeAzureInterruptions{err: errors.New("boom")}}
 	if m := o.pollAzureInterruptions(context.Background()); m != nil {
 		t.Fatalf("a failed poll must return a nil map, got %v", m)
+	}
+}
+
+// A real production incident: a leader pod stuck with idle CPU and no log
+// line for 49+ minutes, because nothing bounded a sequential external call
+// under runLeader's unbounded, cancel-only ctx. This is the same mechanism
+// as externalCallBudget's other call sites (runLeader's own startup
+// sequence, pruneTerminalAllocations's DeregisterRunner loop,
+// refreshAWSPrices/refreshAzurePrices/refreshGCPPrices) - a seventh site,
+// found only by auditing every external call in this package rather than
+// trusting the first six to be exhaustive.
+func TestPollAzureInterruptionsBoundsAnUnresponsivePoll(t *testing.T) {
+	previous := externalCallBudget
+	externalCallBudget = 100 * time.Millisecond
+	defer func() { externalCallBudget = previous }()
+
+	o := &Operator{AzureInterruptions: &fakeAzureInterruptions{hang: true}}
+
+	// ctx is cancel-only, deliberately with no deadline of its own -
+	// matching leaderCtx/runCtx in production. A test-owned deadline here
+	// would let the test still pass even if pollAzureInterruptions stopped
+	// applying externalCallBudget itself.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan map[string]bool, 1)
+	go func() { done <- o.pollAzureInterruptions(ctx) }()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pollAzureInterruptions did not bound the stalled poll - it hung past externalCallBudget")
 	}
 }
 

@@ -267,12 +267,18 @@ module's header says so.
 `ExternalFailureVisibility.tla` models the diagnosability property that was
 actually broken: an observable condition must name the failing subsystem
 instead of collapsing every preparation failure to one sentinel. It covers
-the original JIT case (`pre178`) and the current gaps across WireGuard,
-cloud-create, observe, and delete failures (`current`), because the
-swallowing shape is not specific to JIT. `post_all_fixes` is the extrapolated
-fix, not current behavior. TLA+ models the failure causes as distinct labels,
-not as the real error strings, so a clean run here means the classification
-invariant holds, not that the Go text itself is correct.
+the original JIT case (`pre178`) and the WireGuard/cloud-create/observe/
+delete gaps that existed alongside it (`post178_pre182`), because the
+swallowing shape was not specific to JIT. That state is now historical: #182
+closed the remaining four classes, so `post_all_fixes` is no longer an
+extrapolation - it is what ships today, and the module's own header comment
+was corrected to say so rather than continue claiming the gap as current
+(a later review verification caught the earlier `current.cfg`, retired in
+favor of `post178_pre182`, describing a state #182 had already fixed before
+this correction - see the independent verification pass below for how that
+was found). TLA+ models the failure causes as distinct labels, not as the
+real error strings, so a clean run here means the classification invariant
+holds, not that the Go text itself is correct.
 
 ## ListenerSession.tla: the subsystem every other module sits downstream of
 
@@ -355,18 +361,65 @@ observation blocks `HandleDesiredRunnerCount`, which blocks the listener's
 own message loop - the same "admission stops entirely" symptom as the
 lookup/session hang, via a different call path entirely).
 
-`ExternalCallBudget.tla` models the six call sites as one set rather than
-one incident: `pre_fix` reproduces the original shape (nothing bounded),
+`ExternalCallBudget.tla` models the call sites as one set rather than one
+incident: `pre_fix` reproduces the original shape (nothing bounded),
 `partial_fix_witness` proves that bounding only the two call sites the
 incident report actually named is not sufficient - any of the remaining
-four left unbounded still permanently strands reconciliation - and
-`post_fix` certifies the shipped state, all six wrapped in
+sites left unbounded still permanently strands reconciliation - and
+`post_fix` certifies the shipped state, every one wrapped in
 `externalCallBudget` (a new shared budget; `githubStartupBudget` already
 existed for the two `runLeader` steps specifically). Bounding a call does
 not fix whatever external condition stalled it - the model's own
 `Recover` action is deliberately silent about what happens next (a
 Kubernetes restart on a fatal error, or the next loop iteration reached) -
 it only prevents that stall from becoming permanent and invisible.
+
+## Six call sites, verified, still not exhaustive - a seventh found by asking again
+
+The module's own first version stopped at six call sites and said so in its
+own header comment: "CallSites enumerates them exactly." Asked directly to
+verify every TLA+ model against the current code with the explicit goal of
+finding drift rather than confirming it looked fine, an independent pass
+found a seventh, real, still-unbounded call site the first audit had missed:
+`pollAzureInterruptions`'s single `AzureInterruptions.Poll` call
+(azure_interruptions.go), reachable from the exact same unbounded `ctx`,
+running once every `Tick` whenever `AzureInterruptionQueueURL` is
+configured. It carried the identical risk as the other six - a stalled
+Azure Storage Queue dequeue would have hung every subsequent `Tick`
+indefinitely, the same incident shape this module exists to prevent - and
+was not caught by the first pass despite that pass's own stated goal of
+enumerating "exactly." Fixed the same way as the other six (wrapped in
+`externalCallBudget`), and `CallSites` now has seven members;
+`partial_fix_witness` was updated to reflect the real historical state this
+repository passed through (six bounded, `AzureInterruptionPoll` not yet
+found) rather than an arbitrary hypothetical omission, since that state
+genuinely existed for one commit.
+
+The same verification pass also caught `ExternalFailureVisibility.tla`'s
+`current.cfg` describing a state #182 had already fixed before the config
+was ever checked against the code again - see that module's own section
+above - and two issues in `RunnerRegistration.tla`, the very first module
+this directory ever got: its `Claim`/`ToCreating` guards had the real
+causal order backwards (the model required GitHub's registration before
+the Creating phase could persist; Step's own code persists Creating first,
+via Store.Save, before CreateWithResources - where the registration call
+actually lives - is ever reached), and its `Prune` action silently dropped
+`pruneTerminalAllocations`'s own additional `f.Released` gate for a Deleted
+candidate without ever saying so. Neither changed what `NoOrphanedRegistration`/
+`NoIrrecoverableOrphan` prove (re-run against all four existing configs,
+same results), but the first was a genuine reachable-state omission (a
+real crash window - Creating, not yet registered - the old guard made
+structurally impossible to model) and the second was an unacknowledged
+simplification the project's own convention (state what you abstract and
+why) requires calling out explicitly rather than leaving implicit.
+
+None of these four findings - the seventh call site, the stale
+`ExternalFailureVisibility` config, the backwards `Claim`/`ToCreating`
+ordering, or the silent `Prune` simplification - were found by any model's
+author re-reading their own work. All four were found by a fresh check
+whose only job was to disbelieve each claim until it held up against the
+code as it stood at the moment of checking, not as it stood when the model
+was written.
 
 ## Why `make tlc` and not CI
 

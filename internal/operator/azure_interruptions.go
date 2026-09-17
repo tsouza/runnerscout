@@ -34,7 +34,16 @@ func (o *Operator) pollAzureInterruptions(ctx context.Context) map[string]bool {
 	if o.AzureInterruptions == nil {
 		return nil
 	}
-	results, err := o.AzureInterruptions.Poll(ctx)
+	// Bounded like every other external call reachable from Tick's own ctx
+	// outside Step's per-allocation goroutine budget - see externalCallBudget's
+	// own comment (operator.go) for why: this runs on runLeader's cancel-only,
+	// no-deadline ctx, and lease renewal is independent of Azure connectivity,
+	// so a stalled Storage Queue dequeue here would otherwise hang every
+	// subsequent Tick indefinitely, the same incident shape externalCallBudget
+	// exists to prevent.
+	callCtx, cancel := context.WithTimeout(ctx, externalCallBudget)
+	results, err := o.AzureInterruptions.Poll(callCtx)
+	cancel()
 	if err != nil {
 		return nil
 	}
