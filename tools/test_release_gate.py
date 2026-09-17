@@ -46,9 +46,22 @@ class ReleaseGate(unittest.TestCase):
             result = assess(chart(tmp, '0.1.0'), repo)
             self.assertEqual(result, {'publish': True, 'version': 'v0.1.0'})
 
-    def test_malformed_app_version_raises(self):
+    def test_placeholder_app_version_does_not_publish(self):
+        # "development" is Chart.yaml's own steady-state appVersion between
+        # releases (unchanged since the chart's original commit) - an
+        # ordinary push to main with no chore(release) bump pending must not
+        # be treated as a release attempt, let alone fail the gate job.
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            repo = git_repo_with_tags(tmp, tags=['v1.2.2'])
+            result = assess(chart(tmp, 'development'), repo)
+            self.assertEqual(result, {'publish': False, 'version': None})
+
+    def test_missing_app_version_does_not_publish(self):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             repo = git_repo_with_tags(tmp, tags=[])
-            with self.assertRaises(ValueError):
-                assess(chart(tmp, 'development'), repo)
+            path = tmp / 'Chart.yaml'
+            path.write_text('apiVersion: v2\nname: runnerscout\nversion: 0.1.0\n')
+            result = assess(path, repo)
+            self.assertEqual(result, {'publish': False, 'version': None})
