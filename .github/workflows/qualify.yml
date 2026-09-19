@@ -439,7 +439,7 @@ jobs:
           fi
       - name: "[AWS] Authenticate network provisioner (OIDC role assumption)"
         if: matrix.provider == 'aws'
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
           role-session-name: runnerscout-network-provisioner-${{ github.run_id }}
@@ -563,14 +563,14 @@ jobs:
           fi
       - name: "[AWS] Configure credentials (OIDC role assumption)"
         if: matrix.provider == 'aws' && steps.aws_credmode.outputs.mode == 'oidc'
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_QUALIFICATION_ROLE_ARN }}
           role-session-name: runnerscout-qualify-aws-${{ github.run_id }}
           aws-region: ${{ inputs.aws_region }}
       - name: "[AWS] Configure credentials (static key fallback)"
         if: matrix.provider == 'aws' && steps.aws_credmode.outputs.mode == 'static'
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           aws-access-key-id: ${{ secrets.AWS_QUALIFICATION_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_QUALIFICATION_SECRET_ACCESS_KEY }}
@@ -900,7 +900,7 @@ jobs:
         # incrementally during apply, never left this job's filesystem)
         # still reflects whatever was actually created, so this correctly
         # tears down a partial apply too.
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_NETWORK_PROVISIONER_ROLE_ARN }}
           role-session-name: runnerscout-network-provisioner-destroy-${{ github.run_id }}
