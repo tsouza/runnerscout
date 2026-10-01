@@ -22,7 +22,7 @@ require (
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/time v0.16.0
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446
-	google.golang.org/api v0.297.0
+	google.golang.org/api v0.298.0
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
 	k8s.io/client-go v0.37.0
