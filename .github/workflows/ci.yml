@@ -72,7 +72,7 @@ jobs:
           save: 'true'
       - run: make verify-generated
       - run: make verify
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: verification-${{ github.run_id }}-${{ github.run_attempt }}
@@ -136,7 +136,7 @@ jobs:
       - name: Delete isolated cluster
         if: always()
         run: go run sigs.k8s.io/kind@v0.33.0 delete cluster --name runnerscout-ci
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: kubernetes-integration-${{ github.run_id }}-${{ github.run_attempt }}
@@ -175,7 +175,7 @@ jobs:
         with:
           go-version: ${{ steps.go.outputs.go-version }}
       - run: make emulators
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cloud-emulators-${{ github.run_id }}-${{ github.run_attempt }}
@@ -274,8 +274,8 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/chart-venv"
           "$RUNNER_TEMP/chart-venv/bin/pip" install PyYAML==6.0.3
           echo "$RUNNER_TEMP/chart-venv/bin" >> "$GITHUB_PATH"
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           install-only: true
       # The Dockerfile only COPYs a prebuilt binary now (see its own
@@ -290,7 +290,7 @@ jobs:
           mkdir -p linux/amd64
           goreleaser build --single-target --snapshot --clean --skip=before -o linux/amd64/runnerscout
       - name: Build runtime with persistent layer cache
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
@@ -300,7 +300,7 @@ jobs:
           cache-to: type=gha,scope=runnerscout-runtime-amd64,mode=max
       - run: make image-test
       - run: make helm-integration
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: runtime-image-${{ github.run_id }}-${{ github.run_attempt }}
